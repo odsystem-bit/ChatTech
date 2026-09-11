@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Material3.Light.NoActionBar" parent="Theme.MaterialComponents.Light.NoActionBar.Bridge">
+        <item name="colorPrimary">#0d1a3a</item>
+        <item name="colorPrimaryVariant">#3050a0</item>
+        <item name="colorOnPrimary">#ffffff</item>
+        <item name="colorSecondary">#3050a0</item>
+        <item name="colorOnSecondary">#ffffff</item>
+        <item name="android:statusBarColor">#0d1a3a</item>
+    </style>
+</resources>

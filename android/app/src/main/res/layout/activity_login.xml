@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0d1a3a"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp">
+
+        <ImageView
+            android:layout_width="80dp"
+            android:layout_height="80dp"
+            android:src="@mipmap/ic_launcher"
+            android:layout_marginBottom="16dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CHAPTECH"
+            android:textSize="28sp"
+            android:textStyle="bold"
+            android:textColor="#ffffff"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Saisissez votre code à 4 chiffres"
+            android:textSize="14sp"
+            android:textColor="#80ffffff"
+            android:layout_marginBottom="32dp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="24dp">
+
+            <EditText
+                android:id="@+id/digit1"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"
+                android:autofillHints="1234"
+                android:imeOptions="actionNext" />
+
+            <EditText
+                android:id="@+id/digit2"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"
+                android:autofillHints="1234"
+                android:imeOptions="actionNext" />
+
+            <EditText
+                android:id="@+id/digit3"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"
+                android:autofillHints="1234"
+                android:imeOptions="actionNext" />
+
+            <EditText
+                android:id="@+id/digit4"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:autofillHints="1234"
+                android:imeOptions="actionDone" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/errorText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#ff6b6b"
+            android:textSize="14sp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/loginBtn"
+            android:layout_width="200dp"
+            android:layout_height="48dp"
+            android:text="Se connecter"
+            android:textSize="16sp"
+            app:cornerRadius="24dp"
+            xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginTop="16dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+</ScrollView>
