@@ -1,6 +1,6 @@
 # CHAPTECH - Plan produit SaaS
 
-Statut : **brouillon validé en grande partie. Aucun code n'est écrit.**
+Statut (11/10/2026) : **étapes 1 à 5 codées** (fondations, stock par équipe, attribution et déduction, console web, suivi des poteaux). **Reste** : alerte de stock insuffisant (TODO dans `StockService`), page Supervision, exports d'inventaire, abonnements/Moneroo, Celtiis.
 Point de départ : l'application actuelle FibreTrack (`../fibretrack`), utilisée par une seule entreprise (TELECOM BTP Services).
 
 ## 1. Vision

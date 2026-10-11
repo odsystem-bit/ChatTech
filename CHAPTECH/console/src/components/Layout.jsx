@@ -6,6 +6,7 @@ import { useAuth } from '../auth.jsx';
 // ce filtre n'est que cosmétique.
 const NAV = [
   { vers: '/interventions', label: 'Interventions', roles: ['admin', 'gestionnaire'] },
+  { vers: '/poteaux', label: 'Poteaux', roles: ['admin', 'poteaux', 'chef'] },
   { vers: '/stock', label: 'Stock', roles: ['admin', 'gestionnaire'] },
   { vers: '/articles', label: 'Articles', roles: ['admin', 'gestionnaire'] },
   { vers: '/equipes', label: 'Équipes', roles: ['admin'] },

@@ -60,6 +60,25 @@ export const api = {
   put: (chemin, corps, options) => appel('PUT', chemin, corps, options),
   delete: (chemin, options) => appel('DELETE', chemin, undefined, options),
 
+  // Téléchargement de fichier : le jeton est en en-tête, donc pas de simple lien.
+  async telecharger(chemin, nomFichier) {
+    const reponse = await fetch(`${BASE}${chemin}`, {
+      headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
+    });
+    if (!reponse.ok) {
+      const corps = await reponse.json().catch(() => null);
+      throw new ApiErreur(reponse.status, corps);
+    }
+    const url = URL.createObjectURL(await reponse.blob());
+    const lien = document.createElement('a');
+    lien.href = url;
+    lien.download = nomFichier;
+    document.body.appendChild(lien);
+    lien.click();
+    lien.remove();
+    URL.revokeObjectURL(url);
+  },
+
   login: (identifiant, password) =>
     appel('POST', '/auth/login', { identifiant, password }),
   loginPlateforme: (identifiant, password) =>

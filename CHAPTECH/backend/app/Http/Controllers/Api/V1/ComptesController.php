@@ -17,7 +17,7 @@ use Illuminate\Validation\Rule;
  */
 class ComptesController extends Controller
 {
-    private const ROLES_ASSIGNABLES = ['admin', 'gestionnaire', 'chef', 'technicien'];
+    private const ROLES_ASSIGNABLES = ['admin', 'gestionnaire', 'poteaux', 'chef', 'technicien'];
 
     public function index()
     {

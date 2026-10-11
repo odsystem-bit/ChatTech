@@ -9,6 +9,7 @@ import Equipes from './pages/Equipes.jsx';
 import Interventions from './pages/Interventions.jsx';
 import Login from './pages/Login.jsx';
 import PlateformeLogin from './pages/PlateformeLogin.jsx';
+import Poteaux from './pages/Poteaux.jsx';
 import Stock from './pages/Stock.jsx';
 
 function Protege({ roles, children }) {
@@ -24,14 +25,15 @@ function Protege({ roles, children }) {
   return children;
 }
 
+const ACCUEIL = {
+  super_admin: '/entreprises',
+  poteaux: '/poteaux',
+  chef: '/poteaux',
+};
+
 function Accueil() {
   const { compte } = useAuth();
-  return (
-    <Navigate
-      to={compte?.role === 'super_admin' ? '/entreprises' : '/interventions'}
-      replace
-    />
-  );
+  return <Navigate to={ACCUEIL[compte?.role] ?? '/interventions'} replace />;
 }
 
 export default function App() {
@@ -44,6 +46,9 @@ export default function App() {
           <Route path="/" element={<Accueil />} />
           <Route path="/interventions" element={
             <Protege roles={['admin', 'gestionnaire']}><Interventions /></Protege>
+          } />
+          <Route path="/poteaux" element={
+            <Protege roles={['admin', 'poteaux', 'chef']}><Poteaux /></Protege>
           } />
           <Route path="/comptes" element={
             <Protege roles={['admin']}><Comptes /></Protege>

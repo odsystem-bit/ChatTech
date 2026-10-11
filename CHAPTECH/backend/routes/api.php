@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\EquipesController;
 use App\Http\Controllers\Api\V1\ErreursController;
 use App\Http\Controllers\Api\V1\InterventionsController;
 use App\Http\Controllers\Api\V1\MediaController;
+use App\Http\Controllers\Api\V1\PoteauxController;
 use App\Http\Controllers\Api\V1\StockController;
 use App\Http\Controllers\Api\V1\SyncController;
 use Illuminate\Support\Facades\Route;
@@ -52,6 +53,12 @@ Route::prefix('v1')->group(function () {
         Route::post('stock/mouvements', [StockController::class, 'mouvement']);
         Route::post('stock/import', [StockController::class, 'import'])
             ->middleware('role:admin,gestionnaire');
+
+        // Suivi des poteaux §3 — chef : son équipe uniquement (filtre serveur)
+        Route::middleware('role:admin,poteaux,chef')->group(function () {
+            Route::get('poteaux', [PoteauxController::class, 'index']);
+            Route::get('poteaux/export', [PoteauxController::class, 'export']);
+        });
 
         // Catalogue articles — lecture tous, écriture console
         Route::get('articles', [ArticlesController::class, 'index']);
