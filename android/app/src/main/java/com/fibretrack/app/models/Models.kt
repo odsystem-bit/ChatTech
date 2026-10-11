@@ -22,7 +22,8 @@ data class Intervention(
     val msan: String = "",
     val fat_ref: String = "",
     val port: String = "",
-    val port_disponible: Boolean = false,
+    val ports_disponibles: String = "",
+    val port_disponible: Int = 0,
     val type_cable: String = "",
     val depart_m: Double = 0.0,
     val arrivee_m: Double = 0.0,
@@ -33,6 +34,7 @@ data class Intervention(
     val sn: String = "",
     val nb_poteaux_traverses: Int = 0,
     val nb_poteaux_implantes: Int = 0,
+    val nb_poteaux_armes: Int = 0,
     val ont_sn: String = "",
     val pto_qte: Int = 0,
     val repeteur_wifi_qte: Int = 0,
@@ -58,6 +60,7 @@ data class Intervention(
     val signature_technicien: String = "",
     val modifie_par: String = "",
     val modifie_le: String = "",
+    val updated_at: String = "",
     val materiel_pose: Map<String, Int> = emptyMap(),
     val points_gps: List<GpsPoint> = emptyList(),
     val whatsapp_photos: List<WhatsappPhoto> = emptyList()
@@ -123,6 +126,13 @@ data class StockTemplateItem(
     val quantite: Int = 0
 )
 
+data class StockImportResult(
+    val ok: Boolean = false,
+    val count: Int = 0,
+    val not_found: List<String> = emptyList(),
+    val error: String = ""
+)
+
 data class StockMovement(
     val id: Int = 0,
     val designation: String = "",
@@ -148,4 +158,18 @@ data class InterventionPhotos(
     val whatsapp_photos: List<WhatsappPhoto> = emptyList(),
     val signature_client: String = "",
     val signature_technicien: String = ""
+)
+
+data class InterventionMedia(
+    val id: String = "",
+    val intervention_id: String = "",
+    val type: String = "",
+    val file_path: String = "",
+    val url: String = "",
+    val latitude: Double = 0.0,
+    val longitude: Double = 0.0,
+    val precision_m: Double = 0.0,
+    val captured_at: String = "",
+    val added_by: String = "",
+    val created_at: String = ""
 )

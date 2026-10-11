@@ -1,3 +1,5 @@
+import { getApiAuthHeaders } from "./Account";
+
 // Modèle de données "Intervention" - synchronisé avec le backend MySQL.
 // Toutes les interventions sont partagées entre tous les techniciens.
 
@@ -6,7 +8,7 @@ const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/
 async function apiPost(action, body = {}) {
   const res = await fetch(`${API_URL}?action=${action}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
     body: JSON.stringify(body),
   });
   const data = await res.json();
@@ -15,7 +17,7 @@ async function apiPost(action, body = {}) {
 }
 
 async function apiGet(action) {
-  const res = await fetch(`${API_URL}?action=${action}`);
+  const res = await fetch(`${API_URL}?action=${action}`, { headers: getApiAuthHeaders() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;
@@ -59,9 +61,19 @@ export async function listInterventions() {
  */
 export async function saveIntervention(intervention) {
   try {
-    await apiPost("intervention_save", intervention);
+    const response = await apiPost("intervention_save", {
+      ...intervention,
+      expected_updated_at: intervention.updated_at || "",
+    });
+    if (response?.updated_at) intervention = { ...intervention, updated_at: response.updated_at };
   } catch (err) {
     console.error("saveIntervention error:", err);
+    const list = getCached();
+    const index = list.findIndex((i) => i.id === intervention.id);
+    if (index >= 0) list[index] = intervention;
+    else list.push(intervention);
+    setCached(list);
+    throw err;
   }
   const list = getCached();
   const index = list.findIndex((i) => i.id === intervention.id);
@@ -84,6 +96,10 @@ export async function getIntervention(id) {
   }
 }
 
+export async function getInterventionLight(id) {
+  return apiPost("intervention_get_light", { id });
+}
+
 /**
  * Supprime une intervention.
  * @param {string} id
@@ -93,6 +109,7 @@ export async function deleteIntervention(id) {
     await apiPost("intervention_delete", { id });
   } catch (err) {
     console.error("deleteIntervention error:", err);
+    throw err;
   }
   const list = getCached().filter((i) => i.id !== id);
   setCached(list);
@@ -115,7 +132,8 @@ export function createEmptyIntervention(technicien) {
     msan: "",
     fat_ref: "",
     port: "",
-    port_disponible: false,
+    ports_disponibles: "",
+    port_disponible: 0,
     type_cable: "",
     depart_m: 0,
     arrivee_m: 0,
@@ -126,6 +144,7 @@ export function createEmptyIntervention(technicien) {
     sn: "",
     nb_poteaux_traverses: 0,
     nb_poteaux_implantes: 0,
+    nb_poteaux_armes: 0,
 
     materiel_pose: {},
 

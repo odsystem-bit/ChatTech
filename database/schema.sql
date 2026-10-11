@@ -8,6 +8,7 @@ USE fibretrack;
 CREATE TABLE IF NOT EXISTS accounts (
   id VARCHAR(36) PRIMARY KEY,
   nom VARCHAR(255) NOT NULL,
+  code CHAR(4) NOT NULL UNIQUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -28,7 +29,8 @@ CREATE TABLE IF NOT EXISTS interventions (
   msan VARCHAR(100),
   fat_ref VARCHAR(100),
   port VARCHAR(20),
-  port_disponible TINYINT(1) DEFAULT 0,
+  ports_disponibles VARCHAR(100) DEFAULT '',
+  port_disponible TINYINT UNSIGNED DEFAULT 0,
   type_cable VARCHAR(50),
   depart_m INT DEFAULT 0,
   arrivee_m INT DEFAULT 0,
@@ -39,6 +41,7 @@ CREATE TABLE IF NOT EXISTS interventions (
   sn VARCHAR(100),
   nb_poteaux_traverses INT DEFAULT 0,
   nb_poteaux_implantes INT DEFAULT 0,
+  nb_poteaux_armes INT DEFAULT 0,
 
   materiel_pose JSON,
 
@@ -72,6 +75,8 @@ CREATE TABLE IF NOT EXISTS interventions (
   modifie_par VARCHAR(255),
   modifie_le DATETIME,
 
+  materiel_deduit TINYINT(1) DEFAULT 0,
+
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
@@ -99,33 +104,43 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   INDEX idx_date (date_mouvement)
 );
 
--- Insertion des designations par defaut
+CREATE TABLE IF NOT EXISTS intervention_media (
+  id CHAR(36) PRIMARY KEY,
+  intervention_id VARCHAR(36) NOT NULL,
+  type ENUM('photo', 'video', 'fiche') NOT NULL,
+  file_path VARCHAR(500) NOT NULL,
+  latitude DECIMAL(10,7) NULL,
+  longitude DECIMAL(10,7) NULL,
+  precision_m DECIMAL(10,2) NULL,
+  captured_at DATETIME NULL,
+  added_by VARCHAR(255) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_media_intervention (intervention_id),
+  INDEX idx_media_date (created_at)
+);
+
+-- Insertion des designations par defaut (strictement alignees sur le fichier Excel d'inventaire)
 INSERT INTO stock (designation, quantite) VALUES
-  ('rue', 0),
-  ('pince', 0),
-  ('crochets', 0),
-  ('susp', 0),
-  ('piton', 0),
-  ('closer', 0),
-  ('rp1', 0),
-  ('traverse_13t', 0),
-  ('traverse_15t', 0),
-  ('semelle_eq', 0),
-  ('poteau_sbee_non_arme', 0),
-  ('poteau_sbee_arme', 0),
   ('ont', 0),
   ('pto', 0),
-  ('repeteur_wifi', 0),
   ('jarretiere', 0),
+  ('piton', 0),
+  ('cheville', 0),
+  ('connecteur', 0),
+  ('closer', 0),
+  ('fibre_1fo', 0),
   ('cpc_50', 0),
   ('cpc_100', 0),
   ('cpc_150', 0),
   ('cpc_200', 0),
+  ('cpc_250', 0),
   ('cpc_300', 0),
   ('cpc_350', 0),
-  ('connecteur', 0),
-  ('boulon', 0),
-  ('bouchon_feuillard', 0)
+  ('crochets', 0),
+  ('pince', 0),
+  ('susp', 0),
+  ('traverse_13t', 0),
+  ('traverse_15t', 0)
 ON DUPLICATE KEY UPDATE quantite = quantite;
 
 -- Index pour performances

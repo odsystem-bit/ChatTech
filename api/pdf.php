@@ -9,6 +9,8 @@ require_once __DIR__ . '/_env.php';
 
 define('_SYSTEM_TTFONTS', __DIR__ . '/fonts/');
 
+define('PDF_DPI', 150);
+
 define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
 define('DB_NAME', getenv('DB_NAME') ?: 'u795734321_fibre');
 define('DB_USER', getenv('DB_USER') ?: 'u795734321_fibretrack');
@@ -27,6 +29,52 @@ function db() {
   return $pdo;
 }
 
+function requirePdfAuth() {
+  $code = trim($_GET['code'] ?? ($_SERVER['HTTP_X_USER_CODE'] ?? ''));
+  if ($code === '9999') return;
+  if (!preg_match('/^\d{4}$/', $code)) { http_response_code(401); exit; }
+  $stmt = db()->prepare('SELECT id FROM accounts WHERE code = ?');
+  $stmt->execute([$code]);
+  if (!$stmt->fetch()) { http_response_code(401); exit; }
+}
+
+function compressJpeg($imgData, $maxW, $maxH, $quality = 75) {
+  if (!function_exists('imagecreatefromjpeg')) return $imgData;
+  $tmp = tempnam(sys_get_temp_dir(), 'cmp') . '.jpg';
+  file_put_contents($tmp, $imgData);
+  $src = @imagecreatefromjpeg($tmp);
+  @unlink($tmp);
+  if (!$src) return $imgData;
+  $srcW = imagesx($src);
+  $srcH = imagesy($src);
+  $scale = min($maxW / $srcW, $maxH / $srcH, 1);
+  $dstW = (int)($srcW * $scale);
+  $dstH = (int)($srcH * $scale);
+  $dst = imagecreatetruecolor($dstW, $dstH);
+  imagecopyresampled($dst, $src, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+  imagedestroy($src);
+  ob_start();
+  imagejpeg($dst, null, $quality);
+  $out = ob_get_clean();
+  imagedestroy($dst);
+  return $out ?: $imgData;
+}
+
+function compressGabarit($path, $maxW, $maxH) {
+  static $cache = [];
+  $key = $path . '_' . $maxW . 'x' . $maxH;
+  if (isset($cache[$key])) return $cache[$key];
+  $compressed = compressJpeg(file_get_contents($path), $maxW, $maxH, 80);
+  $tmp = tempnam(sys_get_temp_dir(), 'gab') . '.jpg';
+  file_put_contents($tmp, $compressed);
+  $cache[$key] = $tmp;
+  return $tmp;
+}
+
+function mmToPxAtDpi($mm, $dpi) {
+  return (int)($mm * $dpi / 25.4);
+}
+
 function getIntervention($id) {
   $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ?');
   $stmt->execute([$id]);
@@ -35,7 +83,7 @@ function getIntervention($id) {
   $r['materiel_pose'] = json_decode($r['materiel_pose'] ?? '{}', true);
   $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true);
   $r['whatsapp_photos'] = json_decode($r['whatsapp_photos'] ?? '[]', true);
-  $r['port_disponible'] = (bool)$r['port_disponible'];
+  $r['port_disponible'] = (int)$r['port_disponible'];
   $r['client_confirme_emplacement'] = (bool)$r['client_confirme_emplacement'];
   $r['remise_equipement_ok'] = (bool)$r['remise_equipement_ok'];
   $r['travaux_conformes'] = (bool)$r['travaux_conformes'];
@@ -47,6 +95,11 @@ function getIntervention($id) {
   $r['recommanderait'] = (bool)$r['recommanderait'];
   $r['accepte_recontact'] = (bool)$r['accepte_recontact'];
   return $r;
+}
+
+/** UTF-8 → Windows-1252 pour Cell() avec les polices core FPDF (Latin-1). */
+function pdfT($s) {
+  return mb_convert_encoding((string)$s, 'Windows-1252', 'UTF-8');
 }
 
 class ChaptechPDF extends tFPDF {
@@ -75,7 +128,7 @@ class ChaptechPDF extends tFPDF {
     $this->SetFont($font, $style, $size);
     $this->SetTextColor($color[0], $color[1], $color[2]);
     $this->SetXY($x, $y);
-    $this->Cell(0, $size * 0.35, $txt);
+    $this->Cell(0, $size * 0.35, pdfT($txt));
     $this->SetTextColor(0, 0, 0);
   }
 
@@ -139,10 +192,21 @@ class ChaptechPDF extends tFPDF {
     $base64 = explode(',', $base64Data)[1] ?? '';
     $imgData = base64_decode($base64);
     if (!$imgData) return false;
+    $maxW = mmToPxAtDpi($w, PDF_DPI);
+    $maxH = mmToPxAtDpi($h, PDF_DPI);
+    $imgData = compressJpeg($imgData, $maxW, $maxH, 75);
     $tmpFile = tempnam(sys_get_temp_dir(), 'photo') . '.jpg';
     file_put_contents($tmpFile, $imgData);
     try {
-      $this->Image($tmpFile, $x, $y, $w, $h);
+      $size = @getimagesize($tmpFile);
+      if ($size && $size[0] > 0 && $size[1] > 0) {
+        $ratio = min($w / $size[0], $h / $size[1]);
+        $dw = $size[0] * $ratio;
+        $dh = $size[1] * $ratio;
+        $this->Image($tmpFile, $x + ($w - $dw) / 2, $y + ($h - $dh) / 2, $dw, $dh);
+      } else {
+        $this->Image($tmpFile, $x, $y, $w, $h);
+      }
       @unlink($tmpFile);
       return true;
     } catch (Exception $e) {
@@ -152,10 +216,11 @@ class ChaptechPDF extends tFPDF {
   }
 }
 
+
 function generateFichesPDF($d) {
   $pdf = new ChaptechPDF();
   $pdf->SetAutoPageBreak(false);
-
+ 
   $dateStr = date('d/m/Y', strtotime($d['date'] ?? 'now'));
   $etat = $d['etat'] ?? '';
   $gabaritsDir = __DIR__ . '/../public/templates/gabarits';
@@ -164,78 +229,95 @@ function generateFichesPDF($d) {
   }
   $sbinBg = $gabaritsDir . '/fiche_sbin_word.jpg';
   $satBg = $gabaritsDir . '/fiche_satisfaction_word.jpg';
-
-  // ===== Page 1: FICHE SBIN - image de fond + overlay données =====
+  $gabMaxW = mmToPxAtDpi(210, PDF_DPI);
+  $gabMaxH = mmToPxAtDpi(297, PDF_DPI);
+ 
+  // ===================== PAGE 1 : FICHE SBIN =====================
   $pdf->AddPage();
   if (file_exists($sbinBg)) {
-    $pdf->Image($sbinBg, 0, 0, 210, 297);
+    $pdf->Image(compressGabarit($sbinBg, $gabMaxW, $gabMaxH), 0, 0, 210, 297);
   }
-
-  // --- Identification (coordonnées mesurées sur l'image) ---
-  $pdf->drawHand(55, 25, $dateStr, 12);
-  $pdf->drawHand(65, 31, $d['nom_client'] ?? '', 12);
-  if ($etat === 'PON' || $etat === 'FTTH') {
-    $pdf->drawCheckboxHand(22, 31);
-  }
-  if ($etat === 'Cuivre') {
-    $pdf->drawCheckboxHand(50, 31);
-  }
-  $pdf->drawHand(55, 37, $dateStr, 12);
-  $pdf->drawHand(55, 43, $dateStr, 12);
-
-  $pdf->drawHand(135, 25, $d['nom_client'] ?? '', 12);
-  $pdf->drawHand(145, 31, $d['telephone_ligne'] ?? '', 12);
-  $pdf->drawHand(145, 37, $d['mobile'] ?? '', 12);
-  $pdf->drawHand(135, 43, $d['mail'] ?? '', 12);
-
-  // --- Installation ---
-  $pdf->drawHand(55, 61, $d['ont_sn'] ?? $d['sn'] ?? '', 12);
-  $pdf->drawHand(55, 67, (string)($d['pto_qte'] ?? ''), 12);
-  $pdf->drawHand(60, 73, (string)($d['repeteur_wifi_qte'] ?? ''), 12);
-  $pdf->drawHand(65, 80, $d['emplacement_ont'] ?? '', 11);
-
-  // --- Offres (checkboxes) ---
+ 
+  // --- En-tête identification (recalibré sur gabarit fiche_sbin_word.jpg) ---
+  // Les positions sont en mm depuis le coin supérieur gauche
+  // Ligne 1: Date d'intervention (NI/INT) | Client
+  $pdf->drawHand(62, 47, $dateStr, 10);                               // Date d'intervention
+  $pdf->drawHand(125, 47, $d['nom_client'] ?? '', 10);                // Client
+ 
+  // Ligne 2: Service FTTH/CUIVRE (cases à cocher)
+  if ($etat === 'PON' || $etat === 'FTTH') $pdf->drawCheckboxHand(35, 52, true);   // case FTTH
+  if ($etat === 'Cuivre') $pdf->drawCheckboxHand(52, 52, true);                    // case CUIVRE
+ 
+  // Ligne 3: vide gauche | Ligne (droite)
+  $pdf->drawHand(125, 55, $d['telephone_ligne'] ?? '', 10);           // Ligne
+ 
+  // Ligne 4: Date de déclaration | Mobil
+  $pdf->drawHand(62, 60, $dateStr, 10);                               // Date de déclaration
+  $pdf->drawHand(125, 60, $d['mobile'] ?? '', 10);                    // Mobil
+ 
+  // Ligne 5: Date de mise en service | Mail
+  $pdf->drawHand(62, 66, $dateStr, 10);                               // Date de mise en service
+  $pdf->drawHand(125, 66, $d['mail'] ?? '', 10);                      // Mail
+ 
+  // --- 1. INSTALLATION (tableau sous "DÉSIGNATION / CONSTAT") ---
+  // Colonne QUANTITÉ à x≈105mm, colonne OBSERVATION à x≈155mm
+  // ONT/FT (Numéro de série) - ligne 1 du tableau
+  $pdf->drawHand(105, 80, $d['ont_sn'] ?? $d['sn'] ?? '', 9);
+  // PTO - ligne 2
+  $pdf->drawHand(105, 85, (string)($d['pto_qte'] ?? ''), 9);
+  // Répéteur WIFI - ligne 3
+  $pdf->drawHand(105, 90, (string)($d['repeteur_wifi_qte'] ?? ''), 9);
+  // Emplacement de l'ONT (dans la zone observation, ligne 4)
+  $pdf->drawHand(105, 100, $d['emplacement_ont'] ?? '', 8);
+ 
+  // --- Satisfaction du client (zone texte libre sous le tableau installation) ---
+  $pdf->drawHand(15, 112, $d['appreciation_satisfaction_libre'] ?? '', 9);
+ 
+  // --- 2. VÉRIFICATION SUR LES OFFRES FTTH B2B2G (cases à cocher) ---
   $offreVal = $d['offre_souscrite'] ?? '';
+  // Positions Y des offres (mesuré sur gabarit - section 2)
   $offreY = [
-    'Fibre Pro' => 109,
-    'Fibre Pro Max' => 115,
-    'Fibre Pro Mega' => 121,
-    'Fibre Office Max' => 127,
-    'Fibre Office Mega' => 133,
+    'Fibre Pro' => 130,
+    'Fibre Pro Max' => 135,
+    'Fibre Pro Mega' => 140,
+    'Fibre Office Max' => 147,
+    'Fibre Office Mega' => 155,
   ];
   foreach ($offreY as $off => $oy) {
-    if ($offreVal === $off) {
-      $pdf->drawCheckboxHand(8, $oy);
-    }
+    if ($offreVal === $off) $pdf->drawCheckboxHand(53, $oy, true);
   }
-
-  // Résultat Oui/Non pour les offres (sauf Fibre Pro = NA)
+  // Résultat Oui/Non (colonnes à droite: Oui≈170mm, Non≈185mm)
   $remiseOk = $d['remise_equipement_ok'] ?? false;
-  $resultY = [115, 121, 127, 133];
-  foreach ($resultY as $ry) {
-    if ($remiseOk) {
-      $pdf->drawCheckboxHand(140, $ry);
-    } else {
-      $pdf->drawCheckboxHand(162, $ry);
-    }
+  $ouiX = 170;
+  $nonX = 185;
+  foreach ([135, 140, 147, 155] as $ry) {
+    $pdf->drawCheckboxHand($remiseOk ? $ouiX : $nonX, $ry, true);
   }
-
-  // --- Matériels récupérés ---
-  $pdf->drawHand(7, 186, $d['materiel_recupere'] ?? '', 11);
-  $pdf->drawHand(70, 194, (string)($d['rdv_manques'] ?? ''), 12);
-  $pdf->drawHand(70, 200, ($d['appreciation_satisfaction_libre'] ?? '') . ' /10', 12);
-  $pdf->drawHand(7, 208, $d['autre_element'] ?? '', 11);
-  $pdf->drawHand(70, 216, ($d['appreciation_generale'] ?? '') . ' /10', 12);
-
-  // --- Signatures ---
+ 
+  // --- 3. INTERVENTIONS (CONSTATS ET TRAVAUX EXÉCUTÉS) ---
+  // Zone de texte libre (pas de champs spécifiques dans le formulaire actuel)
+ 
+  // --- Matériels récupérés (à déposer à la SBIN ici contre décharge) ---
+  $pdf->drawHand(15, 207, $d['materiel_recupere'] ?? '', 9);
+ 
+  // --- Nombre de rendez-vous manqués ---
+  $pdf->drawHand(62, 215, (string)($d['rdv_manques'] ?? ''), 10);
+ 
+  // --- Qualité de l'intervention de l'équipe : .../10 ---
+  $pdf->drawHand(78, 220, ($d['appreciation_satisfaction_libre'] ?? ''), 10);
+ 
+  // --- Autre élément à remplir par le prestataire sur demande du client ---
+  $pdf->drawHand(15, 230, $d['autre_element'] ?? '', 9);
+ 
+  // --- Appréciation générale du client .../10 ---
+  $pdf->drawHand(100, 240, ($d['appreciation_generale'] ?? ''), 10);
+ 
+  // --- Signatures (zone "Client" à gauche, "Prestataire" à droite) ---
   $nomClient = $d['nom_client_declaration'] ?? $d['nom_client'] ?? '';
   $nomTech = $d['nom_technicien'] ?? '';
-  if ($nomClient) {
-    $pdf->drawHand(7, 240, $nomClient, 13);
-  }
-  if ($nomTech) {
-    $pdf->drawHand(112, 240, $nomTech, 13);
-  }
+  if ($nomClient) $pdf->drawHand(15, 258, $nomClient, 10);
+  if ($nomTech) $pdf->drawHand(155, 258, $nomTech, 10);
+ 
   $sigClient = $d['signature_client'] ?? null;
   $sigTech = $d['signature_technicien'] ?? null;
   if ($sigClient && strpos($sigClient, 'data:image') === 0) {
@@ -244,7 +326,7 @@ function generateFichesPDF($d) {
     if ($imgData) {
       $tmpFile = tempnam(sys_get_temp_dir(), 'sig') . '.png';
       file_put_contents($tmpFile, $imgData);
-      try { $pdf->Image($tmpFile, 30, 228, 40, 15); } catch (Exception $e) {}
+      try { $pdf->Image($tmpFile, 15, 263, 45, 20); } catch (Exception $e) {}
       @unlink($tmpFile);
     }
   }
@@ -254,106 +336,119 @@ function generateFichesPDF($d) {
     if ($imgData) {
       $tmpFile = tempnam(sys_get_temp_dir(), 'sig') . '.png';
       file_put_contents($tmpFile, $imgData);
-      try { $pdf->Image($tmpFile, 135, 228, 40, 15); } catch (Exception $e) {}
+      try { $pdf->Image($tmpFile, 155, 263, 45, 20); } catch (Exception $e) {}
       @unlink($tmpFile);
     }
   }
-
-  // ===== Page 2: Fiche Satisfaction - image de fond + overlay données =====
+ 
+  // ===================== PAGE 2 : FICHE SATISFACTION =====================
   $pdf->AddPage();
   if (file_exists($satBg)) {
-    $pdf->Image($satBg, 0, 0, 210, 297);
+    $pdf->Image(compressGabarit($satBg, $gabMaxW, $gabMaxH), 0, 0, 210, 297);
   }
-
-  // --- Informations client (2 colonnes) ---
-  // Gauche: data x=55 ; Droite: data x=140
-  $pdf->drawHand(55, 30, $d['nom_client'] ?? '', 12);
-  $pdf->drawHand(55, 36, $d['telephone_ligne'] ?? '', 12);
-  $pdf->drawHand(55, 42, $d['adresse_zone'] ?? '', 12);
-  $pdf->drawHand(55, 48, $dateStr, 12);
-
-  $pdf->drawHand(140, 30, substr($d['id'] ?? '', 0, 8), 12);
-  $pdf->drawHand(140, 36, $d['telephone_ligne'] ?? '', 12);
-  $pdf->drawHand(140, 42, $d['adresse_zone'] ?? '', 12);
-  $pdf->drawHand(140, 48, $dateStr, 12);
-
-  // --- Validation (Oui/Non checkboxes) ---
+ 
+  // --- Référence dossier / ticket (après "Référence dossier / ticket :") ---
+  $pdf->drawHand(62, 38, substr($d['id'] ?? '', 0, 8), 10);
+ 
+  // --- 1. Informations client (colonne "Détails" à droite du tableau) ---
+  // Nom du client / Société
+  $pdf->drawHand(95, 48, $d['nom_client'] ?? '', 9);
+  // Téléphone
+  $pdf->drawHand(95, 53, $d['telephone_ligne'] ?? '', 9);
+  // Adresse / Zone
+  $pdf->drawHand(95, 58, $d['adresse_zone'] ?? '', 9);
+  // Type d'intervention - pas de case cochée pour l'instant
+  // Date de l'intervention
+  $pdf->drawHand(95, 68, $dateStr, 9);
+ 
+  // --- 2. Validation de l'intervention (cases Oui/Non) ---
+  // Positions Y mesurées sur le gabarit (section "2. Validation de l'intervention")
   $validations = [
-    $d['travaux_conformes'] ?? false,
-    $d['emplacement_valide'] ?? false,
-    $d['travail_propre'] ?? false,
-    $d['service_teste'] ?? false,
-    $d['service_fonctionne'] ?? false,
-    $d['explications_donnees'] ?? false,
-    $d['recommanderait'] ?? false,
-    $d['accepte_recontact'] ?? false,
+    $d['travaux_conformes'] ?? false,      // Les travaux réalisés correspondent à votre demande
+    $d['emplacement_valide'] ?? false,     // L'emplacement des équipements a été validé avec vous
+    $d['travail_propre'] ?? false,         // Les techniciens ont travaillé proprement et en sécurité
+    $d['service_teste'] ?? false,          // Le fonctionnement du service a été testé en votre présence
+    $d['service_fonctionne'] ?? false,     // Le service fonctionne correctement après intervention
+    $d['explications_donnees'] ?? false,   // Les explications ou consignes nécessaires vous ont été données
   ];
-  $valY = 62;
-  foreach ($validations as $checked) {
-    if ($checked) {
-      $pdf->drawCheckboxHand(172, $valY);
-    } else {
-      $pdf->drawCheckboxHand(192, $valY);
-    }
-    $valY += 7;
+  $valY = [82, 87, 92, 97, 102, 107];
+  $ouiX = 180;
+  $nonX = 193;
+  foreach ($validations as $i => $checked) {
+    $pdf->drawCheckboxHand($checked ? $ouiX : $nonX, $valY[$i], true);
   }
-
-  // --- Niveau de satisfaction (checkboxes) ---
+  
+  // Recommanderiez-vous notre entreprise à un proche ?
+  $pdf->drawCheckboxHand(($d['recommanderait'] ?? false) ? $ouiX : $nonX, 112, true);
+  
+  // Accepteriez-vous d'être recontacté pour le suivi qualité ?
+  $pdf->drawCheckboxHand(($d['accepte_recontact'] ?? false) ? $ouiX : $nonX, 117, true);
+ 
+  // --- 3. Votre niveau de satisfaction (tableau 4 colonnes) ---
+  // Colonnes: Très satisfait | Satisfait | Peu satisfait | Insatisfait
   $niveaux = ['Très satisfait', 'Satisfait', 'Peu satisfait', 'Insatisfait'];
-  $satX = [72, 107, 142, 182];
+  $satX = [122, 142, 162, 182];  // Positions X des 4 colonnes (cases)
+  $satY = [132, 137, 142];       // Positions Y des 3 critères
   $criteres = [
-    $d['qualite'] ?? '',
-    $d['delais'] ?? '',
-    $d['professionnalisme'] ?? '',
+    $d['qualite'] ?? '',           // Qualité de la prestation
+    $d['delais'] ?? '',            // Respect des délais
+    $d['professionnalisme'] ?? '', // Professionnalisme des techniciens
   ];
-  $satY = 131;
-  foreach ($criteres as $val) {
-    for ($i = 0; $i < 4; $i++) {
-      if ($val === $niveaux[$i]) {
-        $pdf->drawCheckboxHand($satX[$i], $satY);
-      }
+  foreach ($criteres as $ci => $val) {
+    foreach ($niveaux as $i => $niv) {
+      if ($val === $niv) $pdf->drawCheckboxHand($satX[$i], $satY[$ci], true);
     }
-    $satY += 7;
   }
-
-  // --- Déclaration ---
-  $pdf->drawHand(7, 160, $d['nom_client_declaration'] ?? $d['nom_client'] ?? '', 13);
-
-  // --- Remarque libre ---
-  $pdf->drawHand(7, 175, $d['remarque_libre'] ?? '', 11);
-
-  // --- Signatures ---
+ 
+  // --- 4. Déclaration du client ("Je soussigné(e) ___") ---
+  $pdf->drawHand(45, 155, $d['nom_client_declaration'] ?? $d['nom_client'] ?? '', 10);
+ 
+  // --- 5. Observation ou remarque du client ---
+  // Case "Aucune remarque" ou "Remarque / suggestion"
+  $remarque = $d['remarque_libre'] ?? '';
+  if (empty($remarque)) {
+    $pdf->drawCheckboxHand(15, 243, true);  // Aucune remarque
+  } else {
+    $pdf->drawCheckboxHand(15, 248, true);  // Remarque / suggestion
+    $pdf->drawHand(55, 249, $remarque, 9);
+  }
+ 
+  // --- Signatures finales (tableau en bas de page) ---
+  // Colonnes: Nom et Prénom du client | Signature Client | Nom et prénom du Technicien | Signature Technicien
   $nomClient2 = $d['nom_client_declaration'] ?? $d['nom_client'] ?? '';
   $nomTech2 = $d['nom_technicien'] ?? '';
-  if ($nomClient2) {
-    $pdf->drawHand(7, 210, $nomClient2, 13);
-  }
-  if ($nomTech2) {
-    $pdf->drawHand(112, 210, $nomTech2, 13);
-  }
+  
+  // Nom du client (colonne 1)
+  if ($nomClient2) $pdf->drawHand(15, 275, $nomClient2, 9);
+  // Nom du technicien (colonne 3)
+  if ($nomTech2) $pdf->drawHand(115, 275, $nomTech2, 9);
+ 
+  // Signature client (colonne 2)
   if ($sigClient && strpos($sigClient, 'data:image') === 0) {
     $base64 = explode(',', $sigClient)[1] ?? '';
     $imgData = base64_decode($base64);
     if ($imgData) {
       $tmpFile = tempnam(sys_get_temp_dir(), 'sig2') . '.png';
       file_put_contents($tmpFile, $imgData);
-      try { $pdf->Image($tmpFile, 30, 198, 40, 15); } catch (Exception $e) {}
+      try { $pdf->Image($tmpFile, 55, 270, 35, 15); } catch (Exception $e) {}
       @unlink($tmpFile);
     }
   }
+  // Signature technicien (colonne 4)
   if ($sigTech && strpos($sigTech, 'data:image') === 0) {
     $base64 = explode(',', $sigTech)[1] ?? '';
     $imgData = base64_decode($base64);
     if ($imgData) {
       $tmpFile = tempnam(sys_get_temp_dir(), 'sig2') . '.png';
       file_put_contents($tmpFile, $imgData);
-      try { $pdf->Image($tmpFile, 135, 198, 40, 15); } catch (Exception $e) {}
+      try { $pdf->Image($tmpFile, 165, 270, 35, 15); } catch (Exception $e) {}
       @unlink($tmpFile);
     }
   }
-
+ 
   return $pdf;
 }
+ 
 
 function generateRapportPDF($d) {
   $pdf = new ChaptechPDF();
@@ -519,17 +614,15 @@ function generateRapportPDF($d) {
 
 function generateStockPDF() {
   $labels = [
-    'rue' => 'Rue', 'pince' => 'Pince', 'crochets' => 'Crochets',
-    'susp' => 'Suspente', 'piton' => 'Piton', 'closer' => 'Closer',
-    'rp1' => 'RP1', 'traverse_13t' => 'Traverse 13T', 'traverse_15t' => 'Traverse 15T',
-    'semelle_eq' => 'Semelle Eq', 'poteau_sbee_non_arme' => 'Poteau SBEE non armé',
-    'poteau_sbee_arme' => 'Poteau SBEE armé', 'ont' => 'ONT', 'pto' => 'PTO',
-    'repeteur_wifi' => 'Répéteur WIFI', 'jarretiere' => 'Jarretière',
+    'ont' => 'ONT', 'pto' => 'PTO', 'jarretiere' => 'Jarretière',
+    'piton' => 'Piton', 'cheville' => 'Cheville', 'connecteur' => 'Connecteur',
+    'closer' => 'Closer', 'fibre_1fo' => 'Câble Fibre 1FO',
     'cpc_50' => 'Câble CPC 50', 'cpc_100' => 'Câble CPC 100',
     'cpc_150' => 'Câble CPC 150', 'cpc_200' => 'Câble CPC 200',
-    'cpc_300' => 'Câble CPC 300', 'cpc_350' => 'Câble CPC 350',
-    'connecteur' => 'Connecteur', 'boulon' => 'Boulon',
-    'bouchon_feuillard' => 'Bouchon feuillard'
+    'cpc_250' => 'Câble CPC 250', 'cpc_300' => 'Câble CPC 300',
+    'cpc_350' => 'Câble CPC 350', 'crochets' => 'Crochets',
+    'pince' => 'Pince', 'susp' => 'Suspente',
+    'traverse_13t' => 'Traverse 13T', 'traverse_15t' => 'Traverse 15T'
   ];
 
   $stmt = db()->query('SELECT designation, quantite FROM stock ORDER BY designation');
@@ -644,17 +737,15 @@ function generateStockUsagePDF($interventionId) {
   $movements = $stmt->fetchAll();
 
   $labels = [
-    'rue' => 'Rue', 'pince' => 'Pince', 'crochets' => 'Crochets',
-    'susp' => 'Suspente', 'piton' => 'Piton', 'closer' => 'Closer',
-    'rp1' => 'RP1', 'traverse_13t' => 'Traverse 13T', 'traverse_15t' => 'Traverse 15T',
-    'semelle_eq' => 'Semelle Eq', 'poteau_sbee_non_arme' => 'Poteau SBEE non armé',
-    'poteau_sbee_arme' => 'Poteau SBEE armé', 'ont' => 'ONT', 'pto' => 'PTO',
-    'repeteur_wifi' => 'Répéteur WIFI', 'jarretiere' => 'Jarretière',
+    'ont' => 'ONT', 'pto' => 'PTO', 'jarretiere' => 'Jarretière',
+    'piton' => 'Piton', 'cheville' => 'Cheville', 'connecteur' => 'Connecteur',
+    'closer' => 'Closer', 'fibre_1fo' => 'Câble Fibre 1FO',
     'cpc_50' => 'Câble CPC 50', 'cpc_100' => 'Câble CPC 100',
     'cpc_150' => 'Câble CPC 150', 'cpc_200' => 'Câble CPC 200',
-    'cpc_300' => 'Câble CPC 300', 'cpc_350' => 'Câble CPC 350',
-    'connecteur' => 'Connecteur', 'boulon' => 'Boulon',
-    'bouchon_feuillard' => 'Bouchon feuillard'
+    'cpc_250' => 'Câble CPC 250', 'cpc_300' => 'Câble CPC 300',
+    'cpc_350' => 'Câble CPC 350', 'crochets' => 'Crochets',
+    'pince' => 'Pince', 'susp' => 'Suspente',
+    'traverse_13t' => 'Traverse 13T', 'traverse_15t' => 'Traverse 15T'
   ];
 
   $pdf = new ChaptechPDF();
@@ -753,11 +844,117 @@ function generateStockUsagePDF($interventionId) {
 }
 
 // ===== Routing =====
+/**
+ * Liste des clients pour la clôture sur la plage [$moisDebut, $moisFin]
+ * ('YYYY-MM' ; si $moisFin absent = un seul mois).
+ * Colonnes : N° | Date | Nom client | N° de ligne.
+ */
+function generateListeMois($moisDebut, $moisFin = null) {
+  if (!preg_match('/^\d{4}-\d{2}$/', $moisDebut) || strtotime($moisDebut . '-01') === false) return null;
+  if ($moisFin === null || $moisFin === '') $moisFin = $moisDebut;
+  if (!preg_match('/^\d{4}-\d{2}$/', $moisFin) || strtotime($moisFin . '-01') === false) return null;
+  if ($moisFin < $moisDebut) { $t = $moisDebut; $moisDebut = $moisFin; $moisFin = $t; }
+  $stmt = db()->prepare("SELECT date, nom_client, telephone_ligne, nom_technicien
+    FROM interventions
+    WHERE date >= ? AND date < ?
+    ORDER BY date ASC, nom_client ASC");
+  $stmt->execute([$moisDebut . '-01', date('Y-m-d', strtotime('first day of next month', strtotime($moisFin . '-01')))]);
+  return $stmt->fetchAll();
+}
+
+function libellePlageMois($moisDebut, $moisFin = null) {
+  $moisFr = ['01'=>'janvier','02'=>'février','03'=>'mars','04'=>'avril','05'=>'mai','06'=>'juin',
+             '07'=>'juillet','08'=>'août','09'=>'septembre','10'=>'octobre','11'=>'novembre','12'=>'décembre'];
+  $f = function ($m) use ($moisFr) { return ($moisFr[substr($m, 5, 2)] ?? substr($m, 5, 2)) . ' ' . substr($m, 0, 4); };
+  if ($moisFin === null || $moisFin === '' || $moisFin === $moisDebut) return $f($moisDebut);
+  return $f($moisDebut) . ' à ' . $f($moisFin);
+}
+
+function generateMoisPDF($moisDebut, $moisFin = null) {
+  $lignes = generateListeMois($moisDebut, $moisFin);
+  if ($lignes === null) return null;
+
+  $pdf = new ChaptechPDF();
+  $pdf->SetAutoPageBreak(true, 20);
+  $pdf->AddPage();
+  $pdf->SetFont('Helvetica', 'B', 14);
+  $pdf->Cell(0, 10, pdfT("Liste des clients — " . libellePlageMois($moisDebut, $moisFin)), 0, 1, 'C');
+  $pdf->Ln(4);
+
+  // En-tête du tableau : N° | Date | Nom | N° de ligne
+  $pdf->SetFont('Helvetica', 'B', 10);
+  $pdf->SetFillColor(220, 230, 245);
+  $pdf->Cell(15, 8, pdfT('N°'), 1, 0, 'C', true);
+  $pdf->Cell(30, 8, 'Date', 1, 0, 'C', true);
+  $pdf->Cell(85, 8, 'Nom', 1, 0, 'L', true);
+  $pdf->Cell(60, 8, pdfT('N° de ligne'), 1, 1, 'C', true);
+
+  $pdf->SetFont('Helvetica', '', 10);
+  $fill = false;
+  $pdf->SetFillColor(245, 247, 250);
+  $n = 0;
+  foreach ($lignes as $l) {
+    $n++;
+    $pdf->Cell(15, 7, $n, 1, 0, 'C', $fill);
+    $pdf->Cell(30, 7, date('d/m/Y', strtotime($l['date'])), 1, 0, 'C', $fill);
+    $pdf->Cell(85, 7, pdfT($l['nom_client'] ?? ''), 1, 0, 'L', $fill);
+    $pdf->Cell(60, 7, pdfT($l['telephone_ligne'] ?? ''), 1, 1, 'C', $fill);
+    $fill = !$fill;
+  }
+  if ($n === 0) {
+    $pdf->SetFont('Helvetica', 'I', 10);
+    $pdf->Cell(190, 8, pdfT('Aucune intervention sur cette période.'), 1, 1, 'C');
+  }
+  return $pdf;
+}
+
+/** Tableau HTML copiable (collage direct dans Excel / WhatsApp). */
+function renderListeMoisHTML($moisDebut, $moisFin = null) {
+  $lignes = generateListeMois($moisDebut, $moisFin);
+  if ($lignes === null) { http_response_code(400); echo 'Mois invalide'; return; }
+  $titre = libellePlageMois($moisDebut, $moisFin);
+  header('Content-Type: text/html; charset=utf-8');
+  echo '<!doctype html><html lang="fr"><meta charset="utf-8"><title>Liste ', htmlspecialchars($titre), '</title>';
+  echo '<style>body{font-family:sans-serif;padding:16px}table{border-collapse:collapse}td,th{border:1px solid #333;padding:4px 10px}th{background:#dde6f5}h1{font-size:18px}</style>';
+  echo '<h1>Liste des clients — ', htmlspecialchars($titre), '</h1>';
+  echo '<table><thead><tr><th>N°</th><th>Date</th><th>Nom</th><th>N° de ligne</th></tr></thead><tbody>';
+  $n = 0;
+  foreach ($lignes as $l) {
+    $n++;
+    echo '<tr><td>', $n, '</td><td>', date('d/m/Y', strtotime($l['date'])), '</td><td>',
+         htmlspecialchars($l['nom_client'] ?? ''), '</td><td>',
+         htmlspecialchars($l['telephone_ligne'] ?? ''), '</td></tr>';
+  }
+  if ($n === 0) echo '<tr><td colspan="4"><em>Aucune intervention ce mois-ci.</em></td></tr>';
+  echo '</tbody></table></html>';
+}
+
 $action = $_GET['action'] ?? '';
 $id = $_GET['id'] ?? '';
+$__t0 = microtime(true);
 
 try {
-  if ($action === 'pdf_stock') {
+  requirePdfAuth();
+  if ($action === 'liste_mois') {
+    // Tableau HTML copiable : collage direct dans Excel/WhatsApp
+    renderListeMoisHTML(trim($_GET['mois'] ?? date('Y-m')));
+  } elseif ($action === 'pdf_mois') {
+    $mois = trim($_GET['mois'] ?? date('Y-m'));
+    $pdf = generateMoisPDF($mois);
+    if (!$pdf) { http_response_code(400); echo json_encode(['error' => 'Mois invalide']); exit; }
+    $filename = 'liste_' . $mois . '.pdf';
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Access-Control-Allow-Origin: *');
+    $pdf->Output('D', $filename);
+  } elseif ($action === 'pdf_mois_view') {
+    $mois = trim($_GET['mois'] ?? date('Y-m'));
+    $pdf = generateMoisPDF($mois);
+    if (!$pdf) { http_response_code(400); echo json_encode(['error' => 'Mois invalide']); exit; }
+    header('Content-Type: application/pdf');
+    header('Access-Control-Allow-Origin: *');
+    $pdf->Output('I');
+  } elseif ($action === 'pdf_stock') {
     $pdf = generateStockPDF();
     $filename = 'stock_' . date('Y-m-d') . '.pdf';
     header('Content-Type: application/pdf');
@@ -829,3 +1026,5 @@ try {
   http_response_code(500);
   echo json_encode(['error' => $e->getMessage()]);
 }
+
+error_log('[PDF] action=' . $action . ' id=' . $id . ' time=' . round((microtime(true) - $__t0) * 1000) . 'ms');

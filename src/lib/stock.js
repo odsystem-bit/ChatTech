@@ -1,3 +1,5 @@
+import { getApiAuthHeaders } from "../models/Account";
+
 // Utilitaires de gestion du stock de matériel d'équipe.
 // Synchronisé avec le backend MySQL - partagé entre tous les techniciens.
 
@@ -6,7 +8,7 @@ const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/
 async function apiPost(action, body = {}) {
   const res = await fetch(`${API_URL}?action=${action}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
     body: JSON.stringify(body),
   });
   const data = await res.json();
@@ -15,7 +17,7 @@ async function apiPost(action, body = {}) {
 }
 
 async function apiGet(action) {
-  const res = await fetch(`${API_URL}?action=${action}`);
+  const res = await fetch(`${API_URL}?action=${action}`, { headers: getApiAuthHeaders() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;
@@ -83,14 +85,48 @@ export async function fetchStock() {
  * Sauvegarde une désignation sur le backend.
  */
 export async function saveStockItem(designation, quantite) {
-  try {
-    await apiPost("stock_save", { designation, quantite });
-  } catch (err) {
-    console.error("saveStockItem error:", err);
-  }
+  await apiPost("stock_save", { designation, quantite });
   const stock = getCached();
   stock[designation] = quantite;
   setCached(stock);
+  _stockPromise = null;
+  return stock;
+}
+
+export async function moveStockItem(designationInput, type, quantite, motif = "Mouvement manuel") {
+  const designation = resolveOrCreateDesignation(designationInput);
+  const amount = Number(quantite);
+  if (!Number.isInteger(amount) || amount <= 0) throw new Error("La quantité doit être un entier positif.");
+  await apiPost("stock_move", { designation, type, quantite: amount, motif });
+  const stock = await apiGet("stock_list");
+  setCached(stock);
+  _stockPromise = null;
+  return stock;
+}
+
+/**
+ * Récupère l'historique des mouvements de stock.
+ * @param {number} limit
+ */
+export async function fetchStockMovements(limit = 100) {
+  const res = await fetch(`${API_URL}?action=stock_movements&limit=${limit}`, { headers: getApiAuthHeaders() });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Erreur API");
+  return data;
+}
+
+export async function importStockExcel(file, mode) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const result = await apiPost("stock_import_excel", {
+    file_base64: btoa(binary),
+    mode,
+  });
+  const stock = await apiGet("stock_list");
+  setCached(stock);
+  _stockPromise = null;
+  return { result, stock };
 }
 
 /**
@@ -124,26 +160,14 @@ export function resolveOrCreateDesignation(nameInput) {
  * Incrémente le stock (réception d'un bon).
  */
 export async function incrementStock(designationInput, quantite) {
-  const designation = resolveOrCreateDesignation(designationInput);
-  const stock = getCached();
-  const newQte = (stock[designation] ?? 0) + quantite;
-  stock[designation] = newQte;
-  setCached(stock);
-  await saveStockItem(designation, newQte);
-  return stock;
+  return moveStockItem(designationInput, "entree", quantite, "Réception stock");
 }
 
 /**
  * Déduit du stock (matériel posé sur une intervention).
  */
 export async function decrementStock(designationInput, quantite) {
-  const designation = resolveOrCreateDesignation(designationInput);
-  const stock = getCached();
-  const newQte = (stock[designation] ?? 0) - quantite;
-  stock[designation] = newQte;
-  setCached(stock);
-  await saveStockItem(designation, newQte);
-  return stock;
+  return moveStockItem(designationInput, "sortie", quantite, "Retrait manuel");
 }
 
 /**
@@ -154,8 +178,9 @@ export async function applyInterventionToStock(materielPose) {
   for (const [designationInput, quantite] of Object.entries(materielPose)) {
     if (!quantite) continue;
     const designation = resolveOrCreateDesignation(designationInput);
-    stock[designation] = (stock[designation] ?? 0) - quantite;
-    await saveStockItem(designation, stock[designation]);
+    const newQte = (stock[designation] ?? 0) - quantite;
+    await saveStockItem(designation, newQte);
+    stock[designation] = newQte;
   }
   setCached(stock);
   return stock;

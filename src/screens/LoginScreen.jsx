@@ -8,8 +8,6 @@ export default function LoginScreen({ onLogin }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const refs = useRef([]);
-  const logoTapsRef = useRef(0);
-  const logoTimerRef = useRef(null);
 
   function handleChange(idx, val) {
     if (!/^\d?$/.test(val)) return;
@@ -35,7 +33,9 @@ export default function LoginScreen({ onLogin }) {
     }
 
     if (fullCode === ADMIN_CODE) {
-      onLogin({ nom: "ADMIN", id: "admin", isAdmin: true });
+      const admin = { nom: "ADMIN", id: "admin", isAdmin: true, code: ADMIN_CODE };
+      setCurrentAccount(admin);
+      onLogin(admin);
       return;
     }
 
@@ -45,8 +45,9 @@ export default function LoginScreen({ onLogin }) {
     setLoading(false);
 
     if (user) {
-      setCurrentAccount(user);
-      onLogin(user);
+      const account = { ...user, code: fullCode };
+      setCurrentAccount(account);
+      onLogin(account);
     } else {
       setError("Code invalide");
       setCode(["", "", "", ""]);
@@ -54,22 +55,9 @@ export default function LoginScreen({ onLogin }) {
     }
   }
 
-  function handleLogoTap() {
-    logoTapsRef.current += 1;
-    if (logoTimerRef.current) clearTimeout(logoTimerRef.current);
-    if (logoTapsRef.current >= 5) {
-      logoTapsRef.current = 0;
-      onLogin({ nom: "ADMIN", id: "admin", isAdmin: true });
-      return;
-    }
-    logoTimerRef.current = setTimeout(() => {
-      logoTapsRef.current = 0;
-    }, 1500);
-  }
-
   return (
     <div className="login-screen">
-      <div className="login-logo" onClick={handleLogoTap} style={{ cursor: "pointer" }}>
+      <div className="login-logo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M12 2L2 7l10 5 10-5-10-5z" />
           <path d="M2 17l10 5 10-5" />
@@ -77,7 +65,7 @@ export default function LoginScreen({ onLogin }) {
         </svg>
       </div>
       <h1>CHAPTECH</h1>
-      <p className="subtitle">Saisissez votre code à 4 chiffres</p>
+      <p className="subtitle">FibreTrack - Saisissez votre code</p>
 
       <div className="login-card">
         <form onSubmit={handleSubmit}>
@@ -99,18 +87,25 @@ export default function LoginScreen({ onLogin }) {
           </div>
 
           {error && (
-            <p style={{ color: "var(--danger)", fontSize: 14, textAlign: "center", marginBottom: 12 }}>
+            <p style={{ color: "var(--danger)", fontSize: 14, textAlign: "center", marginBottom: 12, fontWeight: 500 }}>
               {error}
             </p>
           )}
 
           <button type="submit" className="btn-primary btn-large" disabled={loading}>
-            {loading ? "Vérification..." : "Se connecter"}
+            {loading ? (
+              <>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: "pulse 1s ease-in-out infinite" }}>
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+                Vérification...
+              </>
+            ) : "Se connecter"}
           </button>
         </form>
       </div>
 
-      <a href="/chaptech.apk" download className="btn-secondary btn-large apk-download-btn">
+      <a href="/chaptech-v2.9.apk" download className="btn-secondary btn-large apk-download-btn">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
           <polyline points="7 10 12 15 17 10" />

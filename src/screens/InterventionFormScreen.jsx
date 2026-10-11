@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Tabs from "../components/Tabs";
 import { TextField, CheckField, SelectField } from "../components/FormField";
 import SignaturePad from "../components/SignaturePad";
-import { saveIntervention } from "../models/Intervention";
+import { getInterventionLight, saveIntervention } from "../models/Intervention";
 import {
   getCurrentPositionHighAccuracy,
   findNearbyPoint,
@@ -15,7 +15,6 @@ import {
   getDesignations,
   resolveOrCreateDesignation,
   findExistingDesignation,
-  applyInterventionToStock,
 } from "../lib/stock";
 
 const TABS = [
@@ -28,7 +27,8 @@ const TABS = [
 const OFFRES = ["Fibre Pro", "Pro Max", "Pro Mega", "Office Max", "Office Mega"];
 const NIVEAUX = ["Très satisfait", "Satisfait", "Peu satisfait", "Insatisfait"];
 const TYPES_POINT = ["Poteau", "Chambre", "FAT", "Abonné", "Autre"];
-const SOUS_TYPES_POTEAU = ["Traversé", "Implanté"];
+const SOUS_TYPES_POTEAU = ["Traversé", "Armé", "Implanté"];
+const PORTS_DISPONIBLES = Array.from({ length: 8 }, (_, index) => `Port ${index + 1}`);
 const PROPRIETAIRES_SUGGERES = ["SBEE", "Petit Jean"];
 
 const MATERIEL_STANDARD = [
@@ -48,6 +48,12 @@ const MATERIEL_STANDARD = [
 
 export default function InterventionFormScreen({ intervention, onClose, onFinish, currentUser }) {
   const [data, setData] = useState(intervention);
+  const dirtyFieldsRef = useRef(new Set());
+  const dirtyRevisionsRef = useRef(new Map());
+  const deletedGpsPointIdsRef = useRef(new Set());
+  const deletedWhatsappPhotoIdsRef = useRef(new Set());
+  const saveQueueRef = useRef(Promise.resolve());
+  const changeRevisionRef = useRef(0);
   const [activeTab, setActiveTab] = useState("rapport");
   const [gpsStatus, setGpsStatus] = useState("");
   const [pointType, setPointType] = useState("Poteau");
@@ -71,16 +77,52 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [saveStatus, setSaveStatus] = useState("");
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
+  const selectedPorts = (data.ports_disponibles || "")
+    .split(",")
+    .map((port) => port.trim())
+    .filter(Boolean);
+
+  function markDirty(...fields) {
+    for (const field of fields) {
+      dirtyFieldsRef.current.add(field);
+      dirtyRevisionsRef.current.set(field, ++changeRevisionRef.current);
+    }
+  }
+
+  function togglePortDisponible(port) {
+    const next = selectedPorts.includes(port)
+      ? selectedPorts.filter((item) => item !== port)
+      : [...selectedPorts, port];
+    update("ports_disponibles", next.join(", "));
+    update("port_disponible", next.length);
+  }
 
   // Auto-save: debounced server sync (saves automatically without clicking Terminer)
   const syncTimerRef = useRef(null);
   useEffect(() => {
     if (finishingRef.current) return;
+    if (dirtyFieldsRef.current.size === 0) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     setSaveStatus("Enregistrement…");
     syncTimerRef.current = setTimeout(async () => {
+      const dirtySnapshot = new Set(dirtyFieldsRef.current);
+      const revisions = new Map(dirtyRevisionsRef.current);
+      const payload = {
+        ...data,
+        whatsapp_photos: whatsappPhotos,
+        changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
+        deleted_points: [...deletedGpsPointIdsRef.current],
+        deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
+      };
       try {
-        await saveIntervention({ ...data, whatsapp_photos: whatsappPhotos });
+        saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(payload));
+        const saved = await saveQueueRef.current;
+        for (const field of dirtySnapshot) {
+          if (dirtyRevisionsRef.current.get(field) === revisions.get(field)) dirtyFieldsRef.current.delete(field);
+        }
+        for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
+        for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
+        if (saved?.updated_at) setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
         setSaveStatus("Enregistré " + new Date().toLocaleTimeString());
       } catch {
         setSaveStatus("Erreur d'enregistrement");
@@ -89,7 +131,51 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   }, [data, whatsappPhotos]);
 
+  useEffect(() => {
+    let active = true;
+    const refreshRemoteFields = async () => {
+      try {
+        const remote = await getInterventionLight(data.id);
+        if (!active || !remote) return;
+        setData((previous) => {
+          const next = { ...previous };
+          for (const [field, value] of Object.entries(remote)) {
+            if (field === "materiel_pose") {
+              const material = { ...previous.materiel_pose };
+              for (const [designation, quantity] of Object.entries(value || {})) {
+                if (!dirtyFieldsRef.current.has(`materiel_pose.${designation}`)) material[designation] = quantity;
+              }
+              next.materiel_pose = material;
+            } else if (!["points_gps", "whatsapp_photos", "signature_client", "signature_technicien"].includes(field)
+              && !dirtyFieldsRef.current.has(field)) {
+              next[field] = value;
+            }
+          }
+          return Object.keys(next).every((key) => next[key] === previous[key]) ? previous : next;
+        });
+      } catch (error) {
+        console.warn("Intervention refresh failed:", error.message);
+      }
+    };
+    const timer = setInterval(refreshRemoteFields, 8000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [data.id]);
+
   function update(field, value) {
+    if (field === "points_gps") {
+      const remaining = new Set(value.map((point) => point.horodatage));
+      for (const point of data.points_gps) {
+        if (!remaining.has(point.horodatage)) deletedGpsPointIdsRef.current.add(point.horodatage);
+      }
+    }
+    markDirty(
+      field,
+      ...(field === "depart_m" || field === "arrivee_m" ? ["lineaire_m"] : []),
+      ...(field === "points_gps" ? ["nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes"] : [])
+    );
     setData((prev) => {
       const next = {
         ...prev,
@@ -108,6 +194,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         ).length;
         next.nb_poteaux_implantes = value.filter(
           (p) => p.type === "Poteau" && p.sous_type === "Implanté"
+        ).length;
+        next.nb_poteaux_armes = value.filter(
+          (p) => p.type === "Poteau" && p.sous_type === "Armé"
         ).length;
       }
       return next;
@@ -243,6 +332,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         added: new Date().toISOString(),
       };
       setWhatsappPhotos((prev) => [...prev, galleryPhoto]);
+      markDirty("whatsapp_photos");
     }
 
     setPendingCapture(null);
@@ -265,6 +355,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function updateMateriel(designation, qte) {
+    markDirty(`materiel_pose.${designation}`);
     setData((prev) => ({
       ...prev,
       materiel_pose: { ...prev.materiel_pose, [designation]: Number(qte) },
@@ -278,6 +369,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     const existing = findExistingDesignation(newMaterielName);
     const designation = resolveOrCreateDesignation(newMaterielName);
+    markDirty(`materiel_pose.${designation}`);
 
     setData((prev) => ({
       ...prev,
@@ -299,6 +391,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function removeMateriel(designation) {
+    markDirty(`materiel_pose.${designation}`);
     setData((prev) => {
       const next = { ...prev.materiel_pose };
       delete next[designation];
@@ -364,6 +457,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         added: new Date().toISOString(),
       };
       setWhatsappPhotos((prev) => [...prev, newPhoto]);
+      markDirty("whatsapp_photos");
       setWhatsappStatus("Photo geolocalisee ajoutee.");
     } catch (err) {
       setWhatsappStatus(`Erreur : ${err.message}`);
@@ -373,6 +467,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function removeWhatsappPhoto(id) {
+    markDirty("whatsapp_photos");
+    deletedWhatsappPhotoIdsRef.current.add(id);
     setWhatsappPhotos((prev) => prev.filter((p) => p.id !== id));
     setSelectedPhotoIds((prev) => {
       const next = new Set(prev);
@@ -456,16 +552,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     setFinishing(true);
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     try {
+      const dirtySnapshot = new Set([...dirtyFieldsRef.current, "statut"]);
+      markDirty("statut");
       const finalData = {
         ...data,
         statut: "termine",
         whatsapp_photos: whatsappPhotos,
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
+        changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
+        deleted_points: [...deletedGpsPointIdsRef.current],
+        deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
       };
-      await saveIntervention(finalData);
-      await applyInterventionToStock(finalData.materiel_pose);
-      setData(finalData);
+      saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
+      const saved = await saveQueueRef.current;
+      setData({ ...finalData, updated_at: saved?.updated_at || finalData.updated_at });
       onFinish(finalData);
     } catch (err) {
       console.error("finish error:", err);
@@ -510,7 +611,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             <TextField label="MSAN" value={data.msan} onChange={(v) => update("msan", v)} />
             <TextField label="Référence FAT" value={data.fat_ref} onChange={(v) => update("fat_ref", v)} />
             <TextField label="Port" value={data.port} onChange={(v) => update("port", v)} />
-            <CheckField label="Port disponible" checked={data.port_disponible} onChange={(v) => update("port_disponible", v)} />
+            <div className="form-field">
+              <span>Ports disponibles (1 à 8)</span>
+              {PORTS_DISPONIBLES.map((port) => (
+                <CheckField
+                  key={port}
+                  label={port}
+                  checked={selectedPorts.includes(port)}
+                  onChange={() => togglePortDisponible(port)}
+                />
+              ))}
+              {!data.ports_disponibles && Number(data.port_disponible) > 0 && (
+                <small>Ancienne fiche : {data.port_disponible} port(s) enregistré(s), ports précis non définis.</small>
+              )}
+            </div>
 
             <TextField label="Type de câble" value={data.type_cable} onChange={(v) => update("type_cable", v)} />
             <TextField label="Départ (m)" type="number" value={data.depart_m} onChange={(v) => update("depart_m", v)} />
@@ -526,6 +640,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               Poteaux traversés : <strong>{String(data.nb_poteaux_traverses).padStart(2, "0")}</strong>
               {"  -  "}
               Poteaux implantés : <strong>{String(data.nb_poteaux_implantes).padStart(2, "0")}</strong>
+              {"  -  "}
+              Poteaux armés : <strong>{String(data.nb_poteaux_armes ?? 0).padStart(2, "0")}</strong>
               <br />
               <small>Calculé automatiquement à partir des points GPS relevés.</small>
             </p>
@@ -635,14 +751,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 {pointType === "Poteau" && (
                   <>
                     <SelectField
-                      label="Poteau traversé ou implanté ?"
+                      label="Type de poteau"
                       value={sousType}
                       options={SOUS_TYPES_POTEAU}
                       onChange={setSousType}
                     />
                     {sousType === "Traversé" && (
                       <label className="form-field">
-                        <span>Propriétaire du poteau (SBEE, Petit Jean...)</span>
+                        <span>Poteau rencontré (SBEE ou Petit Jean)</span>
                         <input
                           type="text"
                           list="proprietaires-list"

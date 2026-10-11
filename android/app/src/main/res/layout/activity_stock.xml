@@ -4,96 +4,184 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#f5f5f5">
+    android:background="@color/background">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="#0d1a3a"
-        app:navigationIcon="@android:drawable/ic_media_previous"
-        app:titleTextColor="#ffffff"
-        app:title="Stock" />
+        android:background="@color/primary"
+        app:navigationIcon="@drawable/ic_arrow_back"
+        app:titleTextColor="@color/on_primary"
+        app:title="Gestion du Stock" />
 
-    <LinearLayout
+    <!-- Actions principales en grille 2x2 -->
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:gravity="center_vertical">
+        android:layout_margin="12dp"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="@color/divider">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnImportCanevas"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Canevas"
-            app:cornerRadius="8dp"
-            app:icon="@android:drawable/ic_menu_edit"
-            android:layout_marginEnd="4dp" />
+            android:orientation="vertical"
+            android:padding="12dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPdfStock"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="PDF Stock"
-            app:cornerRadius="8dp"
-            app:icon="@android:drawable/ic_menu_save"
-            android:layout_marginEnd="4dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnMovements"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Mouvements"
-            app:cornerRadius="8dp"
-            app:icon="@android:drawable/ic_menu_recent_history" />
-    </LinearLayout>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnImportExcel"
+                    style="@style/Widget.App.Button.Outlined"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="Import Excel"
+                    android:textSize="12sp"
+                    app:icon="@android:drawable/ic_menu_upload"
+                    app:iconGravity="top"
+                    android:layout_marginEnd="8dp" />
 
-    <LinearLayout
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnImportCanevas"
+                    style="@style/Widget.App.Button.Outlined"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="Canevas"
+                    android:textSize="12sp"
+                    app:icon="@android:drawable/ic_menu_edit"
+                    app:iconGravity="top" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPdfStock"
+                    style="@style/Widget.App.Button.Outlined"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="PDF Stock"
+                    android:textSize="12sp"
+                    app:icon="@android:drawable/ic_menu_save"
+                    app:iconGravity="top"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnMovements"
+                    style="@style/Widget.App.Button.Outlined"
+                    android:layout_width="0dp"
+                    android:layout_height="56dp"
+                    android:layout_weight="1"
+                    android:text="Mouvements"
+                    android:textSize="12sp"
+                    app:icon="@android:drawable/ic_menu_recent_history"
+                    app:iconGravity="top" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnExportExcel"
+                style="@style/Widget.App.Button.Outlined"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="8dp"
+                android:text="📊 Télécharger le Point Excel (Admin)"
+                android:textSize="12sp"
+                android:visibility="gone"
+                app:icon="@android:drawable/ic_menu_save"
+                app:iconGravity="top" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnExportExcelHebdo"
+                style="@style/Widget.App.Button.Outlined"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="8dp"
+                android:text="📅 Télécharger le Rapport Hebdo (Admin)"
+                android:textSize="12sp"
+                android:visibility="gone"
+                app:icon="@android:drawable/ic_menu_agenda"
+                app:iconGravity="top" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <!-- Ajout rapide -->
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp">
+        android:layout_marginHorizontal="12dp"
+        android:layout_marginBottom="8dp"
+        app:cardCornerRadius="12dp"
+        app:cardElevation="0dp"
+        app:strokeWidth="1dp"
+        app:strokeColor="@color/divider">
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:hint="Désignation"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+            android:orientation="horizontal"
+            android:padding="12dp"
+            android:gravity="center_vertical">
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editDesignation"
-                android:layout_width="match_parent"
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:inputType="text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:layout_weight="1"
+                android:layout_marginEnd="8dp"
+                android:hint="Désignation"
+                style="@style/Widget.App.TextInputLayout">
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="80dp"
-            android:layout_height="wrap_content"
-            android:layout_marginEnd="8dp"
-            android:hint="Qté"
-            style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editDesignation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="text" />
+            </com.google.android.material.textfield.TextInputLayout>
 
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/editQty"
-                android:layout_width="match_parent"
+            <com.google.android.material.textfield.TextInputLayout
+                android:layout_width="70dp"
                 android:layout_height="wrap_content"
-                android:inputType="number" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:layout_marginEnd="8dp"
+                android:hint="Qté"
+                style="@style/Widget.App.TextInputLayout">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnAdd"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Ajouter"
-            app:cornerRadius="8dp" />
-    </LinearLayout>
+                <com.google.android.material.textfield.TextInputEditText
+                    android:id="@+id/editQty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:inputType="number" />
+            </com.google.android.material.textfield.TextInputLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAdd"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="+"
+                android:textSize="18sp"
+                app:iconPadding="0dp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingVertical="8dp"
+        android:text="Articles en stock"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp"
+        android:textStyle="bold" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -103,7 +191,9 @@
             android:id="@+id/recyclerStock"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:padding="8dp" />
+            android:clipToPadding="false"
+            android:paddingHorizontal="12dp"
+            android:paddingBottom="16dp" />
 
         <ProgressBar
             android:id="@+id/progressBar"
@@ -111,15 +201,38 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center" />
 
-        <TextView
-            android:id="@+id/emptyText"
+        <LinearLayout
+            android:id="@+id/emptyState"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:text="Aucun stock"
-            android:textColor="#999"
-            android:textSize="16sp"
-            android:visibility="gone" />
+            android:orientation="vertical"
+            android:gravity="center"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="80dp"
+                android:layout_height="80dp"
+                android:src="@android:drawable/ic_menu_sort_by_size"
+                android:alpha="0.3" />
+
+            <TextView
+                android:id="@+id/emptyText"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:text="Aucun stock"
+                android:textSize="16sp"
+                android:textColor="@color/text_hint" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Importez votre inventaire Excel"
+                android:textSize="13sp"
+                android:textColor="@color/text_disabled" />
+        </LinearLayout>
     </FrameLayout>
 
 </LinearLayout>

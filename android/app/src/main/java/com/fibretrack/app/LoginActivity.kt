@@ -10,6 +10,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
 
@@ -20,13 +21,19 @@ class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        if (SessionManager.isLoggedIn(this)) {
+        if (SessionManager.isLoggedIn(this) && SessionManager.getCode(this).isNotEmpty()) {
+            ApiService.setAuthCode(SessionManager.getCode(this))
             startActivity(Intent(this, HomeActivity::class.java))
             finish()
             return
         }
+        if (SessionManager.isLoggedIn(this)) SessionManager.logout(this)
 
         setContentView(R.layout.activity_login)
+        applyBottomSystemBarInset(findViewById(android.R.id.content))
+
+        findViewById<TextView>(R.id.tvVersion)?.text =
+            "Version ${packageManager.getPackageInfo(packageName, 0).versionName}"
 
         digits[0] = findViewById(R.id.digit1)
         digits[1] = findViewById(R.id.digit2)
@@ -65,17 +72,19 @@ class LoginActivity : AppCompatActivity() {
 
         val loginBtn = findViewById<MaterialButton>(R.id.loginBtn)
         val progressBar = findViewById<ProgressBar>(R.id.progressBar)
+        val errorCard = findViewById<MaterialCardView>(R.id.errorCard)
         val errorText = findViewById<TextView>(R.id.errorText)
 
         loginBtn.isEnabled = false
         loginBtn.text = "Vérification..."
         progressBar.visibility = View.VISIBLE
-        errorText.visibility = View.GONE
+        errorCard.visibility = View.GONE
 
         lifecycleScope.launch {
             try {
                 val user = ApiService.validateCode(code)
-                SessionManager.saveUser(this@LoginActivity, user.id, user.nom, user.isAdmin)
+                SessionManager.saveUser(this@LoginActivity, user.id, user.nom, user.isAdmin, code)
+                ApiService.setAuthCode(code)
                 startActivity(Intent(this@LoginActivity, HomeActivity::class.java))
                 finish()
             } catch (e: Exception) {
@@ -83,7 +92,7 @@ class LoginActivity : AppCompatActivity() {
                 loginBtn.text = "Se connecter"
                 progressBar.visibility = View.GONE
                 errorText.text = e.message ?: "Code invalide"
-                errorText.visibility = View.VISIBLE
+                errorCard.visibility = View.VISIBLE
                 for (d in digits) d?.setText("")
                 digits[0]?.requestFocus()
             }

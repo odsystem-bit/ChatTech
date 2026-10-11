@@ -16,6 +16,8 @@ class SignaturePadView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyle: Int = 0
 ) : View(context, attrs, defStyle) {
 
+    var onChanged: (() -> Unit)? = null
+
     private val paint = Paint().apply {
         color = Color.BLACK
         style = Paint.Style.STROKE
@@ -63,6 +65,7 @@ class SignaturePadView @JvmOverloads constructor(
                 paths.add(Pair(currentPath, Paint(paint)))
                 currentPath = Path()
                 invalidate()
+                onChanged?.invoke()
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
@@ -78,6 +81,7 @@ class SignaturePadView @JvmOverloads constructor(
         currentPath = Path()
         hasContent = false
         invalidate()
+        onChanged?.invoke()
     }
 
     fun isEmpty(): Boolean = !hasContent
@@ -93,6 +97,7 @@ class SignaturePadView @JvmOverloads constructor(
         canvas.drawPath(currentPath, paint)
         val baos = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-        return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+        val b64 = Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP)
+        return "data:image/png;base64,$b64"
     }
 }

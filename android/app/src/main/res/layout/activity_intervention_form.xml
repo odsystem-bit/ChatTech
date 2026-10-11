@@ -4,26 +4,30 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#f5f5f5">
+    android:background="@color/background">
 
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
-        android:background="#0d1a3a"
-        app:navigationIcon="@android:drawable/ic_media_previous"
-        app:titleTextColor="#ffffff"
+        android:background="@color/primary"
+        app:navigationIcon="@drawable/ic_arrow_back"
+        app:titleTextColor="@color/on_primary"
+        app:subtitleTextColor="@color/on_primary"
         app:title="Intervention" />
 
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/tabLayout"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:background="#0d1a3a"
-        app:tabIndicatorColor="#ffffff"
-        app:tabSelectedTextColor="#ffffff"
-        app:tabTextColor="#aaaacc"
-        app:tabMode="scrollable" />
+        android:layout_height="48dp"
+        android:background="@color/primary"
+        app:tabIndicatorColor="@color/on_primary"
+        app:tabIndicatorHeight="3dp"
+        app:tabSelectedTextColor="@color/on_primary"
+        app:tabTextColor="#80FFFFFF"
+        app:tabMode="scrollable"
+        app:tabGravity="start"
+        app:tabTextAppearance="@style/TabTextAppearance" />
 
     <FrameLayout
         android:layout_width="match_parent"
@@ -52,39 +56,76 @@
             android:visibility="gone" />
     </FrameLayout>
 
-    <LinearLayout
+    <!-- Barre d'actions fixe en bas -->
+    <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="12dp"
-        android:background="#ffffff"
-        android:elevation="8dp"
-        android:gravity="center_vertical">
+        app:cardCornerRadius="0dp"
+        app:cardElevation="8dp">
 
-        <TextView
-            android:id="@+id/tvSaveStatus"
-            android:layout_width="0dp"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="12sp"
-            android:textColor="#999"
-            android:visibility="gone" />
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:background="@color/surface">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnSave"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:text="Enregistrer"
-            android:layout_marginEnd="8dp"
-            app:cornerRadius="8dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnFinish"
-            android:layout_width="wrap_content"
-            android:layout_height="48dp"
-            android:text="Terminer"
-            app:cornerRadius="8dp" />
-    </LinearLayout>
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPhotoGps"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="52dp"
+                    android:text="PHOTO GPS"
+                    android:textStyle="bold"
+                    android:layout_marginEnd="6dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnVideoGps"
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="52dp"
+                    android:text="VIDEO GPS"
+                    android:textStyle="bold"
+                    android:layout_marginStart="6dp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginTop="8dp">
+
+                <TextView
+                    android:id="@+id/tvSaveStatus"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="12sp"
+                    android:textColor="@color/text_hint"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnSave"
+                    style="@style/Widget.App.Button.Outlined"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="Enregistrer"
+                    android:layout_marginEnd="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnFinish"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:text="Terminer" />
+            </LinearLayout>
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
 
 </LinearLayout>

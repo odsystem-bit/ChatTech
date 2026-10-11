@@ -1,14 +1,56 @@
 // Generation PDF - cote serveur via API PHP
 // L'APK/WebView ne fait qu'ouvrir les URLs, le serveur genere le PDF
 
+import { getApiCode } from "../models/Account";
+
 const PDF_URL = "https://fibretrack.mantota.com/api/pdf.php";
+const EXCEL_EXPORT_URL = "https://fibretrack.mantota.com/api/excel_export.php";
+const EXCEL_HEBDO_URL = "https://fibretrack.mantota.com/api/excel_hebdo.php";
+
+function authSuffix() {
+  const code = getApiCode();
+  return code ? `&code=${encodeURIComponent(code)}` : "";
+}
 
 function isInWebView() {
   return typeof window !== "undefined" && window.AndroidBridge && window.AndroidBridge.isWebView && window.AndroidBridge.isWebView();
 }
 
+export function getPdfUrl(action, id) {
+  return `${PDF_URL}?action=${action}&id=${encodeURIComponent(id)}${authSuffix()}`;
+}
+
+export function getStockPdfUrl(action) {
+  return `${PDF_URL}?action=${action}${authSuffix()}`;
+}
+
+export function getPointMaterielExcelUrl() {
+  return `${EXCEL_EXPORT_URL}?action=export_point_materiel${authSuffix()}`;
+}
+
+export function getExcelHebdoUrl(weekStart = null) {
+  const suffix = weekStart ? `&week_start=${encodeURIComponent(weekStart)}` : "";
+  return `${EXCEL_HEBDO_URL}?action=export_hebdo${authSuffix()}${suffix}`;
+}
+
+export function getExcelMoisUrl(mois) {
+  return `${EXCEL_HEBDO_URL}?action=export_mois&mois=${encodeURIComponent(mois)}${authSuffix()}`;
+}
+
+export function getHistoriqueUrl() {
+  return `${EXCEL_HEBDO_URL}?action=export_historique${authSuffix()}`;
+}
+
+export function getListeMoisUrl(mois) {
+  return `${PDF_URL}?action=liste_mois&mois=${encodeURIComponent(mois)}${authSuffix()}`;
+}
+
+export function getPdfMoisUrl(mois) {
+  return `${PDF_URL}?action=pdf_mois&mois=${encodeURIComponent(mois)}${authSuffix()}`;
+}
+
 export async function generateInterventionPdf(intervention) {
-  const url = `${PDF_URL}?action=pdf_fiches&id=${encodeURIComponent(intervention.id)}`;
+  const url = getPdfUrl("pdf_fiches", intervention.id);
   if (isInWebView()) {
     window.AndroidBridge.downloadUrl(url, `fiches_${intervention.nom_client || intervention.id}.pdf`);
     return;
@@ -17,7 +59,7 @@ export async function generateInterventionPdf(intervention) {
 }
 
 export async function previewInterventionPdf(intervention) {
-  const url = `${PDF_URL}?action=pdf_fiches_view&id=${encodeURIComponent(intervention.id)}`;
+  const url = getPdfUrl("pdf_fiches_view", intervention.id);
   if (isInWebView()) {
     window.AndroidBridge.openUrl(url);
     return null;
@@ -27,7 +69,7 @@ export async function previewInterventionPdf(intervention) {
 }
 
 export async function generateSummaryReportPdf(intervention) {
-  const url = `${PDF_URL}?action=pdf_rapport&id=${encodeURIComponent(intervention.id)}`;
+  const url = getPdfUrl("pdf_rapport", intervention.id);
   if (isInWebView()) {
     window.AndroidBridge.downloadUrl(url, `rapport_${intervention.nom_client || intervention.id}.pdf`);
     return;
@@ -36,7 +78,7 @@ export async function generateSummaryReportPdf(intervention) {
 }
 
 export async function previewSummaryReportPdf(intervention) {
-  const url = `${PDF_URL}?action=pdf_rapport_view&id=${encodeURIComponent(intervention.id)}`;
+  const url = getPdfUrl("pdf_rapport_view", intervention.id);
   if (isInWebView()) {
     window.AndroidBridge.openUrl(url);
     return null;
@@ -46,7 +88,7 @@ export async function previewSummaryReportPdf(intervention) {
 }
 
 export async function shareInterventionPdf(intervention) {
-  const url = `${PDF_URL}?action=pdf_fiches&id=${encodeURIComponent(intervention.id)}`;
+  const url = getPdfUrl("pdf_fiches", intervention.id);
   if (isInWebView()) {
     window.AndroidBridge.shareUrl(url, `Fiches d'intervention - ${intervention.nom_client || ""}`);
     return "shared";

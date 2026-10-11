@@ -21,6 +21,7 @@ export function generateWhatsAppReport(intervention, compteurJour) {
 
   const poteauxTraverses = d.points_gps.filter((p) => p.type === "Poteau" && p.sous_type === "Traversé");
   const poteauxImplantes = d.points_gps.filter((p) => p.type === "Poteau" && p.sous_type === "Implanté");
+  const poteauxArmes = d.points_gps.filter((p) => p.type === "Poteau" && p.sous_type === "Armé");
   const abonne = d.points_gps.find((p) => p.type === "Abonné");
   const fat = d.points_gps.find((p) => p.type === "FAT");
 
@@ -29,6 +30,8 @@ export function generateWhatsAppReport(intervention, compteurJour) {
     const prop = p.proprietaire || "Autre";
     if (!proprietairesOrder.includes(prop)) proprietairesOrder.push(prop);
   }
+
+  const portsDisponibles = d.ports_disponibles || (d.port_disponible ? `${d.port_disponible} port(s)` : "");
 
   const lignes = [
     `*Chef d'Équipe : ${d.nom_technicien || ""}*`,
@@ -46,7 +49,7 @@ export function generateWhatsAppReport(intervention, compteurJour) {
     `*Msan: ${d.msan || ""} ${d.fat_ref || ""}*`,
     ``,
     `*Port:${d.port || ""}*`,
-    `*Port disponible: ${d.port_disponible ? 1 : 0}*`,
+    `*Ports disponibles: ${portsDisponibles}*`,
     `*Type de câble : ${d.type_cable || ""}*`,
     `*Départ :${d.depart_m}m*`,
     `*Arrivée :${d.arrivee_m}m*`,
@@ -57,6 +60,7 @@ export function generateWhatsAppReport(intervention, compteurJour) {
     `*SN : ${d.sn || ""}*`,
     `*Nombre de poteaux traversés : ${fmt2(d.nb_poteaux_traverses)}*`,
     `*Nombre de poteaux implantés: ${fmt2(d.nb_poteaux_implantes)}*`,
+    `*Nombre de poteaux armés: ${fmt2(d.nb_poteaux_armes ?? poteauxArmes.length)}*`,
     `*Rue: ${val("rue")}*`,
     `*Pince:${val("pince")}*`,
     `*Crochets:${val("crochets")}*`,
@@ -93,11 +97,20 @@ export function generateWhatsAppReport(intervention, compteurJour) {
   }
   lignes.push(``);
 
+  lignes.push(`*Poteaux armé : ${fmt2(d.nb_poteaux_armes ?? poteauxArmes.length)}*`);
+  if (poteauxArmes.length > 0) {
+    lignes.push(`*GPS poteaux armés*`);
+    for (const p of poteauxArmes) {
+      lignes.push(`*GPS PT${p.numero}: ${p.lat},${p.lng}*`);
+    }
+  }
+  lignes.push(``);
+
   lignes.push(`*GPS abonné: ${abonne ? `${abonne.lat},${abonne.lng}` : ""}*`);
   lignes.push(``);
   lignes.push(`*GPS FAT: ${fat ? `${fat.lat},${fat.lng}` : ""}*`);
 
-  return lignes.join("\n");
+  return lignes.join("\n").replace(/\*/g, "");
 }
 
 /**

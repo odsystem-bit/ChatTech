@@ -104,32 +104,39 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       <header className="form-header">
         <h2>Intervention terminée</h2>
         <button type="button" className="btn-secondary" onClick={onClose}>
-          Retour à l'accueil
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}>
+            <path d="M3 12l6 6 12-12" />
+          </svg>
+          Accueil
         </button>
       </header>
 
+      <div className="status-banner" style={{ marginBottom: 16 }}>
+        ✅ <strong>{intervention.nom_client || "Nouveau client"}</strong> — Intervention terminée
+      </div>
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <button type="button" className="btn-primary btn-large" onClick={handlePreviewPdf} disabled={loadingAction === "previewPdf"}>
-          {loadingAction === "previewPdf" ? "Chargement…" : "Voir les fiches officielles"}
+          {loadingAction === "previewPdf" ? "Chargement…" : "📄 Voir les fiches officielles"}
         </button>
         <button type="button" className="btn-secondary btn-large" onClick={handleDownloadPdf} disabled={loadingAction === "downloadPdf"}>
-          {loadingAction === "downloadPdf" ? "Chargement…" : "Télécharger les fiches"}
+          {loadingAction === "downloadPdf" ? "Chargement…" : "⬇ Télécharger les fiches"}
         </button>
       </div>
       {pdfStatus && <p className="gps-status">{pdfStatus}</p>}
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
         <button type="button" className="btn-primary btn-large" onClick={handlePreviewReport} disabled={loadingAction === "previewReport"}>
-          {loadingAction === "previewReport" ? "Chargement…" : "Voir le rapport (photos + schéma)"}
+          {loadingAction === "previewReport" ? "Chargement…" : "📸 Voir le rapport (photos + schéma)"}
         </button>
         <button type="button" className="btn-secondary btn-large" onClick={handleDownloadReport} disabled={loadingAction === "downloadReport"}>
-          {loadingAction === "downloadReport" ? "Chargement…" : "Télécharger le rapport"}
+          {loadingAction === "downloadReport" ? "Chargement…" : "⬇ Télécharger le rapport"}
         </button>
       </div>
       {reportStatus && <p className="gps-status">{reportStatus}</p>}
 
       <button type="button" className="btn-secondary btn-large" onClick={handleShare} disabled={loadingAction === "share"} style={{ marginTop: 12 }}>
-        {loadingAction === "share" ? "Chargement…" : "Partager sur WhatsApp"}
+        {loadingAction === "share" ? "Chargement…" : "💬 Partager sur WhatsApp"}
       </button>
       {shareStatus && <p className="gps-status">{shareStatus}</p>}
 
@@ -177,7 +184,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       </div>
 
       <button type="button" className="btn-secondary btn-large" onClick={() => onEdit(intervention)} style={{ marginTop: 12 }}>
-        Modifier cette intervention
+        ✏ Modifier cette intervention
       </button>
     </div>
   );

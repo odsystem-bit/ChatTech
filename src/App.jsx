@@ -13,6 +13,7 @@ import {
   saveIntervention,
   deleteIntervention,
 } from "./models/Intervention";
+import { formatDateFR } from "./lib/date";
 
 export default function App() {
   const [user, setUser] = useState(getCurrentAccount());
@@ -161,7 +162,7 @@ export default function App() {
   }
 
   if (screen === "stock") {
-    return <StockScreen onClose={goToHome} />;
+    return <StockScreen onClose={goToHome} isAdmin={user?.isAdmin === true} />;
   }
 
   return (
@@ -169,7 +170,7 @@ export default function App() {
       <header>
         <div className="header-top">
           <h1>
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M12 2L2 7l10 5 10-5-10-5z" />
               <path d="M2 17l10 5 10-5" />
               <path d="M2 12l10 5 10-5" />
@@ -184,7 +185,7 @@ export default function App() {
             </svg>
           </button>
         </div>
-        <p>Bonjour, {user.nom}</p>
+        <p>Bonjour, <strong>{user.nom}</strong></p>
       </header>
 
       <main>
@@ -242,7 +243,10 @@ export default function App() {
           Interventions ({interventions.length}){loading && " …"}
         </h3>
         {interventions.length === 0 ? (
-          <p className="empty-state">Aucune intervention. Créez-en une pour commencer.</p>
+          <div className="empty-state">
+            <p style={{ fontSize: 28, marginBottom: 8 }}>📋</p>
+            Aucune intervention. Créez-en une pour commencer.
+          </div>
         ) : (
           <ul className="intervention-list">
             {interventions.map((intv) => (
@@ -255,7 +259,7 @@ export default function App() {
                     </span>
                   </div>
                   <div className="badge-meta">
-                    {new Date(intv.date).toLocaleDateString()} · {intv.nom_technicien || "N/A"}
+                    {formatDateFR(intv.date)} · {intv.nom_technicien || "N/A"}
                   </div>
                 </button>
                 <button

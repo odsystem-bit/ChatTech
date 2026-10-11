@@ -11,34 +11,55 @@ import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.fibretrack.app.models.StockImportResult
 import com.fibretrack.app.models.StockMovement
 import com.fibretrack.app.models.StockTemplateItem
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.textfield.TextInputEditText
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 class StockActivity : AppCompatActivity() {
 
     private val stockItems = mutableListOf<Pair<String, Int>>()
     private lateinit var adapter: StockAdapter
+    private var importProgressDialog: androidx.appcompat.app.AlertDialog? = null
+    private var excelImportMode = "set"
+
+    private val excelPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            importExcelFile(uri, excelImportMode)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_stock)
+        applyBottomSystemBarInset(findViewById(android.R.id.content))
 
         val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
         toolbar.setNavigationOnClickListener { finish() }
 
+        if (!SessionManager.isAdmin(this)) {
+            findViewById<MaterialButton>(R.id.btnImportExcel).visibility = View.GONE
+            findViewById<MaterialButton>(R.id.btnImportCanevas).visibility = View.GONE
+        }
+
         val recycler = findViewById<RecyclerView>(R.id.recyclerStock)
 
         adapter = StockAdapter(stockItems,
-            onInc = { pos -> updateQty(pos, stockItems[pos].second + 1) },
-            onDec = { pos -> updateQty(pos, (stockItems[pos].second - 1).coerceAtLeast(0)) }
+            onInc = { pos -> moveQty(pos, 1) },
+            onDec = { pos -> moveQty(pos, -1) }
         )
         recycler.layoutManager = LinearLayoutManager(this)
         recycler.adapter = adapter
@@ -50,9 +71,13 @@ class StockActivity : AppCompatActivity() {
                 android.widget.Toast.makeText(this, "Désignation requise", android.widget.Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            if (qty <= 0) {
+                android.widget.Toast.makeText(this, "Quantité positive requise", android.widget.Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
             lifecycleScope.launch {
                 try {
-                    ApiService.saveStockItem(desig, qty)
+                    ApiService.moveStockItem(desig, qty, "entree", "Réception manuelle")
                     findViewById<TextInputEditText>(R.id.editDesignation).setText("")
                     findViewById<TextInputEditText>(R.id.editQty).setText("")
                     refreshStock()
@@ -60,6 +85,10 @@ class StockActivity : AppCompatActivity() {
                     android.widget.Toast.makeText(this@StockActivity, "Erreur: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+
+        findViewById<MaterialButton>(R.id.btnImportExcel).setOnClickListener {
+            showExcelImportModeDialog()
         }
 
         findViewById<MaterialButton>(R.id.btnImportCanevas).setOnClickListener {
@@ -77,7 +106,89 @@ class StockActivity : AppCompatActivity() {
             showMovementsDialog()
         }
 
+        val btnExportExcel = findViewById<MaterialButton>(R.id.btnExportExcel)
+        val btnExportExcelHebdo = findViewById<MaterialButton>(R.id.btnExportExcelHebdo)
+        if (SessionManager.isAdmin(this)) {
+            btnExportExcel.visibility = View.VISIBLE
+            btnExportExcel.setOnClickListener {
+                val url = ApiService.getPointMaterielExcelUrl()
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+            }
+
+            btnExportExcelHebdo.visibility = View.VISIBLE
+            btnExportExcelHebdo.setOnClickListener {
+                showWeeklyExportPicker()
+            }
+        }
+
         refreshStock()
+    }
+
+    private fun showWeeklyExportPicker() {
+        val today = Calendar.getInstance()
+        android.app.DatePickerDialog(this, { _, year, month, day ->
+            val date = Calendar.getInstance().apply { set(year, month, day) }
+            val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val url = ApiService.getExcelHebdoUrl(formatter.format(date.time))
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }, today.get(Calendar.YEAR), today.get(Calendar.MONTH), today.get(Calendar.DAY_OF_MONTH)).apply {
+            setTitle("Choisir une date dans la semaine à exporter")
+        }.show()
+    }
+
+    private fun showExcelImportModeDialog() {
+        val modes = arrayOf(
+            "Ajouter les quantités comme nouvelle livraison",
+            "Définir le solde d’après STOCK RESTANT"
+        )
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Mode d’import Excel")
+            .setItems(modes) { _, which ->
+                excelImportMode = if (which == 0) "add" else "set"
+                excelPickerLauncher.launch("*/*")
+            }
+            .show()
+    }
+
+    private fun importExcelFile(uri: Uri, mode: String) {
+        val progressDialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Import Excel en cours...")
+            .setMessage("Lecture et envoi du fichier...")
+            .setCancelable(false)
+            .create()
+        progressDialog.show()
+        importProgressDialog = progressDialog
+
+        lifecycleScope.launch {
+            try {
+                val inputStream = contentResolver.openInputStream(uri)
+                    ?: throw Exception("Impossible d'ouvrir le fichier")
+                val bytes = inputStream.use { it.readBytes() }
+                val fileBase64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+
+                val result = ApiService.importStockExcel(fileBase64, mode)
+                progressDialog.dismiss()
+
+                if (result.ok) {
+                    val msg = if (result.not_found.isNotEmpty()) {
+                        "Stock importé (${result.count} articles). Colonnes non trouvées: ${result.not_found.joinToString(", ")}"
+                    } else {
+                        "Stock importé avec succès (${result.count} articles)"
+                    }
+                    android.widget.Toast.makeText(this@StockActivity, msg, android.widget.Toast.LENGTH_LONG).show()
+                    refreshStock()
+                } else {
+                    android.widget.Toast.makeText(this@StockActivity, "Erreur: ${result.error}", android.widget.Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                progressDialog.dismiss()
+                android.widget.Toast.makeText(this@StockActivity, "Erreur: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
     }
 
     private fun showImportCanevasDialog() {
@@ -130,7 +241,7 @@ class StockActivity : AppCompatActivity() {
                 }
 
                 val btnImport = MaterialButton(this@StockActivity).apply {
-                    text = "Importer le stock"
+                    text = "Ajouter ces quantités au stock"
                     cornerRadius = 8
                     setPadding(0, 24, 0, 24)
                     val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
@@ -141,7 +252,7 @@ class StockActivity : AppCompatActivity() {
                     val items = template.map { it.copy(quantite = editTexts[it.designation]?.text.toString().toIntOrNull() ?: 0) }
                     lifecycleScope.launch {
                         try {
-                            ApiService.importStock(items)
+                            ApiService.importStock(items, "add")
                             android.widget.Toast.makeText(this@StockActivity, "Stock importé (${items.size} articles)", android.widget.Toast.LENGTH_SHORT).show()
                             dialog.dismiss()
                             refreshStock()
@@ -246,13 +357,13 @@ class StockActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateQty(pos: Int, newQty: Int) {
+    private fun moveQty(pos: Int, delta: Int) {
         val desig = stockItems[pos].first
+        if (delta < 0 && stockItems[pos].second <= 0) return
         lifecycleScope.launch {
             try {
-                ApiService.saveStockItem(desig, newQty)
-                stockItems[pos] = desig to newQty
-                adapter.notifyItemChanged(pos)
+                ApiService.moveStockItem(desig, kotlin.math.abs(delta), if (delta > 0) "entree" else "sortie", "Ajustement rapide")
+                refreshStock()
             } catch (e: Exception) {
                 android.widget.Toast.makeText(this@StockActivity, "Erreur: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
             }
@@ -261,7 +372,7 @@ class StockActivity : AppCompatActivity() {
 
     private fun refreshStock() {
         val progressBar = findViewById<ProgressBar>(R.id.progressBar)
-        val emptyText = findViewById<TextView>(R.id.emptyText)
+        val emptyState = findViewById<LinearLayout>(R.id.emptyState)
         progressBar.visibility = View.VISIBLE
 
         lifecycleScope.launch {
@@ -271,7 +382,7 @@ class StockActivity : AppCompatActivity() {
                 stockItems.addAll(stock.entries.sortedBy { it.key }.map { it.key to it.value })
                 adapter.notifyDataSetChanged()
                 progressBar.visibility = View.GONE
-                emptyText.visibility = if (stockItems.isEmpty()) View.VISIBLE else View.GONE
+                emptyState.visibility = if (stockItems.isEmpty()) View.VISIBLE else View.GONE
             } catch (e: Exception) {
                 progressBar.visibility = View.GONE
                 android.widget.Toast.makeText(this@StockActivity, "Erreur: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
