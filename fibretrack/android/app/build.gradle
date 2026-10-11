@@ -1,0 +1,84 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.fibretrack.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.fibretrack.app"
+        minSdk 24
+        targetSdk 35
+        versionCode 18
+        versionName "3.4.2"
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('../chaptech-release.keystore')
+            storePassword 'chaptech2024'
+            keyAlias 'chaptech'
+            keyPassword 'chaptech2024'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'androidx.core:core-ktx:1.12.0'
+    implementation 'androidx.recyclerview:recyclerview:1.3.2'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
+    implementation 'androidx.activity:activity-ktx:1.8.2'
+    implementation 'androidx.media3:media3-transformer:1.3.1'
+    implementation 'androidx.media3:media3-effect:1.3.1'
+    implementation 'androidx.media3:media3-common:1.3.1'
+    implementation 'androidx.media3:media3-exoplayer:1.3.1'
+    implementation 'androidx.media3:media3-ui:1.3.1'
+    implementation 'com.google.guava:guava:32.1.3-android'
+    implementation 'androidx.exifinterface:exifinterface:1.4.2'
+
+    // Networking
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+
+    // Coroutines
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // Location
+    implementation 'com.google.android.gms:play-services-location:21.1.0'
+
+    // Scanner de fiches (ML Kit Document Scanner)
+    implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0'
+
+    // CameraX
+    implementation 'androidx.camera:camera-core:1.3.1'
+    implementation 'androidx.camera:camera-camera2:1.3.1'
+    implementation 'androidx.camera:camera-lifecycle:1.3.1'
+    implementation 'androidx.camera:camera-view:1.3.1'
+}

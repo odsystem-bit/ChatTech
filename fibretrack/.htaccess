@@ -1,0 +1,28 @@
+# SPA routing - redirige tout vers index.html sauf les fichiers existants
+RewriteEngine On
+
+# Ne pas rediriger les fichiers existants (assets, images, etc.)
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# L'API PHP garde son propre routing
+RewriteRule ^api/ - [L]
+
+# Tout le reste renvoie vers index.html
+RewriteRule ^ index.html [L]
+
+# Compression
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/css application/javascript application/json
+</IfModule>
+
+# Cache des assets statiques
+<IfModule mod_expires.c>
+  ExpiresActive On
+  ExpiresByType application/javascript "access plus 1 month"
+  ExpiresByType text/css "access plus 1 month"
+  ExpiresByType image/jpeg "access plus 1 month"
+  ExpiresByType image/png "access plus 1 month"
+  ExpiresByType image/svg+xml "access plus 1 month"
+</IfModule>

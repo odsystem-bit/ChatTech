@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Couleurs principales -->
+    <color name="primary">#123CCB</color>
+    <color name="primary_variant">#0B2CA0</color>
+    <color name="primary_light">#2F78F4</color>
+    <color name="on_primary">#FFFFFF</color>
+    
+    <!-- Couleurs secondaires -->
+    <color name="secondary">#28BDEB</color>
+    <color name="on_secondary">#FFFFFF</color>
+    
+    <!-- Couleurs de fond -->
+    <color name="background">#F4F8FF</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#EAF2FF</color>
+    
+    <!-- Couleurs de texte -->
+    <color name="text_primary">#1A1A1A</color>
+    <color name="text_secondary">#666666</color>
+    <color name="text_hint">#999999</color>
+    <color name="text_disabled">#BDBDBD</color>
+    
+    <!-- Couleurs d'état -->
+    <color name="success">#4CAF50</color>
+    <color name="success_light">#E8F5E9</color>
+    <color name="warning">#FF9800</color>
+    <color name="warning_light">#FFF3E0</color>
+    <color name="error">#F44336</color>
+    <color name="error_light">#FFEBEE</color>
+    <color name="info">#2196F3</color>
+    <color name="info_light">#E3F2FD</color>
+    
+    <!-- Dividers et bordures -->
+    <color name="divider">#D9E5FA</color>
+    <color name="border">#C8D9F5</color>
+    
+    <!-- Legacy (pour icône launcher) -->
+    <color name="ic_background">#123CCB</color>
+    <color name="ic_foreground">#FFFFFF</color>
+</resources>

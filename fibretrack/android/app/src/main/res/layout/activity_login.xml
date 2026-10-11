@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/primary"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp">
+
+        <!-- Logo avec animation subtile -->
+        <com.google.android.material.card.MaterialCardView
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:layout_width="100dp"
+            android:layout_height="100dp"
+            app:cardCornerRadius="50dp"
+            app:cardElevation="8dp"
+            app:cardBackgroundColor="@color/surface"
+            android:layout_marginBottom="24dp">
+
+            <ImageView
+                android:layout_width="60dp"
+                android:layout_height="60dp"
+                android:layout_gravity="center"
+                android:src="@mipmap/ic_launcher" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="CHAPTECH"
+            android:textSize="32sp"
+            android:textStyle="bold"
+            android:textColor="@color/on_primary"
+            android:letterSpacing="0.1"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="FibreTrack"
+            android:textSize="14sp"
+            android:textColor="#80FFFFFF"
+            android:layout_marginBottom="32dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Saisissez votre code à 4 chiffres"
+            android:textSize="15sp"
+            android:textColor="#B0FFFFFF"
+            android:layout_marginBottom="24dp" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="24dp">
+
+            <EditText
+                android:id="@+id/digit1"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"
+                android:autofillHints="1234"
+                android:imeOptions="actionNext" />
+
+            <EditText
+                android:id="@+id/digit2"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"
+                android:autofillHints="1234"
+                android:imeOptions="actionNext" />
+
+            <EditText
+                android:id="@+id/digit3"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:layout_marginEnd="8dp"
+                android:autofillHints="1234"
+                android:imeOptions="actionNext" />
+
+            <EditText
+                android:id="@+id/digit4"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:inputType="number"
+                android:maxLength="1"
+                android:textSize="24sp"
+                android:textAlignment="center"
+                android:background="@drawable/code_digit_bg"
+                android:textColor="#ffffff"
+                android:autofillHints="1234"
+                android:imeOptions="actionDone" />
+        </LinearLayout>
+
+        <!-- Message d'erreur -->
+        <com.google.android.material.card.MaterialCardView
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            android:id="@+id/errorCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="0dp"
+            app:cardBackgroundColor="@color/error_light"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/errorText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:padding="12dp"
+                android:textColor="@color/error"
+                android:textSize="14sp"
+                android:gravity="center" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/loginBtn"
+            android:layout_width="220dp"
+            android:layout_height="52dp"
+            android:text="Se connecter"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            app:cornerRadius="26dp"
+            app:backgroundTint="@color/surface"
+            android:textColor="@color/primary"
+            xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        <ProgressBar
+            android:id="@+id/progressBar"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:layout_marginTop="24dp"
+            android:indeterminateTint="@color/on_primary"
+            android:visibility="gone" />
+
+        <!-- Version info (remplie dynamiquement dans LoginActivity) -->
+        <TextView
+            android:id="@+id/tvVersion"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="48dp"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#60FFFFFF" />
+
+    </LinearLayout>
+</ScrollView>
