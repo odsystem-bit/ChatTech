@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\ArticlesController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ComptesController;
 use App\Http\Controllers\Api\V1\EntreprisesController;
+use App\Http\Controllers\Api\V1\EpiController;
 use App\Http\Controllers\Api\V1\EquipesController;
 use App\Http\Controllers\Api\V1\ErreursController;
 use App\Http\Controllers\Api\V1\InterventionsController;
@@ -34,16 +35,16 @@ Route::prefix('v1')->group(function () {
         Route::post('auth/logout', [AuthController::class, 'logout']);
 
         // Sync terrain §16 — le cœur
-        Route::post('interventions/{id}/ops', [SyncController::class, 'ops']);
+        Route::post('interventions/{id}/ops', [SyncController::class, 'ops'])->middleware('epi');
         Route::get('interventions/{id}/changes', [SyncController::class, 'changes']);
 
         // Interventions
         Route::get('interventions', [InterventionsController::class, 'index']);
-        Route::post('interventions', [InterventionsController::class, 'store']);
+        Route::post('interventions', [InterventionsController::class, 'store'])->middleware('epi');
         Route::get('interventions/{id}', [InterventionsController::class, 'show']);
 
         // Médias : upload + téléchargement contrôlé §6.3
-        Route::post('media', [MediaController::class, 'store']);
+        Route::post('media', [MediaController::class, 'store'])->middleware('epi');
         Route::get('media/{id}', [MediaController::class, 'show']);
 
         // Journal interne §14 — remontée des plantages clients
@@ -55,6 +56,14 @@ Route::prefix('v1')->group(function () {
         Route::post('stock/mouvements', [StockController::class, 'mouvement']);
         Route::post('stock/import', [StockController::class, 'import'])
             ->middleware('role:admin,gestionnaire');
+
+        // Photo EPI du matin : statut/envoi pour l'équipe, décision pour la conformité
+        Route::get('epi/statut', [EpiController::class, 'statut']);
+        Route::post('epi', [EpiController::class, 'envoyer'])->middleware('role:chef,technicien');
+        Route::get('epi/jour', [EpiController::class, 'jour'])->middleware('role:admin,conformite');
+        Route::post('epi/delegations', [EpiController::class, 'deleguer'])->middleware('role:admin,conformite,chef');
+        Route::post('epi/{id}/decision', [EpiController::class, 'decision'])->middleware('role:admin,conformite');
+        Route::get('epi/{id}/photo', [EpiController::class, 'photo'])->middleware('role:admin,conformite,chef');
 
         // Conformité terrain §3 (poteaux...) — toute l'entreprise, jamais le chef
         Route::middleware('role:admin,conformite')->group(function () {

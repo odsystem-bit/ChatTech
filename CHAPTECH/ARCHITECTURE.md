@@ -44,11 +44,14 @@ Une seule base de données, chaque table métier a `entreprise_id`. C'est le plu
 - **Rôle `conformite`** (12/10/2026) : gère les poteaux et tout le contrôle terrain sur toutes les équipes. Le **chef d'équipe n'a pas accès aux poteaux** (route `/poteaux` réservée à `admin` et `conformite`, vérifiée côté serveur).
 - Le nom du chef est copié sur l'intervention à sa création, il ne change pas si le chef change plus tard.
 
-## 3 bis. Photo EPI du matin (à concevoir, pas encore codé)
-- Le **chef d'équipe** envoie chaque matin la photo EPI de l'équipe. **Dès l'envoi, tous les membres de l'équipe peuvent utiliser l'APK pour la journée** ; sans photo du jour, l'APK de l'équipe est verrouillé.
-- Pistes : table `epi_journaliers` (entreprise_id, equipe_id, date, photo_id, envoyé par, validé par/le) avec unicité `(equipe_id, date)` ; le serveur expose « l'équipe est-elle débloquée aujourd'hui ? » et refuse les écritures terrain (`ops`, médias) si ce n'est pas le cas, plutôt que de compter sur l'APK seule.
-- Photo stockée comme les autres médias (§8), visible par la conformité par équipe et par jour.
-- Questions ouvertes : voir `PLAN.md` §12 (validation, heure de fin, hors réseau, chef absent).
+## 3 bis. Photo EPI du matin (codé côté serveur et console)
+Règles métier : voir `PLAN.md` §6 bis. Choix techniques :
+- **Tables** : `epi_journaliers` (une ligne par équipe et par jour, unicité `(equipe_id, date)`, statut `en_attente|valide|rejete`, motif, `envoye_le` heure serveur) et `epi_delegations` (technicien autorisé à envoyer un jour donné). Colonne `entreprises.epi_obligatoire` (faux par défaut).
+- **État calculé à la lecture** (`EpiService::statut`) : pas de cron. En attente depuis plus de 30 min = débloquée ; hors 06h-23h (heure `Africa/Porto-Novo`, sans changer `app.timezone`) = bloquée.
+- **Blocage côté serveur** : middleware `epi` (code 423) sur la création de fiche, `ops` et l'envoi de médias, pour chef et technicien seulement. L'APK ne peut donc pas contourner le verrou ; elle doit traiter 423 comme « réessayer plus tard » (file locale).
+- **API** : `GET /epi/statut`, `POST /epi` (chef ou technicien délégué), `GET /epi/jour` + `POST /epi/{id}/decision` + `GET /epi/{id}/photo` (admin, conformité), `POST /epi/delegations` (admin, conformité, chef pour sa propre équipe).
+- Photo sur disque privé `uploads/{entreprise}/epi/{date}/`, servie par un endpoint qui vérifie le droit. À 8h30, la vue du jour marque `a_signaler` toute équipe sans photo ni délégation.
+- Limite connue : la file locale de l'APK et le verrou côté appareil restent à faire.
 
 ## 4. Authentification
 - Fini le code à 4 chiffres et le `9999` en dur : identifiant + mot de passe haché (`password_hash`).

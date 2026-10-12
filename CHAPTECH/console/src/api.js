@@ -79,6 +79,15 @@ export const api = {
     URL.revokeObjectURL(url);
   },
 
+  // Affiche un fichier protégé (photo) dans un nouvel onglet.
+  async ouvrir(chemin) {
+    const reponse = await fetch(`${BASE}${chemin}`, {
+      headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
+    });
+    if (!reponse.ok) throw new ApiErreur(reponse.status, await reponse.json().catch(() => null));
+    window.open(URL.createObjectURL(await reponse.blob()), '_blank');
+  },
+
   login: (identifiant, password) =>
     appel('POST', '/auth/login', { identifiant, password }),
   loginPlateforme: (identifiant, password) =>

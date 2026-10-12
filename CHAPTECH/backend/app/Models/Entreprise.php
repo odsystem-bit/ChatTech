@@ -11,10 +11,12 @@ class Entreprise extends Model
 
     protected $fillable = [
         'nom', 'etat_abonnement', 'fin_abonnement', 'limite_equipes',
+        'epi_obligatoire',
     ];
 
     protected $casts = [
         'fin_abonnement' => 'date',
+        'epi_obligatoire' => 'boolean',
     ];
 
     public function equipes()

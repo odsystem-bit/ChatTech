@@ -5,6 +5,7 @@ import Abonnements from './pages/Abonnements.jsx';
 import Articles from './pages/Articles.jsx';
 import Comptes from './pages/Comptes.jsx';
 import Entreprises from './pages/Entreprises.jsx';
+import Epi from './pages/Epi.jsx';
 import Equipes from './pages/Equipes.jsx';
 import Interventions from './pages/Interventions.jsx';
 import Login from './pages/Login.jsx';
@@ -48,6 +49,9 @@ export default function App() {
           } />
           <Route path="/conformite" element={
             <Protege roles={['admin', 'conformite']}><Poteaux /></Protege>
+          } />
+          <Route path="/epi" element={
+            <Protege roles={['admin', 'conformite']}><Epi /></Protege>
           } />
           <Route path="/comptes" element={
             <Protege roles={['admin']}><Comptes /></Protege>

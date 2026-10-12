@@ -7,6 +7,7 @@ import { useAuth } from '../auth.jsx';
 const NAV = [
   { vers: '/interventions', label: 'Interventions', roles: ['admin', 'gestionnaire', 'conformite'] },
   { vers: '/conformite', label: 'Conformité', roles: ['admin', 'conformite'] },
+  { vers: '/epi', label: 'EPI du jour', roles: ['admin', 'conformite'] },
   { vers: '/stock', label: 'Stock', roles: ['admin', 'gestionnaire'] },
   { vers: '/articles', label: 'Articles', roles: ['admin', 'gestionnaire'] },
   { vers: '/equipes', label: 'Équipes', roles: ['admin'] },

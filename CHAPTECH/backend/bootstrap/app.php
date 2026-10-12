@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'tenant' => \App\Http\Middleware\TenantMiddleware::class,
             'abonnement' => \App\Http\Middleware\AbonnementMiddleware::class,
             'role' => \App\Http\Middleware\RoleMiddleware::class,
+            'epi' => \App\Http\Middleware\ExigeEpiMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

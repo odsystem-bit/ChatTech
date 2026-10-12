@@ -1,6 +1,6 @@
 # CHAPTECH - Plan produit SaaS
 
-Statut (12/10/2026) : **étapes 1 à 5 codées** (fondations, stock par équipe, attribution et déduction, console web, poteaux). Alerte de stock insuffisant faite. Poteaux corrigés : ils relèvent du rôle **Conformité**, pas du chef d'équipe. **Reste** : photo EPI du matin (§6 bis), enrichir la section Conformité, page Supervision, exports d'inventaire, abonnements/Moneroo, Celtiis.
+Statut (12/10/2026) : **étapes 1 à 5 codées** (fondations, stock par équipe, attribution et déduction, console web, poteaux). Alerte de stock insuffisant faite. Poteaux corrigés : ils relèvent du rôle **Conformité**, pas du chef d'équipe. Photo EPI du matin codée côté serveur et console (§6 bis). **Reste** : APK pour l'EPI (envoi, verrou, file locale), dossiers du jour (§6 bis, à concevoir), page Supervision, exports d'inventaire, abonnements/Moneroo, Celtiis.
 Point de départ : l'application actuelle FibreTrack (`../fibretrack`), utilisée par une seule entreprise (TELECOM BTP Services).
 
 ## 1. Vision
@@ -97,10 +97,23 @@ Toutes les tables métier portent `entreprise_id`. Chaque requête est filtrée 
 Un rôle d'entreprise gère **tout ce qui est conformité sur le terrain** : poteaux, photos, respect des règles. Il **voit toutes les équipes de son entreprise**. Le chef d'équipe n'a **pas** accès au suivi des poteaux (correction du 12/10/2026). La section est destinée à s'enrichir.
 
 ### Photo EPI chaque matin
+Codé (backend + console, 12/10/2026). Activable **par entreprise** (`epi_obligatoire`, désactivé par défaut pour ne rien imposer aux entreprises existantes).
+
 - Chaque matin, le **chef d'équipe prend une photo de l'équipe en EPI** et l'envoie depuis l'APK.
-- **Dès l'envoi, toute son équipe est autorisée à utiliser l'APK pour la journée.** Sans photo EPI du jour, l'APK de l'équipe reste verrouillé.
-- La Conformité consulte ces photos (par équipe et par jour) dans la console.
-- Partie **à part**, pas encore codée. Points à trancher avant : voir §12.
+- **La Conformité valide** : l'équipe est débloquée. **Elle peut aussi rejeter, avec un motif obligatoire** : l'équipe reste bloquée et le chef peut renvoyer une photo (le délai de 30 min repart).
+- **Sans décision au bout de 30 minutes, l'équipe se débloque d'elle-même.**
+- **Plus tard, la Conformité peut revoir la photo et révoquer** le déblocage si l'EPI n'est pas respecté.
+- **Le déblocage ne vaut que de 6h à 23h** (heure locale, Africa/Porto-Novo). Hors de cette plage, l'équipe est bloquée.
+- Tant que l'équipe est bloquée, le serveur refuse (code 423) la création de fiche, la synchronisation des opérations et l'envoi de médias. L'APK garde ses opérations en file locale et les renvoie une fois débloquée.
+- **Chef absent** : l'admin ou la Conformité donne le droit d'envoi à un technicien de l'équipe ; le chef peut aussi prévenir à l'avance (avant minuit) en désignant un technicien. Si personne n'a prévenu, **la Conformité voit l'équipe « à signaler » à partir de 8h30** (sans photo ni délégation) et autorise un technicien.
+- **Hors réseau** : internet est nécessaire, mais l'APK met la photo en file locale (avec l'heure de prise de vue) et l'envoie dès que la connexion revient. Le délai de 30 min part de la réception par le serveur.
+- Reste à faire : côté APK (envoi de la photo, verrouillage, file locale, gestion du code 423) et notification poussante à 8h30 (pour l'instant : bandeau dans la console).
+
+### Dossiers du jour (à concevoir)
+- Certains rôles **distribuent les dossiers** ; chaque équipe voit la liste de ses dossiers du jour.
+- **Fin de journée** : les dossiers non terminés ou non clôturés ne disparaissent pas, ils passent à la **date antérieure** (système de dates) ; le lendemain, une nouvelle liste apparaît.
+- L'**admin voit tout**. Les techniciens voient les dossiers **traités** et **non traités** ; les non traités sont en **lecture seule**, et le lendemain ils peuvent être **réattribués à une autre équipe**.
+- Principe : CHAPTECH doit faciliter la vie à tous.
 
 ## 7. Application et interfaces
 - **Console web** pour les **entreprises** (admin, gestionnaire de stock, conformité) et pour le **super-admin** : équipes, comptes, stock, attribution, import, inventaires, suivi des poteaux, rapports, abonnements.
@@ -160,5 +173,6 @@ Chaque étape est livrable séparément et testable avec l'équipe actuelle.
 
 ## 12. Questions ouvertes
 - Questions d'architecture : voir `ARCHITECTURE.md`, section 14.
-- EPI : la photo est-elle validée par la Conformité (acceptée/refusée) ou le simple envoi débloque-t-il ? Déblocage jusqu'à minuit ou heure fixe ? Que faire hors réseau (déblocage local) ? Un technicien seul peut-il envoyer si le chef est absent ?
+- Dossiers du jour : qui les distribue (quel rôle) ? Un dossier est-il l'intervention existante ou un objet distinct (client, adresse...) importé ? Qui réattribue le lendemain (admin seul, ou aussi le chef) ? Un dossier non traité garde-t-il son historique en passant à une autre équipe ?
+- EPI : un chef peut-il re-déclencher l'envoi après une révocation sans limite ? Faut-il une notification poussée (SMS/WhatsApp) à la Conformité à 8h30 en plus du bandeau ?
 - Reporter plus tard : essai gratuit, remise annuelle, période de grâce, Moneroo, Celtiis.

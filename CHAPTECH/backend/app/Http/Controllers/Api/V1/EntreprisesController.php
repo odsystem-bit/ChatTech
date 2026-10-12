@@ -50,6 +50,7 @@ class EntreprisesController extends Controller
             'etat_abonnement' => ['sometimes', Rule::in(['essai', 'actif', 'lecture_seule', 'suspendu'])],
             'fin_abonnement' => 'nullable|date',
             'limite_equipes' => 'sometimes|integer|min:1',
+            'epi_obligatoire' => 'sometimes|boolean',
             // Unique globalement : le login ne demande pas l'entreprise
             'admin_identifiant' => ['required', 'string', 'max:60',
                                     Rule::unique('comptes', 'identifiant')->withoutTrashed()],
@@ -63,6 +64,7 @@ class EntreprisesController extends Controller
                 'etat_abonnement' => $data['etat_abonnement'] ?? 'essai',
                 'fin_abonnement' => $data['fin_abonnement'] ?? null,
                 'limite_equipes' => $data['limite_equipes'] ?? 5,
+                'epi_obligatoire' => $data['epi_obligatoire'] ?? false,
             ]);
 
             $admin = Compte::withoutGlobalScopes()->create([
@@ -95,6 +97,7 @@ class EntreprisesController extends Controller
             'etat_abonnement' => ['sometimes', Rule::in(['essai', 'actif', 'lecture_seule', 'suspendu'])],
             'fin_abonnement' => 'nullable|date',
             'limite_equipes' => 'sometimes|integer|min:1',
+            'epi_obligatoire' => 'sometimes|boolean',
         ]);
 
         $entreprise->update($data);
