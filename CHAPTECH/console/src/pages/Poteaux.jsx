@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { useAuth } from '../auth.jsx';
 import { Bouton, Champ, Select, Tableau, useCharge } from '../components/ui.jsx';
 
 function Carte({ label, valeur }) {
@@ -13,14 +12,11 @@ function Carte({ label, valeur }) {
 }
 
 export default function Poteaux() {
-  const { compte } = useAuth();
   const [debut, setDebut] = useState('');
   const [fin, setFin] = useState('');
   const [equipe, setEquipe] = useState('');
   const [erreurExport, setErreurExport] = useState(null);
   const [export_, setExport] = useState(false);
-
-  const chef = compte.role === 'chef';
 
   const periode = new URLSearchParams();
   if (debut) periode.set('debut', debut);
@@ -33,7 +29,7 @@ export default function Poteaux() {
 
   const lignes = poteaux.data?.lignes ?? [];
 
-  // Le responsable poteaux ne peut pas lister les équipes (route admin) :
+  // La conformité ne peut pas lister les équipes (route admin) :
   // on les déduit des fiches reçues.
   const equipes = useMemo(() => {
     const vues = new Map();
@@ -61,18 +57,15 @@ export default function Poteaux() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Suivi des poteaux</h1>
-      {chef && <p className="text-sm text-slate-400">Vous voyez uniquement votre équipe.</p>}
+      <h1 className="text-2xl font-semibold">Conformité — suivi des poteaux</h1>
 
       <div className="flex flex-wrap items-end gap-4">
         <Champ label="Du" type="date" value={debut} onChange={(e) => setDebut(e.target.value)} />
         <Champ label="Au" type="date" value={fin} onChange={(e) => setFin(e.target.value)} />
-        {!chef && (
-          <Select label="Équipe" value={equipe} onChange={(e) => setEquipe(e.target.value)}>
-            <option value="">Toutes</option>
-            {equipes.map(([id, nom]) => <option key={id} value={id}>{nom}</option>)}
-          </Select>
-        )}
+        <Select label="Équipe" value={equipe} onChange={(e) => setEquipe(e.target.value)}>
+          <option value="">Toutes</option>
+          {equipes.map(([id, nom]) => <option key={id} value={id}>{nom}</option>)}
+        </Select>
         <Bouton onClick={exporter} disabled={export_ || dateInvalide}>
           {export_ ? 'Export…' : 'Télécharger (Excel)'}
         </Bouton>

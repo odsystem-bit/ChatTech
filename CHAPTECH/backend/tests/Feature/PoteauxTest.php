@@ -12,8 +12,8 @@ use Illuminate\Support\Str;
 use Tests\TestCase;
 
 /**
- * Suivi des poteaux §3 : isolation entreprise, règle max(déclaré, GPS),
- * chef limité à son équipe, rôles autorisés.
+ * Conformité §3 (poteaux) : isolation entreprise, règle max(déclaré, GPS),
+ * réservé à admin et conformité (le chef n'y a pas accès).
  */
 class PoteauxTest extends TestCase
 {
@@ -144,24 +144,21 @@ class PoteauxTest extends TestCase
             ->assertStatus(422);
     }
 
-    public function test_un_chef_ne_voit_que_son_equipe_meme_si_il_demande_une_autre(): void
+    public function test_le_chef_d_equipe_n_a_pas_acces_aux_poteaux(): void
     {
         $admin = $this->compte($this->entrepriseA, 'admin');
         $chef = $this->compte($this->entrepriseA, 'chef', $this->equipe1);
         $this->fiche($this->entrepriseA, $this->equipe1, $admin, ['nb_poteaux_implantes' => 1]);
-        $this->fiche($this->entrepriseA, $this->equipe2, $admin, ['nb_poteaux_implantes' => 5]);
 
-        $reponse = $this->withToken($this->creerToken($chef))
-            ->getJson("/api/v1/poteaux?equipe={$this->equipe2->id}");
-
-        $reponse->assertOk();
-        $this->assertSame(1, $reponse->json('totaux.implantes'));
+        $token = $this->creerToken($chef);
+        $this->withToken($token)->getJson('/api/v1/poteaux')->assertStatus(403);
+        $this->withToken($token)->getJson('/api/v1/poteaux/export')->assertStatus(403);
     }
 
-    public function test_le_responsable_poteaux_voit_toute_l_entreprise(): void
+    public function test_la_conformite_voit_toutes_les_equipes_de_son_entreprise(): void
     {
         $admin = $this->compte($this->entrepriseA, 'admin');
-        $resp = $this->compte($this->entrepriseA, 'poteaux');
+        $resp = $this->compte($this->entrepriseA, 'conformite');
         $this->fiche($this->entrepriseA, $this->equipe1, $admin, ['nb_poteaux_implantes' => 1]);
         $this->fiche($this->entrepriseA, $this->equipe2, $admin, ['nb_poteaux_implantes' => 5]);
 

@@ -16,9 +16,8 @@ export default function Login() {
     setErreur(null);
     setChargement(true);
     try {
-      const compte = await login(form.identifiant, form.password);
-      const cible = location.state?.depuis
-        ?? (compte.role === 'super_admin' ? '/entreprises' : '/interventions');
+      await login(form.identifiant, form.password);
+      const cible = location.state?.depuis ?? '/';
       navigate(cible, { replace: true });
     } catch (err) {
       setErreur(err instanceof ApiErreur && err.statut === 401

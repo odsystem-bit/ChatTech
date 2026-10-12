@@ -9,10 +9,9 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 
 /**
- * Suivi des poteaux §3 : implantés / armés / traversés.
- * admin et responsable poteaux : toute l'entreprise (ou une équipe).
- * chef : uniquement SON équipe — le filtre est imposé côté serveur.
- * Règle héritée de FibreTrack : par fiche, on retient le plus grand
+ * Conformité §3 — suivi des poteaux : implantés / armés / traversés.
+ * Réservé à admin et conformité (route) : toute l'entreprise, ou une équipe.
+ * Le chef d'équipe n'y a pas accès. Règle héritée de FibreTrack : par fiche, on retient le plus grand
  * entre le compteur déclaré et le nombre de points GPS correspondants.
  */
 class PoteauxController extends Controller
@@ -65,7 +64,6 @@ class PoteauxController extends Controller
 
     private function lignes(Request $request): array
     {
-        $compte = Tenant::compte();
         $data = $request->validate([
             'equipe' => [
                 'nullable', 'integer',
@@ -82,10 +80,7 @@ class PoteauxController extends Controller
                 ->select('id', 'intervention_id', 'sous_type', 'lat', 'lng'),
         ])->orderBy('date');
 
-        // Un chef ne voit que son équipe, quel que soit le paramètre reçu.
-        if ($compte->role === 'chef') {
-            $query->where('equipe_id', $compte->equipe_id);
-        } elseif (!empty($data['equipe'])) {
+        if (!empty($data['equipe'])) {
             $query->where('equipe_id', $data['equipe']);
         }
         if (!empty($data['debut'])) {

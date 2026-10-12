@@ -40,8 +40,15 @@ Une seule base de données, chaque table métier a `entreprise_id`. C'est le plu
 ## 3. Équipes et rôles
 - Le rôle et l'équipe viennent de la **base**, jamais du téléphone.
 - Un fichier unique de règles `Policy` décrit qui peut faire quoi (la matrice du plan). Chaque route appelle `can($utilisateur, 'action', $ressource)`.
-- Filtrage par équipe : chef et technicien ne voient que `equipe_id = la leur`. Admin et gestionnaire voient toute l'entreprise.
+- Filtrage par équipe : chef et technicien ne voient que `equipe_id = la leur`. Admin, gestionnaire et **conformité** voient toute l'entreprise.
+- **Rôle `conformite`** (12/10/2026) : gère les poteaux et tout le contrôle terrain sur toutes les équipes. Le **chef d'équipe n'a pas accès aux poteaux** (route `/poteaux` réservée à `admin` et `conformite`, vérifiée côté serveur).
 - Le nom du chef est copié sur l'intervention à sa création, il ne change pas si le chef change plus tard.
+
+## 3 bis. Photo EPI du matin (à concevoir, pas encore codé)
+- Le **chef d'équipe** envoie chaque matin la photo EPI de l'équipe. **Dès l'envoi, tous les membres de l'équipe peuvent utiliser l'APK pour la journée** ; sans photo du jour, l'APK de l'équipe est verrouillé.
+- Pistes : table `epi_journaliers` (entreprise_id, equipe_id, date, photo_id, envoyé par, validé par/le) avec unicité `(equipe_id, date)` ; le serveur expose « l'équipe est-elle débloquée aujourd'hui ? » et refuse les écritures terrain (`ops`, médias) si ce n'est pas le cas, plutôt que de compter sur l'APK seule.
+- Photo stockée comme les autres médias (§8), visible par la conformité par équipe et par jour.
+- Questions ouvertes : voir `PLAN.md` §12 (validation, heure de fin, hors réseau, chef absent).
 
 ## 4. Authentification
 - Fini le code à 4 chiffres et le `9999` en dur : identifiant + mot de passe haché (`password_hash`).
@@ -63,7 +70,7 @@ Règles pour qu'aucune quantité ne soit fausse :
 ## 6. Import et export
 - **Import** : fichier au format fixe vers le stock central de l'entreprise, avec aperçu et validation avant application, rapport des lignes en erreur, journalisé.
 - **Sortie / attribution** : le gestionnaire choisit l'équipe et les articles, en un clic ; le stock central diminue, celui de l'équipe augmente.
-- **Export Excel** : inventaire **par équipe** ou **global** (entreprise entière). Liste des poteaux exportable par équipe ou globalement.
+- **Export Excel** : inventaire **par équipe** ou **global** (entreprise entière). Liste des poteaux exportable par équipe ou globalement, **réservée à la conformité et à l'admin**.
 
 ## 7. Interventions et synchronisation
 - Garder le contrôle de conflit actuel (`expected_updated_at`) : deux personnes qui modifient la même fiche ne s'écrasent pas.
@@ -114,7 +121,7 @@ Règles pour qu'aucune quantité ne soit fausse :
 3. Migration de FibreTrack vers l'entreprise n°1.
 4. Stock central, import, attribution aux équipes, déduction automatique.
 5. Console web (entreprise + super-admin).
-6. Poteaux et exports.
+6. Conformité (poteaux, puis photos EPI) et exports.
 7. Moneroo, puis Celtiis.
 
 ## 14. Page super-admin « Supervision »

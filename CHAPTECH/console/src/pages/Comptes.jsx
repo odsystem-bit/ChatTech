@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { useAuth } from '../auth.jsx';
 import { Badge, Bouton, Champ, Select, Tableau, useCharge } from '../components/ui.jsx';
 
-const ROLES = ['admin', 'gestionnaire', 'poteaux', 'chef', 'technicien'];
+const ROLES = ['admin', 'gestionnaire', 'conformite', 'chef', 'technicien'];
 
 export default function Comptes() {
   const { compte: moi } = useAuth();

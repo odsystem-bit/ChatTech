@@ -9,7 +9,7 @@ class Compte extends TenantModel
 {
     use SoftDeletes;
 
-    public const ROLES = ['super_admin', 'admin', 'gestionnaire', 'poteaux', 'chef', 'technicien'];
+    public const ROLES = ['super_admin', 'admin', 'gestionnaire', 'conformite', 'chef', 'technicien'];
 
     protected $fillable = [
         'entreprise_id', 'equipe_id', 'identifiant', 'nom',

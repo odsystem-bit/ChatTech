@@ -27,8 +27,7 @@ function Protege({ roles, children }) {
 
 const ACCUEIL = {
   super_admin: '/entreprises',
-  poteaux: '/poteaux',
-  chef: '/poteaux',
+  conformite: '/conformite',
 };
 
 function Accueil() {
@@ -45,10 +44,10 @@ export default function App() {
         <Route element={<Protege><Layout /></Protege>}>
           <Route path="/" element={<Accueil />} />
           <Route path="/interventions" element={
-            <Protege roles={['admin', 'gestionnaire']}><Interventions /></Protege>
+            <Protege roles={['admin', 'gestionnaire', 'conformite']}><Interventions /></Protege>
           } />
-          <Route path="/poteaux" element={
-            <Protege roles={['admin', 'poteaux', 'chef']}><Poteaux /></Protege>
+          <Route path="/conformite" element={
+            <Protege roles={['admin', 'conformite']}><Poteaux /></Protege>
           } />
           <Route path="/comptes" element={
             <Protege roles={['admin']}><Comptes /></Protege>

@@ -56,8 +56,8 @@ Route::prefix('v1')->group(function () {
         Route::post('stock/import', [StockController::class, 'import'])
             ->middleware('role:admin,gestionnaire');
 
-        // Suivi des poteaux §3 — chef : son équipe uniquement (filtre serveur)
-        Route::middleware('role:admin,poteaux,chef')->group(function () {
+        // Conformité terrain §3 (poteaux...) — toute l'entreprise, jamais le chef
+        Route::middleware('role:admin,conformite')->group(function () {
             Route::get('poteaux', [PoteauxController::class, 'index']);
             Route::get('poteaux/export', [PoteauxController::class, 'export']);
         });

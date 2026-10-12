@@ -1,6 +1,6 @@
 # CHAPTECH - Plan produit SaaS
 
-Statut (11/10/2026) : **étapes 1 à 5 codées** (fondations, stock par équipe, attribution et déduction, console web, suivi des poteaux). **Reste** : alerte de stock insuffisant (TODO dans `StockService`), page Supervision, exports d'inventaire, abonnements/Moneroo, Celtiis.
+Statut (12/10/2026) : **étapes 1 à 5 codées** (fondations, stock par équipe, attribution et déduction, console web, poteaux). Alerte de stock insuffisant faite. Poteaux corrigés : ils relèvent du rôle **Conformité**, pas du chef d'équipe. **Reste** : photo EPI du matin (§6 bis), enrichir la section Conformité, page Supervision, exports d'inventaire, abonnements/Moneroo, Celtiis.
 Point de départ : l'application actuelle FibreTrack (`../fibretrack`), utilisée par une seule entreprise (TELECOM BTP Services).
 
 ## 1. Vision
@@ -13,7 +13,7 @@ Plateforme CHAPTECH (super-admin : nous)
  └── Entreprise (client abonné)
       ├── Admin entreprise
       ├── Gestionnaire de stock (magasinier)
-      ├── Responsable poteaux (implantation / armement)
+      ├── Conformité (poteaux, photos, tout le contrôle terrain — voit toutes les équipes)
       └── Équipe
            ├── Chef d'équipe (gère le matériel de l'équipe)
            └── Techniciens (membres)
@@ -21,7 +21,7 @@ Plateforme CHAPTECH (super-admin : nous)
 
 ## 3. Rôles et droits
 
-| Action | Super-admin | Admin entreprise | Gestionnaire stock | Resp. poteaux | Chef d'équipe | Technicien |
+| Action | Super-admin | Admin entreprise | Gestionnaire stock | Conformité | Chef d'équipe | Technicien |
 |---|---|---|---|---|---|---|
 | Créer / suspendre une entreprise, gérer les abonnements | oui | non | non | non | non | non |
 | Créer des équipes, nommer les chefs, créer des comptes | - | oui | non | non | non | non |
@@ -32,8 +32,10 @@ Plateforme CHAPTECH (super-admin : nous)
 | Attribuer du matériel aux équipes en un clic | - | oui | oui | non | non | non |
 | Suivre la consommation du matériel en temps réel | - | oui | oui | non | son équipe | non |
 | Télécharger l'inventaire d'une équipe | - | oui | oui | non | son équipe | non |
-| Suivre les poteaux implantés / armés / traversés | - | oui | non | oui | son équipe | non |
-| Rapports et exports | - | tous | stock | poteaux | son équipe | non |
+| Suivre les poteaux implantés / armés / traversés | - | oui | non | oui, toutes les équipes | **non** | non |
+| Voir les photos EPI du matin et la conformité terrain | - | oui | non | oui, toutes les équipes | envoie la photo de son équipe | non |
+| Envoyer la photo EPI qui ouvre l'APK de l'équipe | - | - | - | - | oui | non |
+| Rapports et exports | - | tous | stock | conformité (poteaux, EPI) | son équipe (hors poteaux) | non |
 
 Un technicien appartient à **une seule équipe**.
 
@@ -90,8 +92,18 @@ Toutes les tables métier portent `entreprise_id`. Chaque requête est filtrée 
 - Les données ne sont jamais supprimées à l'expiration.
 - Les entreprises **nous contactent** : c'est le super-admin qui crée l'entreprise et la configure la première fois.
 
+## 6 bis. Conformité et photo EPI du matin
+### Rôle Conformité
+Un rôle d'entreprise gère **tout ce qui est conformité sur le terrain** : poteaux, photos, respect des règles. Il **voit toutes les équipes de son entreprise**. Le chef d'équipe n'a **pas** accès au suivi des poteaux (correction du 12/10/2026). La section est destinée à s'enrichir.
+
+### Photo EPI chaque matin
+- Chaque matin, le **chef d'équipe prend une photo de l'équipe en EPI** et l'envoie depuis l'APK.
+- **Dès l'envoi, toute son équipe est autorisée à utiliser l'APK pour la journée.** Sans photo EPI du jour, l'APK de l'équipe reste verrouillé.
+- La Conformité consulte ces photos (par équipe et par jour) dans la console.
+- Partie **à part**, pas encore codée. Points à trancher avant : voir §12.
+
 ## 7. Application et interfaces
-- **Console web** pour les **entreprises** (admin, gestionnaire de stock, responsable poteaux) et pour le **super-admin** : équipes, comptes, stock, attribution, import, inventaires, suivi des poteaux, rapports, abonnements.
+- **Console web** pour les **entreprises** (admin, gestionnaire de stock, conformité) et pour le **super-admin** : équipes, comptes, stock, attribution, import, inventaires, suivi des poteaux, rapports, abonnements.
 - **App Android (APK)** pour les **chefs d'équipe et techniciens** : interventions, photos, GPS, matériel posé. Mise à jour automatique déjà en place.
 - Domaine : on garde `fibretrack.mantota.com` pour l'instant, changement de domaine plus tard (prévoir une URL configurable).
 - Authentification : le code à 4 chiffres est trop faible pour un SaaS. Prévoir identifiant + mot de passe (ou code long) par entreprise.
@@ -122,7 +134,7 @@ Plan : si l'API existe, ajouter un module « Soumission Celtiis » (envoi, statu
 2. **Stock par équipe** et import Excel.
 3. **Attribution du matériel** et déduction automatique.
 4. **Console web** admin.
-5. **Suivi des poteaux** (implantés, armés, traversés) pour le responsable poteaux.
+5. **Conformité** : suivi des poteaux (implantés, armés, traversés) pour le rôle Conformité, puis photos EPI et contrôle terrain (voir §6 bis).
 6. **Abonnements** (limite d'équipes) et facturation.
 7. **Intégration Celtiis**, selon l'accès à leur API.
 8. **Sécurité et production** : sauvegardes, journal d'audit, mots de passe.
@@ -143,7 +155,10 @@ Chaque étape est livrable séparément et testable avec l'équipe actuelle.
 - Celtiis : on prendra contact plus tard.
 - Domaine changé plus tard.
 - Entreprises et super-admin sur le web, chefs d'équipe et techniciens sur l'APK.
+- Les poteaux sont gérés par le rôle **Conformité** (toutes les équipes), jamais par le chef d'équipe.
+- Photo EPI du matin prise par le chef : elle débloque l'APK de toute son équipe pour la journée.
 
 ## 12. Questions ouvertes
 - Questions d'architecture : voir `ARCHITECTURE.md`, section 14.
+- EPI : la photo est-elle validée par la Conformité (acceptée/refusée) ou le simple envoi débloque-t-il ? Déblocage jusqu'à minuit ou heure fixe ? Que faire hors réseau (déblocage local) ? Un technicien seul peut-il envoyer si le chef est absent ?
 - Reporter plus tard : essai gratuit, remise annuelle, période de grâce, Moneroo, Celtiis.
