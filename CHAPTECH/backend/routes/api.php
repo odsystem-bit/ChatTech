@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AbonnementsController;
+use App\Http\Controllers\Api\V1\AlertesStockController;
 use App\Http\Controllers\Api\V1\ArticlesController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ComptesController;
@@ -50,6 +51,7 @@ Route::prefix('v1')->group(function () {
 
         // Stock §5 — journal idempotent + soldes
         Route::get('stock', [StockController::class, 'index']);
+        Route::get('stock/alertes', [AlertesStockController::class, 'index']);
         Route::post('stock/mouvements', [StockController::class, 'mouvement']);
         Route::post('stock/import', [StockController::class, 'import'])
             ->middleware('role:admin,gestionnaire');

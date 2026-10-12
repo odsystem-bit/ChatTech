@@ -40,7 +40,9 @@ start_server() {
         --datadir="$DATADIR" --user="$USER" \
         --port=$PORT --socket="$SOCK" --mysqlx=OFF \
         --pid-file="$PID" --log-error="$LOG" \
-        --bind-address=127.0.0.1 &
+        --bind-address=127.0.0.1 \
+        --performance-schema=OFF --innodb-buffer-pool-size=64M \
+        --innodb-log-buffer-size=8M --max-connections=20 &
     for i in $(seq 1 30); do
         mysqladmin -h127.0.0.1 -P$PORT -uroot ping >/dev/null 2>&1 && break
         sleep 1

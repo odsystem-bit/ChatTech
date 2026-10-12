@@ -17,6 +17,7 @@ export default function Stock() {
     ? `/stock?equipe=${filtre.equipe}`
     : `/stock?central=1`;
   const stocks = useCharge(() => api.get(chemin), [chemin]);
+  const alertes = useCharge(() => api.get('/stock/alertes'));
 
   const [mvt, setMvt] = useState({
     article_id: '', de_type: 'central', vers_type: 'equipe',
@@ -50,6 +51,7 @@ export default function Stock() {
         motif: mvt.motif,
       });
       stocks.recharger();
+      alertes.recharger();
     } catch (err) {
       setErreur(err.corps?.errors
         ? Object.values(err.corps.errors).flat().join(' ')
@@ -64,6 +66,23 @@ export default function Stock() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Stock</h1>
+
+      {alertes.data?.length > 0 && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+          <p className="font-medium text-amber-300">
+            {alertes.data.length} stock{alertes.data.length > 1 ? 's' : ''} négatif{alertes.data.length > 1 ? 's' : ''} à régulariser
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-amber-200">
+            {alertes.data.map((a) => (
+              <li key={a.id}>
+                {a.proprietaire} — {a.article?.code} {a.article?.libelle} :{' '}
+                <span className="font-semibold text-red-400">{a.quantite}</span>
+                {a.article?.unite ? ` ${a.article.unite}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-end gap-3">
         <Select label="Vue" value={filtre.equipe || 'central'}

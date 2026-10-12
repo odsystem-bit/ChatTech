@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AlerteStock;
 use App\Models\Article;
 use App\Models\Intervention;
 use App\Models\MouvementStock;
@@ -74,6 +75,7 @@ class StockService
         if ($stock) {
             $stock->quantite += $delta;
             $stock->save();
+            $solde = $stock->quantite;
         } else {
             Stock::create([
                 'entreprise_id' => $entrepriseId,
@@ -82,11 +84,47 @@ class StockService
                 'proprietaire_id' => $id,
                 'quantite' => $delta,
             ]);
+            $solde = $delta;
         }
 
-        // Stock insuffisant : pas de blocage terrain (§5) mais signalé
-        if (($stock?->quantite ?? $delta) < 0) {
-            // TODO: notification chef/gestionnaire — voir Jobs/Notifier
+        $this->suivreAlerte($articleId, $type, $id, $solde, $entrepriseId);
+    }
+
+    /**
+     * Stock insuffisant §5 : jamais de blocage terrain, mais l'écart est
+     * signalé tant qu'il existe. Une seule alerte ouverte par ligne de stock ;
+     * elle se referme dès que le solde revient à zéro ou plus.
+     * Seuls les stocks réels (équipe, central) sont surveillés : 'exterieur'
+     * et 'intervention' sont des contreparties comptables, négatives par nature.
+     */
+    private function suivreAlerte(int $articleId, string $type, int $id, int $solde, ?int $entrepriseId): void
+    {
+        if (!in_array($type, ['equipe', 'central'], true)) {
+            return;
+        }
+
+        $ouverte = AlerteStock::withoutGlobalScopes()
+            ->where('entreprise_id', $entrepriseId)
+            ->where('article_id', $articleId)
+            ->where('proprietaire_type', $type)
+            ->where('proprietaire_id', $id)
+            ->whereNull('resolue_le');
+
+        if ($solde < 0) {
+            $alerte = $ouverte->first();
+            if ($alerte) {
+                $alerte->update(['quantite' => $solde]);
+            } else {
+                AlerteStock::create([
+                    'entreprise_id' => $entrepriseId,
+                    'article_id' => $articleId,
+                    'proprietaire_type' => $type,
+                    'proprietaire_id' => $id,
+                    'quantite' => $solde,
+                ]);
+            }
+        } else {
+            $ouverte->update(['resolue_le' => now()]);
         }
     }
 
