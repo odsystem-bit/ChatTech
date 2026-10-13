@@ -1,16 +1,16 @@
 {
-  "version": "2.4.1",
-  "buildTime": "2026-10-13T15:45:00Z",
+  "version": "2.5.0",
+  "buildTime": "2026-10-13T17:35:00Z",
   "features": [
+    "Moteur de scan triple technologie ultra-rapide (BarcodeDetector haute fréquence + découpage ZXing 1:1 + OCR Tesseract)",
+    "Reconnaissance optique du texte (OCR) au-dessus des codes-barres pour MAC et SN en cas de code flou ou abîmé",
+    "Extraction exacte et instantanée de MAC 18D6DDF6719E-AE(17) et SN 485754437572231B8 sans inversion ni troncation",
+    "Retour visuel et sonore immédiat en temps réel dès l'ouverture de la caméra",
+    "Passe OCR manuelle ou automatique après 1.4s d'absence de lecture optique",
+    "Support hors-ligne intégral avec modèles Tesseract locaux",
     "Fix opening intervention error: defensive schema defaults for report and form",
     "Per-intervention persistent local storage cache (0ms instant opening without partial data crash)",
-    "Exact barcode format preservation (e.g. 18D6DDF6719E-AE(17) and 485754437572231B8)",
     "Instant 0ms intervention opening (local-first with background sync)",
-    "Instant 0ms new intervention creation",
-    "Optimized mobile touch responsiveness",
-    "Direct native video barcode scanner (BarcodeDetector + ZXing)",
-    "PhotoViewerModal for GPS points & WhatsApp photos on mobile",
-    "PWA install guidance modal",
     "LiteSpeed cache busting headers (.htaccess)"
   ]
 }

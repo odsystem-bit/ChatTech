@@ -702,7 +702,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               <ScannableField
                 label="Adresse MAC (Box / ONT)"
                 value={data.mac}
-                placeholder="Ex: 54:83:3A:4B:2C:1D"
+                placeholder="Ex: 18D6DDF6719E-AE(17)"
                 scanLabel="Scanner MAC"
                 onChange={(v) => update("mac", v)}
                 onScanClick={() => {
@@ -714,7 +714,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               <ScannableField
                 label="SN (Numéro de série ONT)"
                 value={data.sn}
-                placeholder="Ex: ZTEGC8923412 ou HWTC..."
+                placeholder="Ex: 485754437572231B8"
                 scanLabel="Scanner SN"
                 onChange={(v) => {
                   update("sn", v);

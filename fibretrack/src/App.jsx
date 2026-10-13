@@ -102,7 +102,7 @@ export default function App() {
     const id = typeof target === "object" && target !== null ? target.id : target;
     if (!id || openingId) return;
 
-    // 1. Si nous avons l'intervention complète en cache local (0 ms)
+    // 1. Si nous avons l'intervention complète en cache local (0 ms instantané)
     const localFull = getStoredIntervention(id);
     if (localFull) {
       setActiveIntervention(localFull);
@@ -119,7 +119,27 @@ export default function App() {
       return;
     }
 
-    // 2. Première ouverture sur cet appareil : chargement depuis le serveur avec indicateur
+    // 2. Si pas encore en cache complet, mais présent dans la liste chargée (0 ms instantané !)
+    const listItem = typeof target === "object" && target !== null ? target : interventions.find((i) => i.id === id);
+    if (listItem) {
+      const initial = ensureInterventionDefaults(listItem);
+      setActiveIntervention(initial);
+      navigateTo(initial.statut === "termine" ? "report" : "form");
+
+      // Charger les photos et détails complets en tâche de fond sans bloquer l'interface
+      setOpeningId(id);
+      getIntervention(id)
+        .then((fresh) => {
+          if (fresh) {
+            setActiveIntervention(fresh);
+          }
+        })
+        .catch((e) => console.warn("Background fetch failed:", e))
+        .finally(() => setOpeningId(null));
+      return;
+    }
+
+    // 3. Première ouverture inconnue : chargement réseau avec indicateur
     setOpeningId(id);
     try {
       const intervention = await getIntervention(id);
@@ -285,7 +305,7 @@ export default function App() {
               <li key={intv.id}>
                 <button
                   type="button"
-                  onClick={() => openIntervention(intv.id)}
+                  onClick={() => openIntervention(intv)}
                   className="intv-card-btn"
                   disabled={openingId === intv.id}
                 >
