@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ChapTech CelPros</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Entête -->
+    <header class="popup-header">
+      <div class="brand">
+        <div class="logo">⚡</div>
+        <div class="title-group">
+          <h1>ChapTech CelPros</h1>
+          <span class="version">v1.0.0 • Celtiis Fibre</span>
+        </div>
+      </div>
+      <div id="conn-badge" class="badge badge-unknown">Vérification...</div>
+    </header>
+
+    <!-- Contenu Principal -->
+    <main class="popup-body">
+      <!-- Section Statut & Onglet Actif -->
+      <section class="card" id="page-status-card">
+        <div class="card-title">Page courante</div>
+        <div id="page-status-text" class="status-text">Détection de l'onglet actif...</div>
+        <button id="btn-trigger-autofill" class="btn btn-primary" style="margin-top: 8px;" disabled>
+          🚀 Remplir la page active
+        </button>
+      </section>
+
+      <!-- Section Intervention Sélectionnée -->
+      <section class="card" id="active-intervention-card">
+        <div class="card-title-row">
+          <span class="card-title">Intervention active</span>
+          <span id="active-status-badge" class="badge-mini">-</span>
+        </div>
+        <div id="active-client-name" class="active-client">Aucune intervention sélectionnée</div>
+        <div id="active-details" class="active-sub">Sélectionnez une fiche depuis le widget sur la page CelPros.</div>
+      </section>
+
+      <!-- Section Configuration API -->
+      <section class="card">
+        <div class="card-title-row">
+          <span class="card-title">Paramètres ChapTech</span>
+          <button id="btn-test-conn" class="btn-link">Tester</button>
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-api-url">URL de l'API :</label>
+          <input type="text" id="cfg-api-url" class="input" placeholder="https://fibretrack.mantota.com/api/index.php" />
+        </div>
+
+        <div class="form-group">
+          <label for="cfg-api-code">Code technicien / Clé d'accès :</label>
+          <input type="password" id="cfg-api-code" class="input" placeholder="Ex: 9999" />
+        </div>
+
+        <div class="btn-row">
+          <button id="btn-save-cfg" class="btn btn-secondary">💾 Enregistrer les paramètres</button>
+        </div>
+      </section>
+
+      <!-- Liens rapides vers CelPros & FAT Automation -->
+      <section class="quick-links">
+        <div class="links-title">Accès direct aux plateformes :</div>
+        <div class="links-grid">
+          <a href="https://celpros.celtiis.bj/" target="_blank" class="link-item">
+            🌐 CelPros Celtiis
+          </a>
+          <a href="https://fatautomation.celtiis.bj/" target="_blank" class="link-item">
+            🌐 FAT Automation
+          </a>
+          <button id="btn-open-demo" class="link-item link-btn">
+            🧪 Tester la démo locale
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Pied de page -->
+    <footer class="popup-footer">
+      <div id="msg-banner" class="msg-banner" style="display: none;"></div>
+      <small>ChapTech / TELECOM BTP Services • Bénin</small>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

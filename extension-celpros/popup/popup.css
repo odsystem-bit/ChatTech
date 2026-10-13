@@ -1,0 +1,284 @@
+/* Styles pour la Popup de l'extension ChapTech CelPros */
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 340px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #1e293b;
+  background-color: #f8fafc;
+}
+
+.popup-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Entête */
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #ffffff;
+  padding: 12px 14px;
+  border-bottom: 2px solid #0d9488;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+.title-group h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.title-group .version {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 9999px;
+}
+
+.badge-connected {
+  background: #065f46;
+  color: #34d399;
+}
+
+.badge-error {
+  background: #7f1d1d;
+  color: #f87171;
+}
+
+.badge-unknown {
+  background: #334155;
+  color: #94a3b8;
+}
+
+/* Corps */
+.popup-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.card-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.card-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #64748b;
+}
+
+.status-text {
+  font-size: 12px;
+  color: #334155;
+}
+
+.active-client {
+  font-weight: 700;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.active-sub {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.badge-mini {
+  font-size: 10px;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Formulaires */
+.form-group {
+  margin-bottom: 8px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 11px;
+  color: #475569;
+  margin-bottom: 3px;
+  font-weight: 500;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 5px;
+  font-size: 12px;
+  outline: none;
+  background: #f8fafc;
+}
+
+.input:focus {
+  border-color: #0284c7;
+  background: #ffffff;
+}
+
+/* Boutons */
+.btn {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s ease;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.95;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+}
+
+.btn-secondary:hover {
+  background: #e2e8f0;
+}
+
+.btn-link {
+  background: none;
+  border: none;
+  color: #0284c7;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.btn-link:hover {
+  text-decoration: underline;
+}
+
+/* Liens rapides */
+.quick-links {
+  margin-top: 4px;
+}
+
+.links-title {
+  font-size: 11px;
+  color: #64748b;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.links-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.link-item {
+  display: block;
+  text-decoration: none;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: #0f172a;
+  font-weight: 500;
+  font-size: 11px;
+  transition: all 0.15s;
+}
+
+.link-item:hover {
+  border-color: #0284c7;
+  background: #f0f9ff;
+  color: #0284c7;
+}
+
+.link-btn {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Messages et Pied */
+.msg-banner {
+  padding: 6px 10px;
+  border-radius: 5px;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.msg-banner.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.msg-banner.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.popup-footer {
+  background: #f1f5f9;
+  border-top: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 10px;
+}

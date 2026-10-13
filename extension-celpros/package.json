@@ -1,0 +1,20 @@
+{
+  "name": "extension-celpros",
+  "version": "1.0.0",
+  "description": "Extension navigateur d'automatisation et de pré-remplissage des interventions fibre sur CelPros (Celtiis) et FAT Automation",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "icons": "node generate-icons.js"
+  },
+  "keywords": [
+    "celtiis",
+    "celpros",
+    "fatautomation",
+    "fibretrack",
+    "chaptech",
+    "autofill"
+  ],
+  "author": "ChapTech / TELECOM BTP Services",
+  "license": "MIT"
+}

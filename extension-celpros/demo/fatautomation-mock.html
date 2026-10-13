@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Celtiis FAT Automation - Déclaration PBO / Boîtier</title>
+  <style>
+    :root {
+      --primary: #0284c7;
+      --teal: #0d9488;
+      --dark: #0f172a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #f1f5f9;
+      color: #1e293b;
+    }
+    header {
+      background: var(--dark);
+      color: #fff;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 3px solid var(--teal);
+    }
+    .container {
+      max-width: 720px;
+      margin: 30px auto;
+      background: #fff;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+    }
+    h2 {
+      margin-top: 0;
+      color: var(--teal);
+      font-size: 18px;
+      border-bottom: 2px solid #e2e8f0;
+      padding-bottom: 8px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 5px;
+      color: #334155;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.2);
+    }
+    .btn-submit {
+      background: var(--teal);
+      color: #fff;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 6px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      font-size: 15px;
+      margin-top: 10px;
+    }
+    .btn-submit:hover {
+      background: #0f766e;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div><strong>CELTIIS FAT AUTOMATION</strong> • Contrôle PBO &amp; Boîtier</div>
+    <div style="font-size: 12px; color: #94a3b8;">Portail Automatisé</div>
+  </header>
+
+  <div class="container">
+    <h2>Vérification et Déclaration Boîtier FAT / PBO</h2>
+    <form id="fatForm">
+      <div class="form-group">
+        <label for="msan">MSAN / NRO de rattachement</label>
+        <input type="text" id="msan" name="msan" placeholder="Ex: MSAN_AKP_01" />
+      </div>
+
+      <div class="form-group">
+        <label for="fat_ref">Référence FAT / PBO</label>
+        <input type="text" id="fat_ref" name="fat_ref" placeholder="Ex: FAT-04-12" />
+      </div>
+
+      <div class="form-group">
+        <label for="port">Numéro de Port raccordé</label>
+        <input type="text" id="port" name="port" placeholder="Ex: Port 3 ou 3" />
+      </div>
+
+      <div class="form-group">
+        <label for="ports_disponibles">Ports libres / disponibles</label>
+        <input type="text" id="ports_disponibles" name="ports_disponibles" placeholder="Ex: Port 1, Port 4, Port 5" />
+      </div>
+
+      <div class="form-group">
+        <label for="puissance_fat">Mesure Puissance Optique FAT (dBm)</label>
+        <input type="number" step="0.01" id="puissance_fat" name="puissance_fat" placeholder="Ex: -18.5" />
+      </div>
+
+      <div class="form-group">
+        <label for="etat">État PON</label>
+        <select id="etat" name="etat">
+          <option value="PON">PON</option>
+          <option value="Cuivre">Cuivre</option>
+        </select>
+      </div>
+
+      <button type="button" class="btn-submit" onclick="alert('Données FAT validées !');">
+        Valider la déclaration FAT
+      </button>
+    </form>
+  </div>
+
+  <!-- Intégration autonome pour test local et via popup -->
+  <script src="../content/field-mapping.js"></script>
+  <script src="../content/form-filler.js"></script>
+  <script src="../content/ui-widget.js"></script>
+  <script src="../content/content.js"></script>
+  <link rel="stylesheet" href="../content/content.css" />
+</body>
+</html>

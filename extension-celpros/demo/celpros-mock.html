@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Celtiis CelPros - Simulation Intervention Fibre #1042</title>
+  <style>
+    :root {
+      --celtiis-primary: #005a9c;
+      --celtiis-teal: #00a88f;
+      --celtiis-dark: #1b2a47;
+      --celtiis-gray: #f4f6f9;
+      --border-color: #d1d5db;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--celtiis-gray);
+      color: #333;
+    }
+    header.celpros-topbar {
+      background-color: var(--celtiis-dark);
+      color: #fff;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 3px solid var(--celtiis-teal);
+    }
+    .brand-title {
+      font-size: 18px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .badge-celtiis {
+      background-color: var(--celtiis-teal);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: normal;
+    }
+    .container {
+      max-width: 1020px;
+      margin: 24px auto;
+      background: #fff;
+      padding: 24px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    h2 {
+      margin-top: 0;
+      color: var(--celtiis-primary);
+      border-bottom: 2px solid #e5e7eb;
+      padding-bottom: 8px;
+      font-size: 20px;
+    }
+    .form-section {
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--celtiis-dark);
+      margin-bottom: 12px;
+      background: #f8fafc;
+      padding: 8px 12px;
+      border-left: 4px solid var(--celtiis-teal);
+      border-radius: 0 4px 4px 0;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 12px;
+    }
+    .col {
+      flex: 1;
+      min-width: 220px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      color: #4b5563;
+    }
+    input[type="text"], input[type="number"], select, textarea {
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      font-size: 13px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: var(--celtiis-primary);
+      box-shadow: 0 0 0 3px rgba(0, 90, 156, 0.15);
+    }
+    .form-check {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .form-check input {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+    .event-log-box {
+      margin-top: 24px;
+      background: #0f172a;
+      color: #38bdf8;
+      padding: 14px;
+      border-radius: 6px;
+      font-family: monospace;
+      font-size: 12px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+    .log-title {
+      font-weight: bold;
+      color: #94a3b8;
+      margin-bottom: 6px;
+    }
+    .btn-submit {
+      background-color: var(--celtiis-primary);
+      color: #fff;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 6px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      float: right;
+    }
+    .btn-submit:hover {
+      background-color: #004578;
+    }
+  </style>
+</head>
+<body>
+  <header class="celpros-topbar">
+    <div class="brand-title">
+      <span>CELTIIS CELPROS</span>
+      <span class="badge-celtiis">Portail Technicien Fibre</span>
+    </div>
+    <div>Intervention #1042 • Raccordement FTTH</div>
+  </header>
+
+  <div class="container">
+    <h2>Formulaire d'Installation Fibre - CelPros</h2>
+    <p style="color: #64748b; font-size: 13px;">
+      Cette page reproduit la structure exacte des formulaires JHipster / Angular de CelPros pour vérifier le pré-remplissage automatique depuis l'extension ChapTech.
+    </p>
+
+    <form id="celprosForm">
+      <!-- 1. IDENTIFICATION CLIENT -->
+      <div class="form-section">
+        <div class="section-title">1. Informations Abonné / Client</div>
+        <div class="row">
+          <div class="col">
+            <label for="field_nomClient">Nom du client *</label>
+            <input type="text" id="field_nomClient" name="nomClient" formcontrolname="nomClient" placeholder="Ex: Marc DOSSOU" required />
+          </div>
+          <div class="col">
+            <label for="field_adresse">Adresse / Zone *</label>
+            <input type="text" id="field_adresse" name="adresse" formcontrolname="adresse" placeholder="Ex: Akpakpa, Cotonou" required />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_telephone">Téléphone ligne</label>
+            <input type="text" id="field_telephone" name="telephone" formcontrolname="telephone" placeholder="Ex: 21300000" />
+          </div>
+          <div class="col">
+            <label for="field_mobile">Mobile / Contact *</label>
+            <input type="text" id="field_mobile" name="mobile" formcontrolname="mobile" placeholder="Ex: 0197000000" required />
+          </div>
+          <div class="col">
+            <label for="field_offre">Offre souscrite *</label>
+            <select id="field_offre" name="offre" formcontrolname="offre">
+              <option value="">-- Sélectionner l'offre --</option>
+              <option value="Fibre Pro">Fibre Pro</option>
+              <option value="Pro Max">Pro Max</option>
+              <option value="Pro Mega">Pro Mega</option>
+              <option value="Office Max">Office Max</option>
+              <option value="Office Mega">Office Mega</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. RÉSEAU & FAT/PBO -->
+      <div class="form-section">
+        <div class="section-title">2. Réseau &amp; Raccordement FAT / PBO</div>
+        <div class="row">
+          <div class="col">
+            <label for="field_etat">État Réseau (PON) *</label>
+            <select id="field_etat" name="etat" formcontrolname="etat">
+              <option value="PON">PON</option>
+              <option value="Cuivre">Cuivre</option>
+              <option value="Autre">Autre</option>
+            </select>
+          </div>
+          <div class="col">
+            <label for="field_msan">MSAN / OLT *</label>
+            <input type="text" id="field_msan" name="msan" formcontrolname="msan" placeholder="Ex: MSAN_AKP_01" />
+          </div>
+          <div class="col">
+            <label for="field_fat">Référence FAT / PBO *</label>
+            <input type="text" id="field_fat" name="fat" formcontrolname="fat" placeholder="Ex: FAT-04-12" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_port">Port raccordé *</label>
+            <input type="text" id="field_port" name="port" formcontrolname="port" placeholder="Ex: 3" />
+          </div>
+          <div class="col">
+            <label for="field_portDisponible">Ports disponibles</label>
+            <input type="text" id="field_portDisponible" name="portsDisponibles" formcontrolname="portsDisponibles" placeholder="Ex: Port 1, Port 4, Port 5" />
+          </div>
+          <div class="col">
+            <label for="field_puissanceFat">Puissance FAT (dBm) *</label>
+            <input type="number" step="0.01" id="field_puissanceFat" name="puissanceFat" formcontrolname="puissanceFat" placeholder="Ex: -18.5" />
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. CÂBLAGE & MESURES -->
+      <div class="form-section">
+        <div class="section-title">3. Câblage &amp; Poteaux</div>
+        <div class="row">
+          <div class="col">
+            <label for="field_typeCable">Type de câble *</label>
+            <input type="text" id="field_typeCable" name="typeCable" formcontrolname="typeCable" placeholder="Drop 1FO" />
+          </div>
+          <div class="col">
+            <label for="field_depart">Départ (m)</label>
+            <input type="number" id="field_depart" name="depart" formcontrolname="depart" />
+          </div>
+          <div class="col">
+            <label for="field_arrivee">Arrivée (m)</label>
+            <input type="number" id="field_arrivee" name="arrivee" formcontrolname="arrivee" />
+          </div>
+          <div class="col">
+            <label for="field_lineaire">Linéaire total (m) *</label>
+            <input type="number" id="field_lineaire" name="lineaire" formcontrolname="lineaire" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_poteauxTraverses">Poteaux traversés</label>
+            <input type="number" id="field_poteauxTraverses" name="nbPoteauxTraverses" formcontrolname="nbPoteauxTraverses" />
+          </div>
+          <div class="col">
+            <label for="field_poteauxImplantes">Poteaux implantés</label>
+            <input type="number" id="field_poteauxImplantes" name="nbPoteauxImplantes" formcontrolname="nbPoteauxImplantes" />
+          </div>
+          <div class="col">
+            <label for="field_poteauxArmes">Poteaux armés</label>
+            <input type="number" id="field_poteauxArmes" name="nbPoteauxArmes" formcontrolname="nbPoteauxArmes" />
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. MESURES PTO & MATÉRIEL CLIENT -->
+      <div class="form-section">
+        <div class="section-title">4. Matériel &amp; Mesure Client</div>
+        <div class="row">
+          <div class="col">
+            <label for="field_puissancePto">Puissance PTO (dBm) *</label>
+            <input type="number" step="0.01" id="field_puissancePto" name="puissancePto" formcontrolname="puissancePto" placeholder="Ex: -19.2" />
+          </div>
+          <div class="col">
+            <label for="field_ptoQte">Quantité PTO</label>
+            <input type="number" id="field_ptoQte" name="ptoQte" formcontrolname="ptoQte" value="1" />
+          </div>
+          <div class="col">
+            <label for="field_emplacementOnt">Emplacement ONT / Box</label>
+            <input type="text" id="field_emplacementOnt" name="emplacementOnt" formcontrolname="emplacementOnt" placeholder="Ex: Salon" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_mac">Adresse MAC ONT</label>
+            <input type="text" id="field_mac" name="mac" formcontrolname="mac" placeholder="Ex: 48:57:02:AA:BB:CC" />
+          </div>
+          <div class="col">
+            <label for="field_sn">Numéro de série ONT (SN) *</label>
+            <input type="text" id="field_sn" name="sn" formcontrolname="sn" placeholder="Ex: ALCLB1234567" />
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. PV DE CONFORMITÉ -->
+      <div class="form-section">
+        <div class="section-title">5. Contrôles &amp; Validation du Service</div>
+        <div class="row">
+          <div class="col">
+            <label class="form-check">
+              <input type="checkbox" id="field_travauxConformes" name="travauxConformes" formcontrolname="travauxConformes" />
+              <span>Travaux conformes</span>
+            </label>
+            <label class="form-check">
+              <input type="checkbox" id="field_emplacementValide" name="emplacementValide" formcontrolname="emplacementValide" />
+              <span>Emplacement validé</span>
+            </label>
+            <label class="form-check">
+              <input type="checkbox" id="field_travailPropre" name="travailPropre" formcontrolname="travailPropre" />
+              <span>Travail propre</span>
+            </label>
+          </div>
+          <div class="col">
+            <label class="form-check">
+              <input type="checkbox" id="field_serviceTeste" name="serviceTeste" formcontrolname="serviceTeste" />
+              <span>Service testé</span>
+            </label>
+            <label class="form-check">
+              <input type="checkbox" id="field_serviceFonctionne" name="serviceFonctionne" formcontrolname="serviceFonctionne" />
+              <span>Service fonctionne (Internet OK)</span>
+            </label>
+            <label class="form-check">
+              <input type="checkbox" id="field_explicationsDonnees" name="explicationsDonnees" formcontrolname="explicationsDonnees" />
+              <span>Explications données au client</span>
+            </label>
+          </div>
+          <div class="col">
+            <label for="field_qualite">Qualité globale</label>
+            <select id="field_qualite" name="qualite" formcontrolname="qualite">
+              <option value="Très satisfait">Très satisfait</option>
+              <option value="Satisfait">Satisfait</option>
+              <option value="Peu satisfait">Peu satisfait</option>
+              <option value="Insatisfait">Insatisfait</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_remarques">Remarque libre / Observations</label>
+            <textarea id="field_remarques" name="remarques" formcontrolname="remarques" rows="2"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <div style="overflow: hidden; margin-top: 16px;">
+        <button type="button" class="btn-submit" onclick="alert('Formulaire validé avec succès !');">
+          💾 Enregistrer sur CelPros
+        </button>
+      </div>
+    </form>
+
+    <!-- Journal d'événements réactifs pour vérification -->
+    <div class="event-log-box">
+      <div class="log-title">⚡ Journal des événements réactifs reçus (input / change / blur) :</div>
+      <div id="eventLogs">En attente de saisie ou d'autofill...</div>
+    </div>
+  </div>
+
+  <script>
+    // Écouteur pour tracer les événements reçus (prouve que les frameworks Angular/React réagissent)
+    const logBox = document.getElementById('eventLogs');
+    let eventCount = 0;
+    function logEvent(e) {
+      eventCount++;
+      const id = e.target.id || e.target.name || e.target.tagName;
+      const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
+      const line = `[#${eventCount}] Événement '${e.type}' sur ${id} -> "${val}"`;
+      const p = document.createElement('div');
+      p.textContent = line;
+      logBox.prepend(p);
+    }
+
+    const form = document.getElementById('celprosForm');
+    form.addEventListener('input', logEvent, true);
+    form.addEventListener('change', logEvent, true);
+  </script>
+
+  <!-- Script d'inclusion autonome pour test hors-extension directe et via popup -->
+  <script src="../content/field-mapping.js"></script>
+  <script src="../content/form-filler.js"></script>
+  <script src="../content/ui-widget.js"></script>
+  <script src="../content/content.js"></script>
+  <link rel="stylesheet" href="../content/content.css" />
+</body>
+</html>

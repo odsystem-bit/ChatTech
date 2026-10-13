@@ -1,0 +1,610 @@
+/* ChapTech CelPros Extension - Content Script Styles */
+
+/* 1. Surbrillance des champs remplis dans les formulaires de CelPros */
+.celpros-filled-highlight {
+  outline: 2px solid #10b981 !important;
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.45) !important;
+  background-color: #ecfdf5 !important;
+  transition: all 0.25s ease-in-out !important;
+}
+
+/* 2. Racine du conteneur du widget flottant */
+.chaptech-widget-container {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 999999;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #1e293b;
+  pointer-events: auto;
+}
+
+/* 3. Bouton Flottant Réduit (Pill) */
+.chaptech-widget-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+  color: #ffffff;
+  padding: 10px 16px;
+  border-radius: 9999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(13, 148, 136, 0.4);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chaptech-widget-pill:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+
+.pill-icon {
+  font-size: 16px;
+}
+
+.pill-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid #ffffff;
+}
+
+/* 4. Panneau Déplié */
+.chaptech-widget-panel {
+  display: flex;
+  flex-direction: column;
+  width: 350px;
+  max-width: calc(100vw - 32px);
+  max-height: 84vh;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2), 0 1px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  overflow: hidden;
+  animation: chaptechSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes chaptechSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 5. Entête du Panneau */
+.chaptech-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  color: #ffffff;
+  padding: 12px 14px;
+  border-bottom: 2px solid #0d9488;
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+.header-title-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.header-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #ffffff;
+}
+
+.header-subtitle {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-btn {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #ffffff;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.header-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Pastille statut API */
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 3px 7px;
+  border-radius: 9999px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.status-connected {
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.status-error {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.status-loading {
+  background: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+  animation: pulse 1s infinite;
+}
+
+.status-unknown {
+  background: #94a3b8;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+/* 6. Corps du Panneau */
+.chaptech-panel-body {
+  padding: 14px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chaptech-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.section-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 12px;
+  color: #334155;
+}
+
+.btn-text-action {
+  background: none;
+  border: none;
+  color: #0284c7;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 4px;
+}
+
+.btn-text-action:hover {
+  text-decoration: underline;
+}
+
+.chaptech-input,
+.chaptech-select,
+.chaptech-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #1e293b;
+  background-color: #f8fafc;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.chaptech-input:focus,
+.chaptech-select:focus,
+.chaptech-textarea:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+  background-color: #ffffff;
+}
+
+/* 7. Carte Résumé Intervention */
+.chaptech-card {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-header-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 6px;
+  font-size: 12px;
+}
+
+.card-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  font-size: 11px;
+}
+
+.card-cell {
+  display: flex;
+  flex-direction: column;
+}
+
+.cell-label {
+  color: #64748b;
+  font-size: 10px;
+}
+
+.cell-val {
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 8. Bouton Principal de Remplissage */
+.chaptech-actions-box {
+  display: flex;
+  flex-direction: column;
+}
+
+.chaptech-btn-primary {
+  background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+  color: #ffffff;
+  border: none;
+  padding: 11px 14px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(5, 150, 105, 0.3);
+  transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+
+.chaptech-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(5, 150, 105, 0.4);
+}
+
+.chaptech-btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 9. Bannières de résultat */
+.chaptech-result-banner {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.chaptech-result-banner.success {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.chaptech-result-banner.warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+/* 10. Boutons d'outils secondaires */
+.chaptech-tools-row {
+  display: flex;
+  gap: 6px;
+}
+
+.chaptech-btn-sub {
+  flex: 1;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  padding: 6px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.chaptech-btn-sub:hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+.chaptech-btn-link {
+  background: none;
+  border: none;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px;
+}
+
+.chaptech-btn-link:hover {
+  text-decoration: underline;
+}
+
+/* 11. Tiroir d'importation JSON */
+.chaptech-drawer {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.drawer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* 12. Accordéon inspection des champs */
+.chaptech-details-accordion {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 8px;
+}
+
+.accordion-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+
+.accordion-content {
+  padding-top: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.fields-breakdown {
+  font-size: 11px;
+}
+
+.breakdown-summary {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #334155;
+}
+
+.breakdown-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.breakdown-item {
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: #f1f5f9;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-cat {
+  font-size: 9px;
+  background: #0284c7;
+  color: #ffffff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.breakdown-val {
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.breakdown-id {
+  color: #94a3b8;
+  font-size: 10px;
+}
+
+.breakdown-unmatched {
+  margin-top: 6px;
+  font-size: 10px;
+  color: #64748b;
+}
+
+/* 13. Pied de page du widget */
+.chaptech-panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
+  padding: 8px 12px;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.footer-safety {
+  color: #059669;
+  font-weight: 600;
+}
+
+/* 14. Toasts de notification */
+.chaptech-toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.chaptech-toast {
+  pointer-events: auto;
+  background: #1e293b;
+  color: #ffffff;
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  font-size: 12px;
+  animation: chaptechToastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 320px;
+}
+
+.toast-success {
+  background: #065f46;
+  border-left: 4px solid #10b981;
+}
+
+.toast-error {
+  background: #991b1b;
+  border-left: 4px solid #ef4444;
+}
+
+.toast-warning {
+  background: #92400e;
+  border-left: 4px solid #f59e0b;
+}
+
+.toast-info {
+  background: #1e293b;
+  border-left: 4px solid #0284c7;
+}
+
+.toast-fadeout {
+  opacity: 0;
+  transform: translateY(-8px);
+  transition: all 0.3s ease;
+}
+
+@keyframes chaptechToastIn {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 15. Adaptabilité mobile / Kiwi Browser (écrans tactiles étroits) */
+@media (max-width: 480px) {
+  .chaptech-widget-container {
+    bottom: 12px;
+    right: 12px;
+  }
+
+  .chaptech-widget-panel {
+    width: calc(100vw - 24px);
+    max-height: 86vh;
+    border-radius: 12px;
+  }
+
+  .chaptech-toast-container {
+    top: 10px;
+    right: 10px;
+    left: 10px;
+  }
+
+  .chaptech-toast {
+    max-width: 100%;
+  }
+
+  .card-grid {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .chaptech-tools-row {
+    flex-wrap: wrap;
+  }
+
+  .chaptech-btn-sub {
+    min-width: calc(50% - 6px);
+  }
+}
