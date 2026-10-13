@@ -1,13 +1,14 @@
 {
-  "version": "2.3.0",
-  "buildTime": "2026-10-13T14:26:00Z",
+  "version": "2.4.0",
+  "buildTime": "2026-10-13T14:45:00Z",
   "features": [
-    "Native hardware-accelerated video barcode scanner for ONT MAC & SN",
-    "Dual-engine decoding (native BarcodeDetector + ZXing MultiFormat fallback)",
-    "Torch/flash toggle and multi-camera switcher",
-    "Instant 0ms local auto-save",
+    "Exact barcode format preservation (e.g. 18D6DDF6719E-AE(17) and 485754437572231B8)",
+    "Instant 0ms intervention opening (local-first with background sync)",
+    "Instant 0ms new intervention creation",
+    "Optimized mobile touch responsiveness",
+    "Direct native video barcode scanner (BarcodeDetector + ZXing)",
     "PhotoViewerModal for GPS points & WhatsApp photos on mobile",
-    "PWA install button for Mobile & Desktop PC",
+    "PWA install guidance modal",
     "LiteSpeed cache busting headers (.htaccess)"
   ]
 }

@@ -26,7 +26,7 @@ async function apiGet(action) {
 // Cache local pour fonctionnement hors-ligne
 const CACHE_KEY = "fibretrack_interventions_cache";
 
-function getCached() {
+export function getCached() {
   try {
     return JSON.parse(localStorage.getItem(CACHE_KEY) || "[]");
   } catch {
