@@ -238,6 +238,10 @@
           if (res && res.ok && res.data) {
             if (res.data.activeIntervention) {
               this.setSelectedIntervention(res.data.activeIntervention, false);
+              // Rafraîchir systématiquement les détails réels complets pour charger points_gps, materiel_pose, photos
+              if (res.data.activeIntervention.id) {
+                this.onInterventionChange(res.data.activeIntervention.id);
+              }
             }
           }
         });
@@ -245,57 +249,9 @@
         // Charger la liste des interventions depuis l'API
         this.fetchInterventions();
       } else {
-        // Mode autonome hors-extension (test direct du fichier HTML)
-        this.setApiStatus("connected", "Mode démo locale");
-        this.interventions = [
-          {
-            id: "demo-intervention-001",
-            nom_client: "KOUASSI Jean-Baptiste",
-            nom_technicien: "Davy H.",
-            nom_equipe: "TELECOM BTP Services",
-            adresse_zone: "Haie Vive, Cotonou",
-            mobile: "0197123456",
-            telephone_ligne: "21301234",
-            offre_souscrite: "Fibre Pro",
-            etat: "PON",
-            msan: "MSAN_COTONOU_02",
-            fat_ref: "FAT-HV-07",
-            port: "4",
-            ports_disponibles: "Port 1, Port 2, Port 8",
-            port_disponible: 3,
-            puissance_fat_dbm: -18.45,
-            puissance_pto_dbm: -19.8,
-            type_cable: "Drop 1FO",
-            depart_m: 1000,
-            arrivee_m: 1150,
-            lineaire_m: 150,
-            nb_poteaux_traverses: 3,
-            nb_poteaux_implantes: 1,
-            nb_poteaux_armes: 2,
-            pto_qte: 1,
-            repeteur_wifi_qte: 0,
-            emplacement_ont: "Salon",
-            mac: "48:57:02:11:22:33",
-            sn: "ALCLB998877",
-            travaux_conformes: true,
-            emplacement_valide: true,
-            travail_propre: true,
-            service_teste: true,
-            service_fonctionne: true,
-            explications_donnees: true,
-            qualite: "Très satisfait",
-            delais: "Satisfait",
-            professionnalisme: "Satisfait",
-            remarque_libre: "Installation rapide et propre",
-            points_gps: [
-              { type: "Poteau", numero: 1, lat: 6.3551, lng: 2.411 },
-              { type: "Abonné", numero: 1, lat: 6.356, lng: 2.4125 },
-            ],
-            whatsapp_photos: [{ id: "p1" }, { id: "p2" }],
-          },
-        ];
-        this.renderInterventionOptions();
-        this.setSelectedIntervention(this.interventions[0], false);
+        // Mode autonome hors-extension (test direct du fichier HTML / démo)
+        // Charger directement les données réelles depuis l'API FibreTrack (CORS activé)
+        this.fetchInterventions();
       }
     }
 
@@ -342,13 +298,56 @@
           if (select) select.disabled = false;
           if (res && res.ok && Array.isArray(res.data)) {
             this.interventions = res.data;
-            this.setApiStatus("connected", `${res.data.length} fiches`);
+            this.setApiStatus("connected", `${res.data.length} fiches réelles`);
             this.renderInterventionOptions();
+            this.tryAutoMatchInterventionFromPage();
           } else {
             this.setApiStatus("error", "Erreur connexion");
-            this.showToast(`⚠️ Impossible de joindre l'API ChapTech: ${res?.error || "Inconnu"}`, "error");
+            this.showToast(`⚠️ Impossible de joindre l'API FibreTrack: ${res?.error || "Inconnu"}`, "error");
           }
         });
+      } else {
+        // Mode autonome / hors-extension (direct fetch via API FibreTrack avec CORS)
+        try {
+          const res = await fetch("https://fibretrack.mantota.com/api/index.php?action=interventions_list_light", {
+            headers: { "X-User-Code": "9999" },
+          });
+          const data = await res.json();
+          if (select) select.disabled = false;
+          if (Array.isArray(data)) {
+            this.interventions = data;
+            this.setApiStatus("connected", `${data.length} fiches réelles`);
+            this.renderInterventionOptions();
+            if (!this.selectedIntervention && this.interventions.length > 0) {
+              this.onInterventionChange(this.interventions[0].id);
+            }
+          } else {
+            throw new Error(data.error || "Réponse invalide");
+          }
+        } catch (err) {
+          if (select) select.disabled = false;
+          this.setApiStatus("error", "Erreur connexion");
+          this.showToast(`⚠️ Impossible de joindre l'API FibreTrack: ${err.message}`, "error");
+        }
+      }
+    }
+
+    tryAutoMatchInterventionFromPage() {
+      if (this.selectedIntervention || !this.interventions || !this.interventions.length) return;
+      const text = (document.body?.innerText || "").toLowerCase();
+      for (const item of this.interventions) {
+        if (item.telephone_ligne && item.telephone_ligne.trim().length >= 6 && text.includes(item.telephone_ligne.trim().toLowerCase())) {
+          this.onInterventionChange(item.id);
+          return;
+        }
+        if (item.mobile && item.mobile.trim().length >= 8 && text.includes(item.mobile.trim().toLowerCase())) {
+          this.onInterventionChange(item.id);
+          return;
+        }
+        if (item.fat_ref && item.fat_ref.trim().length >= 4 && text.includes(item.fat_ref.trim().toLowerCase())) {
+          this.onInterventionChange(item.id);
+          return;
+        }
       }
     }
 
@@ -386,14 +385,14 @@
         return;
       }
 
-      this.showToast("Chargement des détails...", "info", 1500);
+      this.showToast("Chargement des détails réels...", "info", 1500);
 
       // Récupérer les détails complets via background service worker
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({ action: "FETCH_INTERVENTION_DETAILS", payload: { id } }, (res) => {
           if (res && res.ok && res.data) {
             this.setSelectedIntervention(res.data, true);
-            this.showToast(`Fiche chargée : <strong>${res.data.nom_client}</strong>`, "success");
+            this.showToast(`Fiche réelle chargée : <strong>${res.data.nom_client}</strong>`, "success");
           } else {
             // En cas d'échec de fetch détaillé, chercher dans la liste locale light
             const light = this.interventions.find((i) => i.id === id);
@@ -403,10 +402,29 @@
           }
         });
       } else {
-        const item = this.interventions.find((i) => i.id === id);
-        if (item) {
-          this.setSelectedIntervention(item, false);
-          this.showToast(`Fiche chargée : <strong>${item.nom_client}</strong>`, "success");
+        // Mode autonome / hors-extension (direct fetch via API FibreTrack avec CORS)
+        try {
+          const res = await fetch("https://fibretrack.mantota.com/api/index.php?action=intervention_get", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-User-Code": "9999",
+            },
+            body: JSON.stringify({ id: String(id) }),
+          });
+          const item = await res.json();
+          if (item && item.id) {
+            this.setSelectedIntervention(item, false);
+            this.showToast(`Fiche réelle chargée : <strong>${item.nom_client}</strong>`, "success");
+          } else {
+            throw new Error(item.error || "Fiche introuvable");
+          }
+        } catch (err) {
+          const light = this.interventions.find((i) => i.id === id);
+          if (light) {
+            this.setSelectedIntervention(light, false);
+          }
+          this.showToast(`⚠️ Erreur chargement détails réels: ${err.message}`, "error");
         }
       }
     }
@@ -418,15 +436,14 @@
         return;
       }
 
-      // Éviter le re-traitement en boucle si les données sont déjà actives
-      if (this.selectedIntervention && this.selectedIntervention.id === data.id) {
-        this.selectedIntervention = data;
-        this.updateSummaryCard();
-        return;
-      }
-
       this.selectedIntervention = data;
       this.updateSummaryCard();
+
+      // Synchroniser visuellement la sélection dans le <select>
+      const select = document.getElementById("chaptech-intervention-select");
+      if (select && data.id && select.value !== data.id) {
+        select.value = data.id;
+      }
 
       // Sauvegarder dans background pour persistance entre onglets uniquement si explicitement demandé
       if (syncToBackground && typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
@@ -452,12 +469,14 @@
 
       document.getElementById("card-client-name").textContent = d.nom_client || "Client Inconnu";
       document.getElementById("card-status").textContent = d.statut === "termine" ? "✅ Terminé" : "⏳ En cours";
-      document.getElementById("card-phone").textContent = d.mobile || d.telephone_ligne || "N/A";
-      document.getElementById("card-zone").textContent = d.adresse_zone || "N/A";
-      document.getElementById("card-fat").textContent = d.fat_ref ? `${d.fat_ref} (${d.msan || "MSAN"})` : "N/A";
-      document.getElementById("card-port").textContent = d.port ? `Port ${d.port}` : "N/A";
-      document.getElementById("card-power").textContent = `${d.puissance_fat_dbm ?? "-"} / ${d.puissance_pto_dbm ?? "-"} dBm`;
-      document.getElementById("card-sn").textContent = d.sn || d.ont_sn || "N/A";
+      document.getElementById("card-phone").textContent = d.mobile || d.telephone_ligne || "-";
+      document.getElementById("card-zone").textContent = d.adresse_zone || "-";
+      document.getElementById("card-fat").textContent = d.fat_ref ? `${d.fat_ref} (${d.msan || "MSAN"})` : "-";
+      document.getElementById("card-port").textContent = d.port ? `Port ${d.port}` : "-";
+      const fatPow = d.puissance_fat_dbm && Number(d.puissance_fat_dbm) !== 0 ? `${d.puissance_fat_dbm} dBm` : "-";
+      const ptoPow = d.puissance_pto_dbm && Number(d.puissance_pto_dbm) !== 0 ? `${d.puissance_pto_dbm} dBm` : "-";
+      document.getElementById("card-power").textContent = `${fatPow} / ${ptoPow}`;
+      document.getElementById("card-sn").textContent = d.sn || d.ont_sn || "-";
 
       this.updateStepDisplay();
 

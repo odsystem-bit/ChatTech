@@ -1,6 +1,7 @@
 // Field Mapping Engine pour CelPros (Celtiis) et FAT Automation
 // Ce fichier définit les règles de correspondance intelligentes entre
-// les données d'intervention ChapTech / FibreTrack et les éléments de formulaire HTML.
+// les données d'intervention FibreTrack et les éléments de formulaire HTML.
+// RÈGLE ABSOLUE : Aucune invention de fausses données / valeurs par défaut fictives.
 
 (function (root, factory) {
   const exports = factory();
@@ -25,6 +26,83 @@
       .toLowerCase()
       .replace(/[^a-z0-9]/g, "") // Ne garde que caractères alphanumériques
       .trim();
+  }
+
+  // Helper pour extraire une quantité de matériel posé depuis data.materiel_pose
+  function getMaterielQuantity(data, ...keys) {
+    const mp = data?.materiel_pose;
+    if (!mp || typeof mp !== "object") return "";
+    for (const k of keys) {
+      if (mp[k] !== undefined && mp[k] !== null && mp[k] !== "") {
+        const n = Number(mp[k]);
+        if (!isNaN(n) && n > 0) return String(n);
+      }
+    }
+    const normKeys = keys.map((k) => normalizeText(k));
+    for (const [mpKey, mpVal] of Object.entries(mp)) {
+      const norm = normalizeText(mpKey);
+      if (normKeys.some((nk) => norm === nk || (nk.length >= 4 && (norm.startsWith(nk) || nk.startsWith(norm))))) {
+        const n = Number(mpVal);
+        if (!isNaN(n) && n > 0) return String(n);
+      }
+    }
+    return "";
+  }
+
+  // Helper pour compter les poteaux SBEE réels
+  function countSbeePoles(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const sbee = list.filter((p) => p && normalizeText(p.type).includes("poteau") && normalizeText(p.proprietaire).includes("sbee")).length;
+    if (sbee > 0) return String(sbee);
+    const mp = data?.materiel_pose || {};
+    const count = Number(mp.poteau_sbee_non_arme || 0) + Number(mp.poteau_sbee_arme || 0) + Number(mp.poteau_sbee || 0);
+    if (count > 0) return String(count);
+    return "";
+  }
+
+  // Helper pour compter les poteaux Petit Jean réels
+  function countPetitJeanPoles(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const pj = list.filter((p) => p && normalizeText(p.type).includes("poteau") && (normalizeText(p.proprietaire).includes("petit") || normalizeText(p.proprietaire).includes("jean"))).length;
+    if (pj > 0) return String(pj);
+    const mp = data?.materiel_pose || {};
+    const count = Number(mp.poteau_petit_jean || mp.poteau_pj || mp.petit_jean || 0);
+    if (count > 0) return String(count);
+    return "";
+  }
+
+  // Extraction du point GPS FAT
+  function extractFatGpsPoint(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const fat = list.find((p) => p && normalizeText(p.type).includes("fat"));
+    if (!fat) return null;
+    const rawLat = fat.lat ?? fat.latitude;
+    const rawLng = fat.lng ?? fat.longitude;
+    if (rawLat === undefined || rawLat === null || rawLng === undefined || rawLng === null) return null;
+    const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
+    const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
+    if (isNaN(lat) || isNaN(lng)) return null;
+    return { ...fat, lat, lng };
+  }
+
+  // Extraction du point GPS de référence (Abonné en priorité, sinon le dernier point relevé)
+  function extractTargetGpsPoint(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    if (!list.length) return null;
+    const abonne = list.find((p) => {
+      if (!p || !p.type) return false;
+      const t = normalizeText(p.type);
+      return t.includes("abonne") || t.includes("client");
+    });
+    const point = abonne || list[list.length - 1] || null;
+    if (!point) return null;
+    const rawLat = point.lat ?? point.latitude ?? null;
+    const rawLng = point.lng ?? point.longitude ?? null;
+    if (rawLat === null || rawLng === null || rawLat === undefined || rawLng === undefined) return null;
+    const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
+    const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
+    if (isNaN(lat) || isNaN(lng)) return null;
+    return { ...point, lat, lng };
   }
 
   // Dictionnaire de correspondances pour tous les champs d'intervention
@@ -60,7 +138,7 @@
         "raison sociale",
         "souscripteur",
       ],
-      valueExtractor: (data) => data.nom_client || "",
+      valueExtractor: (data) => (data?.nom_client ? String(data.nom_client).trim() : ""),
     },
 
     adresse_zone: {
@@ -90,7 +168,7 @@
         "adresse complete",
         "lieu",
       ],
-      valueExtractor: (data) => data.adresse_zone || "",
+      valueExtractor: (data) => (data?.adresse_zone ? String(data.adresse_zone).trim() : ""),
     },
 
     telephone_ligne: {
@@ -117,7 +195,7 @@
         "no ligne",
         "ligne",
       ],
-      valueExtractor: (data) => data.telephone_ligne || "",
+      valueExtractor: (data) => (data?.telephone_ligne ? String(data.telephone_ligne).trim() : ""),
     },
 
     mobile: {
@@ -148,7 +226,11 @@
         "whatsapp",
         "telephone",
       ],
-      valueExtractor: (data) => data.mobile || data.telephone_ligne || "",
+      valueExtractor: (data) => {
+        if (data?.mobile) return String(data.mobile).trim();
+        if (data?.telephone_ligne) return String(data.telephone_ligne).trim();
+        return "";
+      },
     },
 
     offre_souscrite: {
@@ -176,7 +258,7 @@
         "abonnement",
         "type d'offre",
       ],
-      valueExtractor: (data) => data.offre_souscrite || "Fibre Pro",
+      valueExtractor: (data) => (data?.offre_souscrite ? String(data.offre_souscrite).trim() : ""),
     },
 
     // ----------------------------------------------------
@@ -205,7 +287,7 @@
         "type reseau",
         "statut reseau",
       ],
-      valueExtractor: (data) => data.etat || "PON",
+      valueExtractor: (data) => (data?.etat ? String(data.etat).trim() : ""),
     },
 
     msan: {
@@ -232,7 +314,7 @@
         "equipement msan",
         "pop",
       ],
-      valueExtractor: (data) => data.msan || "",
+      valueExtractor: (data) => (data?.msan ? String(data.msan).trim() : ""),
     },
 
     fat_ref: {
@@ -264,7 +346,7 @@
         "code fat",
         "pbo ref",
       ],
-      valueExtractor: (data) => data.fat_ref || "",
+      valueExtractor: (data) => (data?.fat_ref ? String(data.fat_ref).trim() : ""),
     },
 
     port: {
@@ -290,7 +372,12 @@
         "numero port",
         "no port",
       ],
-      valueExtractor: (data) => data.port || "",
+      valueExtractor: (data) => {
+        if (data?.port !== undefined && data?.port !== null && String(data.port).trim() !== "") {
+          return String(data.port).trim();
+        }
+        return "";
+      },
     },
 
     ports_disponibles: {
@@ -312,7 +399,7 @@
         "ports dispo",
         "detail ports",
       ],
-      valueExtractor: (data) => data.ports_disponibles || "",
+      valueExtractor: (data) => (data?.ports_disponibles ? String(data.ports_disponibles).trim() : ""),
     },
 
     port_disponible: {
@@ -337,14 +424,15 @@
         "nombre de ports libres",
       ],
       valueExtractor: (data) => {
-        if (data.port_disponible !== undefined && data.port_disponible !== null && data.port_disponible !== "") {
-          return Number(data.port_disponible);
+        if (data?.port_disponible !== undefined && data?.port_disponible !== null && data?.port_disponible !== "") {
+          const num = Number(data.port_disponible);
+          if (!isNaN(num) && num > 0) return num;
         }
-        if (data.ports_disponibles) {
+        if (data?.ports_disponibles && typeof data.ports_disponibles === "string") {
           const list = data.ports_disponibles.split(",").filter((p) => p.trim());
-          return list.length;
+          if (list.length > 0) return list.length;
         }
-        return 0;
+        return "";
       },
     },
 
@@ -378,8 +466,12 @@
         "puissance pbo",
       ],
       valueExtractor: (data) => {
-        const val = data.puissance_fat_dbm;
-        return val !== undefined && val !== null ? String(val).replace(",", ".") : "";
+        const val = data?.puissance_fat_dbm;
+        if (val === undefined || val === null || val === "") return "";
+        const str = String(val).replace(",", ".").trim();
+        const num = parseFloat(str);
+        if (isNaN(num) || num === 0) return "";
+        return str;
       },
     },
 
@@ -409,7 +501,7 @@
         "type de fibre",
         "cable drop",
       ],
-      valueExtractor: (data) => data.type_cable || "Drop 1FO",
+      valueExtractor: (data) => (data?.type_cable ? String(data.type_cable).trim() : ""),
     },
 
     depart_m: {
@@ -435,7 +527,18 @@
         "metre depart",
         "debut cable",
       ],
-      valueExtractor: (data) => (data.depart_m !== undefined && data.depart_m !== null ? String(data.depart_m).replace(",", ".") : "0"),
+      valueExtractor: (data) => {
+        if (data?.depart_m === undefined || data?.depart_m === null || data?.depart_m === "") return "";
+        const str = String(data.depart_m).replace(",", ".").trim();
+        const num = parseFloat(str);
+        if (isNaN(num)) return "";
+        if (num === 0) {
+          const arr = parseFloat(String(data?.arrivee_m || "0").replace(",", "."));
+          if (arr > 0) return "0";
+          return "";
+        }
+        return str;
+      },
     },
 
     arrivee_m: {
@@ -461,7 +564,13 @@
         "metre arrivee",
         "fin cable",
       ],
-      valueExtractor: (data) => (data.arrivee_m !== undefined && data.arrivee_m !== null ? String(data.arrivee_m).replace(",", ".") : "0"),
+      valueExtractor: (data) => {
+        if (data?.arrivee_m === undefined || data?.arrivee_m === null || data?.arrivee_m === "") return "";
+        const str = String(data.arrivee_m).replace(",", ".").trim();
+        const num = parseFloat(str);
+        if (isNaN(num) || num <= 0) return "";
+        return str;
+      },
     },
 
     lineaire_m: {
@@ -490,16 +599,18 @@
         "metrage total",
       ],
       valueExtractor: (data) => {
-        if (data.lineaire_m !== undefined && data.lineaire_m !== null && data.lineaire_m !== "") {
-          return String(data.lineaire_m).replace(",", ".");
+        if (data?.lineaire_m !== undefined && data?.lineaire_m !== null && data?.lineaire_m !== "") {
+          const str = String(data.lineaire_m).replace(",", ".").trim();
+          const num = parseFloat(str);
+          if (!isNaN(num) && num > 0) return str;
         }
-        if (data.depart_m !== undefined && data.arrivee_m !== undefined) {
+        if (data?.depart_m !== undefined && data?.arrivee_m !== undefined) {
           const dep = parseFloat(String(data.depart_m).replace(",", ".")) || 0;
           const arr = parseFloat(String(data.arrivee_m).replace(",", ".")) || 0;
           const diff = Math.abs(arr - dep);
-          return String(diff);
+          if (diff > 0) return String(diff);
         }
-        return "0";
+        return "";
       },
     },
 
@@ -522,7 +633,16 @@
         "nombre de poteaux traverses",
         "poteaux traverses count",
       ],
-      valueExtractor: (data) => String(data.nb_poteaux_traverses ?? 0),
+      valueExtractor: (data) => {
+        if (data?.nb_poteaux_traverses !== undefined && data?.nb_poteaux_traverses !== null && data?.nb_poteaux_traverses !== "") {
+          const n = Number(data.nb_poteaux_traverses);
+          if (!isNaN(n) && n > 0) return String(n);
+        }
+        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const count = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Traversé").length;
+        if (count > 0) return String(count);
+        return "";
+      },
     },
 
     nb_poteaux_implantes: {
@@ -544,7 +664,16 @@
         "nombre de poteaux implantes",
         "nouveaux poteaux",
       ],
-      valueExtractor: (data) => String(data.nb_poteaux_implantes ?? 0),
+      valueExtractor: (data) => {
+        if (data?.nb_poteaux_implantes !== undefined && data?.nb_poteaux_implantes !== null && data?.nb_poteaux_implantes !== "") {
+          const n = Number(data.nb_poteaux_implantes);
+          if (!isNaN(n) && n > 0) return String(n);
+        }
+        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const count = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Implanté").length;
+        if (count > 0) return String(count);
+        return "";
+      },
     },
 
     nb_poteaux_armes: {
@@ -566,7 +695,16 @@
         "nombre de poteaux armes",
         "armements",
       ],
-      valueExtractor: (data) => String(data.nb_poteaux_armes ?? 0),
+      valueExtractor: (data) => {
+        if (data?.nb_poteaux_armes !== undefined && data?.nb_poteaux_armes !== null && data?.nb_poteaux_armes !== "") {
+          const n = Number(data.nb_poteaux_armes);
+          if (!isNaN(n) && n > 0) return String(n);
+        }
+        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const count = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Armé").length;
+        if (count > 0) return String(count);
+        return "";
+      },
     },
 
     // ----------------------------------------------------
@@ -602,8 +740,12 @@
         "puissance prise",
       ],
       valueExtractor: (data) => {
-        const val = data.puissance_pto_dbm;
-        return val !== undefined && val !== null ? String(val).replace(",", ".") : "";
+        const val = data?.puissance_pto_dbm;
+        if (val === undefined || val === null || val === "") return "";
+        const str = String(val).replace(",", ".").trim();
+        const num = parseFloat(str);
+        if (isNaN(num) || num === 0) return "";
+        return str;
       },
     },
 
@@ -619,6 +761,10 @@
         /^qtepto$/i,
         /^quantitepto$/i,
         /^nombrepto$/i,
+        /^(?:field_)?(?:nb_?)?pto$/i,
+        /^materiel_?pto$/i,
+        /^prise_?pto$/i,
+        /^prise_?optique$/i,
       ],
       labelKeywords: [
         "qte pto",
@@ -626,8 +772,19 @@
         "nombre de pto",
         "nombre pto",
         "pto posees",
+        "pto",
+        "prise optique",
+        "prise pto",
       ],
-      valueExtractor: (data) => String(data.pto_qte ?? 1),
+      valueExtractor: (data) => {
+        if (data?.pto_qte !== undefined && data?.pto_qte !== null && data?.pto_qte !== "") {
+          const n = Number(data.pto_qte);
+          if (!isNaN(n) && n > 0) return String(n);
+        }
+        const fromMat = getMaterielQuantity(data, "pto", "prise_optique", "prise_pto");
+        if (fromMat) return fromMat;
+        return "";
+      },
     },
 
     repeteur_wifi_qte: {
@@ -643,6 +800,7 @@
         /^repeteurwifi$/i,
         /^qterepeteurwifi$/i,
         /^repeteur$/i,
+        /^(?:field_)?(?:nb_?)?repeteur/i,
       ],
       labelKeywords: [
         "qte repeteur wifi",
@@ -652,7 +810,15 @@
         "repeteur",
         "extender",
       ],
-      valueExtractor: (data) => String(data.repeteur_wifi_qte ?? 0),
+      valueExtractor: (data) => {
+        if (data?.repeteur_wifi_qte !== undefined && data?.repeteur_wifi_qte !== null && data?.repeteur_wifi_qte !== "") {
+          const n = Number(data.repeteur_wifi_qte);
+          if (!isNaN(n) && n > 0) return String(n);
+        }
+        const fromMat = getMaterielQuantity(data, "repeteur_wifi", "repeteur", "extender");
+        if (fromMat) return fromMat;
+        return "";
+      },
     },
 
     emplacement_ont: {
@@ -676,7 +842,7 @@
         "emplacement equipement",
         "piece d'installation",
       ],
-      valueExtractor: (data) => data.emplacement_ont || "Salon",
+      valueExtractor: (data) => (data?.emplacement_ont ? String(data.emplacement_ont).trim() : ""),
     },
 
     mac: {
@@ -687,12 +853,14 @@
       attrPatterns: [
         /^field_mac$/i,
         /^field_adressemac$/i,
+        /^field_adresse_mac$/i,
         /^mac$/i,
-        /^macont$/i,
+        /^mac_?ont$/i,
+        /^ont_?mac$/i,
         /^adressemac$/i,
         /^adresse_mac$/i,
         /^macaddress$/i,
-        /^ontmac$/i,
+        /^mac_address$/i,
       ],
       labelKeywords: [
         "mac",
@@ -701,7 +869,7 @@
         "adresse mac ont",
         "mac box",
       ],
-      valueExtractor: (data) => data.mac || "",
+      valueExtractor: (data) => (data?.mac ? String(data.mac).trim() : ""),
     },
 
     sn: {
@@ -712,15 +880,22 @@
       attrPatterns: [
         /^field_sn$/i,
         /^field_ontsn$/i,
+        /^field_ont_sn$/i,
         /^field_serialnumber$/i,
+        /^field_serial_number$/i,
         /^sn$/i,
         /^ont_sn$/i,
         /^ontsn$/i,
         /^serialnumber$/i,
+        /^serial_number$/i,
         /^numeroserie$/i,
-        /^serieont$/i,
+        /^numero_serie$/i,
         /^numserie$/i,
+        /^num_serie$/i,
+        /^serieont$/i,
+        /^serie_ont$/i,
         /^snont$/i,
+        /^sn_ont$/i,
       ],
       labelKeywords: [
         "sn ont",
@@ -734,7 +909,11 @@
         "sn",
         "s/n",
       ],
-      valueExtractor: (data) => data.sn || data.ont_sn || "",
+      valueExtractor: (data) => {
+        if (data?.sn && String(data.sn).trim()) return String(data.sn).trim();
+        if (data?.ont_sn && String(data.ont_sn).trim()) return String(data.ont_sn).trim();
+        return "";
+      },
     },
 
     // ----------------------------------------------------
@@ -756,7 +935,7 @@
         "validation emplacement client",
         "emplacement confirme",
       ],
-      valueExtractor: (data) => Boolean(data.client_confirme_emplacement),
+      valueExtractor: (data) => (data?.client_confirme_emplacement ? true : null),
     },
 
     remise_equipement_ok: {
@@ -776,7 +955,7 @@
         "equipement remis au client",
         "remise materiel ok",
       ],
-      valueExtractor: (data) => Boolean(data.remise_equipement_ok),
+      valueExtractor: (data) => (data?.remise_equipement_ok ? true : null),
     },
 
     travaux_conformes: {
@@ -797,7 +976,7 @@
         "installation conforme",
         "travaux conformes aux regles",
       ],
-      valueExtractor: (data) => Boolean(data.travaux_conformes),
+      valueExtractor: (data) => (data?.travaux_conformes ? true : null),
     },
 
     emplacement_valide: {
@@ -815,7 +994,7 @@
         "emplacement valide",
         "emplacement valide par le client",
       ],
-      valueExtractor: (data) => Boolean(data.emplacement_valide),
+      valueExtractor: (data) => (data?.emplacement_valide ? true : null),
     },
 
     travail_propre: {
@@ -836,7 +1015,7 @@
         "proprete des lieux",
         "nettoyage effectue",
       ],
-      valueExtractor: (data) => Boolean(data.travail_propre),
+      valueExtractor: (data) => (data?.travail_propre ? true : null),
     },
 
     service_teste: {
@@ -857,7 +1036,7 @@
         "test navigation",
         "test debit",
       ],
-      valueExtractor: (data) => Boolean(data.service_teste),
+      valueExtractor: (data) => (data?.service_teste ? true : null),
     },
 
     service_fonctionne: {
@@ -879,7 +1058,7 @@
         "internet fonctionne",
         "connexion ok",
       ],
-      valueExtractor: (data) => Boolean(data.service_fonctionne),
+      valueExtractor: (data) => (data?.service_fonctionne ? true : null),
     },
 
     explications_donnees: {
@@ -898,7 +1077,7 @@
         "explications fournies au client",
         "information client",
       ],
-      valueExtractor: (data) => Boolean(data.explications_donnees),
+      valueExtractor: (data) => (data?.explications_donnees ? true : null),
     },
 
     recommanderait: {
@@ -915,7 +1094,7 @@
         "recommanderait",
         "recommanderait celtiis",
       ],
-      valueExtractor: (data) => Boolean(data.recommanderait),
+      valueExtractor: (data) => (data?.recommanderait ? true : null),
     },
 
     accepte_recontact: {
@@ -932,7 +1111,7 @@
         "accepte recontact",
         "accepte d'etre recontacte",
       ],
-      valueExtractor: (data) => Boolean(data.accepte_recontact),
+      valueExtractor: (data) => (data?.accepte_recontact ? true : null),
     },
 
     qualite: {
@@ -950,7 +1129,7 @@
         "qualite de l'intervention",
         "satisfaction qualite",
       ],
-      valueExtractor: (data) => data.qualite || "Satisfait",
+      valueExtractor: (data) => (data?.qualite ? String(data.qualite).trim() : ""),
     },
 
     delais: {
@@ -967,7 +1146,7 @@
         "delais",
         "respect des delais",
       ],
-      valueExtractor: (data) => data.delais || "Satisfait",
+      valueExtractor: (data) => (data?.delais ? String(data.delais).trim() : ""),
     },
 
     professionnalisme: {
@@ -984,7 +1163,7 @@
         "professionnalisme",
         "professionnalisme technicien",
       ],
-      valueExtractor: (data) => data.professionnalisme || "Satisfait",
+      valueExtractor: (data) => (data?.professionnalisme ? String(data.professionnalisme).trim() : ""),
     },
 
     nom_client_declaration: {
@@ -1004,7 +1183,7 @@
         "nom du signataire",
         "signataire",
       ],
-      valueExtractor: (data) => data.nom_client_declaration || data.nom_client || "",
+      valueExtractor: (data) => (data?.nom_client_declaration ? String(data.nom_client_declaration).trim() : (data?.nom_client ? String(data.nom_client).trim() : "")),
     },
 
     remarque_libre: {
@@ -1031,7 +1210,7 @@
         "remarque",
         "appreciation",
       ],
-      valueExtractor: (data) => data.remarque_libre || data.appreciation_satisfaction_libre || "",
+      valueExtractor: (data) => (data?.remarque_libre ? String(data.remarque_libre).trim() : (data?.appreciation_satisfaction_libre ? String(data.appreciation_satisfaction_libre).trim() : "")),
     },
 
     // ----------------------------------------------------
@@ -1057,7 +1236,7 @@
         "date d'installation",
         "date",
       ],
-      valueExtractor: (data) => (data.date ? String(data.date).slice(0, 10) : new Date().toISOString().slice(0, 10)),
+      valueExtractor: (data) => (data?.date ? String(data.date).slice(0, 10) : ""),
     },
 
     nom_technicien: {
@@ -1081,7 +1260,7 @@
         "intervenant",
         "agent",
       ],
-      valueExtractor: (data) => data.nom_technicien || "",
+      valueExtractor: (data) => (data?.nom_technicien ? String(data.nom_technicien).trim() : ""),
     },
 
     nom_equipe: {
@@ -1105,11 +1284,11 @@
         "prestataire",
         "sous-traitant",
       ],
-      valueExtractor: (data) => data.nom_equipe || "TELECOM BTP Services",
+      valueExtractor: (data) => (data?.nom_equipe ? String(data.nom_equipe).trim() : ""),
     },
 
     // ----------------------------------------------------
-    // 6. GPS
+    // 7. GPS
     // ----------------------------------------------------
     latitude: {
       key: "latitude",
@@ -1184,7 +1363,7 @@
     },
 
     // ----------------------------------------------------
-    // 7. CelPros Étape 1 : Interlocuteur & Configurations
+    // 8. CelPros Étape 1 : Interlocuteur & Configurations
     // ----------------------------------------------------
     interlocuteur: {
       key: "interlocuteur",
@@ -1193,7 +1372,7 @@
       type: "radio",
       attrPatterns: [/^interlocuteur/i, /^demandeur/i],
       labelKeywords: ["le demandeur", "demandeur", "interlocuteur"],
-      valueExtractor: () => "Le demandeur",
+      valueExtractor: (data) => (data?.interlocuteur ? String(data.interlocuteur).trim() : ""),
     },
 
     configurations_type: {
@@ -1202,12 +1381,12 @@
       category: "Client",
       type: "radio",
       attrPatterns: [/^configuration/i, /^type_config/i],
-      labelKeywords: ["na", "configurations", "type"],
-      valueExtractor: () => "NA",
+      labelKeywords: ["configurations", "type configuration", "type config"],
+      valueExtractor: (data) => (data?.configurations_type ? String(data.configurations_type).trim() : (data?.type_config ? String(data.type_config).trim() : "")),
     },
 
     // ----------------------------------------------------
-    // 8. CelPros Étape 2 : Accessoires & Matériels
+    // 9. CelPros Étape 2 : Accessoires & Matériels
     // ----------------------------------------------------
     gps_fat: {
       key: "gps_fat",
@@ -1218,9 +1397,7 @@
       labelKeywords: ["gps fat", "coordonnees fat", "position fat"],
       valueExtractor: (data) => {
         const fat = extractFatGpsPoint(data);
-        return fat
-          ? `${fat.lat.toFixed(5)}, ${fat.lng.toFixed(5)}`
-          : (data.points_gps?.[0] ? `${Number(data.points_gps[0].lat).toFixed(5)}, ${Number(data.points_gps[0].lng).toFixed(5)}` : "");
+        return fat ? `${fat.lat.toFixed(5)}, ${fat.lng.toFixed(5)}` : "";
       },
     },
 
@@ -1231,7 +1408,7 @@
       type: "number",
       attrPatterns: [/^rue$/i, /^materiel_rue$/i],
       labelKeywords: ["rue"],
-      valueExtractor: (data) => String(data.materiel_pose?.["rue"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "rue", "rues"),
     },
 
     pince: {
@@ -1241,7 +1418,7 @@
       type: "number",
       attrPatterns: [/^pince$/i, /^materiel_pince$/i],
       labelKeywords: ["pince"],
-      valueExtractor: (data) => String(data.materiel_pose?.["pince"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "pince", "pinces"),
     },
 
     crochets: {
@@ -1251,7 +1428,7 @@
       type: "number",
       attrPatterns: [/^crochet/i, /^crochets$/i],
       labelKeywords: ["crochets", "crochet"],
-      valueExtractor: (data) => String(data.materiel_pose?.["crochets"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "crochets", "crochet"),
     },
 
     suspension: {
@@ -1261,7 +1438,7 @@
       type: "number",
       attrPatterns: [/^susp/i, /^suspension/i],
       labelKeywords: ["suspension", "susp", "suspente"],
-      valueExtractor: (data) => String(data.materiel_pose?.["susp"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "susp", "suspension", "suspente", "suspentes"),
     },
 
     piton: {
@@ -1269,9 +1446,128 @@
       label: "Piton",
       category: "Accessoires",
       type: "number",
-      attrPatterns: [/^piton/i],
-      labelKeywords: ["piton"],
-      valueExtractor: (data) => String(data.materiel_pose?.["piton"] ?? 0),
+      attrPatterns: [
+        /^field_piton/i,
+        /^piton/i,
+        /^nb_?pitons?/i,
+        /^materiel_?piton/i,
+        /^combien_?de_?pitons?/i,
+      ],
+      labelKeywords: [
+        "piton",
+        "pitons",
+        "nb pitons",
+        "nombre de pitons",
+        "piton utilise",
+        "pitons utilises",
+        "combien de pitons",
+        "combien de pitons utilises",
+        "nombre de pitons utilises",
+      ],
+      valueExtractor: (data) => getMaterielQuantity(data, "piton", "pitons"),
+    },
+
+    cheville: {
+      key: "cheville",
+      label: "Cheville",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [
+        /^field_cheville/i,
+        /^cheville/i,
+        /^nb_?chevilles?/i,
+        /^materiel_?cheville/i,
+      ],
+      labelKeywords: [
+        "cheville",
+        "chevilles",
+        "cheville nylon",
+        "chevilles nylon",
+        "nb chevilles",
+        "nombre de chevilles",
+        "chevilles utilisees",
+      ],
+      valueExtractor: (data) => getMaterielQuantity(data, "cheville", "chevilles", "cheville_nylon", "chevilles_nylon"),
+    },
+
+    jarretiere: {
+      key: "jarretiere",
+      label: "Jarretière optique",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [
+        /^field_jarretiere/i,
+        /^jarretiere/i,
+        /^nb_?jarretieres?/i,
+        /^materiel_?jarretiere/i,
+        /^cordon_?optique/i,
+      ],
+      labelKeywords: [
+        "jarretiere",
+        "jarretieres",
+        "jarretiere optique",
+        "cordon optique",
+        "nb jarretieres",
+        "nombre de jarretieres",
+      ],
+      valueExtractor: (data) => getMaterielQuantity(data, "jarretiere", "jarretieres", "cordon_optique"),
+    },
+
+    ont_livre: {
+      key: "ont_livre",
+      label: "ONT livré",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [
+        /^field_ont_?livre/i,
+        /^ont_?livre/i,
+        /^nb_?ont/i,
+        /^materiel_?ont/i,
+        /^box_?livree?/i,
+        /^modem/i,
+      ],
+      labelKeywords: [
+        "ont livre",
+        "box livree",
+        "materiel ont",
+        "modem",
+        "nb ont",
+        "nombre ont",
+      ],
+      valueExtractor: (data) => {
+        const fromMat = getMaterielQuantity(data, "ont", "box", "modem");
+        if (fromMat) return fromMat;
+        if (data?.sn || data?.ont_sn || data?.mac) return "1";
+        return "";
+      },
+    },
+
+    cpc_cable: {
+      key: "cpc_cable",
+      label: "Câble CPC / Drop",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [
+        /^field_cpc/i,
+        /^cpc/i,
+        /^cable_?cpc/i,
+        /^cable_?drop/i,
+        /^materiel_?cpc/i,
+      ],
+      labelKeywords: [
+        "cable cpc",
+        "cpc",
+        "cable drop",
+        "drop 1fo",
+      ],
+      valueExtractor: (data) => {
+        const fromMat = getMaterielQuantity(
+          data,
+          "cpc_50", "cpc_100", "cpc_150", "cpc_200", "cpc_250", "cpc_300", "cpc_350", "fibre_1fo", "cpc"
+        );
+        if (fromMat) return fromMat;
+        return "";
+      },
     },
 
     connecteur: {
@@ -1281,7 +1577,7 @@
       type: "number",
       attrPatterns: [/^connecteur/i, /^closer/i],
       labelKeywords: ["connecteur", "closer"],
-      valueExtractor: (data) => String(data.materiel_pose?.["closer"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "closer", "connecteur", "connecteurs"),
     },
 
     rp1: {
@@ -1291,7 +1587,56 @@
       type: "number",
       attrPatterns: [/^rp1$/i],
       labelKeywords: ["rp1"],
-      valueExtractor: (data) => String(data.materiel_pose?.["rp1"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "rp1"),
+    },
+
+    poteaux_utilises: {
+      key: "poteaux_utilises",
+      label: "Poteaux utilisés (total)",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [
+        /^poteaux_?utilises?/i,
+        /^nb_?poteaux_?utilises?/i,
+        /^total_?poteaux/i,
+        /^combien_?de_?poteaux/i,
+        /^poteaux$/i,
+        /^field_poteauxutilises?/i,
+        /^field_nbpoteauxutilises?/i,
+      ],
+      labelKeywords: [
+        "combien de poteaux utilises",
+        "combien de poteaux",
+        "poteaux utilises",
+        "nombre de poteaux utilises",
+        "nb poteaux utilises",
+        "total poteaux",
+        "poteaux",
+      ],
+      valueExtractor: (data) => {
+        let total = 0;
+        if (data?.nb_poteaux_traverses) total += Number(data.nb_poteaux_traverses) || 0;
+        if (data?.nb_poteaux_implantes) total += Number(data.nb_poteaux_implantes) || 0;
+        if (data?.nb_poteaux_armes) total += Number(data.nb_poteaux_armes) || 0;
+        if (total > 0) return String(total);
+        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const polePts = pts.filter((p) => p && normalizeText(p.type).includes("poteau")).length;
+        if (polePts > 0) return String(polePts);
+        const sbeePoles = Number(countSbeePoles(data)) || 0;
+        const pjPoles = Number(countPetitJeanPoles(data)) || 0;
+        const sum = sbeePoles + pjPoles;
+        if (sum > 0) return String(sum);
+        const fromMat = getMaterielQuantity(data, "poteau", "poteaux", "poteau_sbee", "poteau_pj");
+        if (fromMat) return fromMat;
+        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const waPoles = wa.filter((p) => {
+          if (!p) return false;
+          const desc = `${p.name || ""} ${p.nom || ""} ${p.type || ""} ${p.caption || ""}`.toLowerCase();
+          return desc.includes("poteau");
+        }).length;
+        if (waPoles > 0) return String(waPoles);
+        return "";
+      },
     },
 
     poteaux_sbee_utilises: {
@@ -1321,7 +1666,7 @@
       type: "number",
       attrPatterns: [/^traverse_?13t/i, /^13t/i],
       labelKeywords: ["traverse 13t", "13t"],
-      valueExtractor: (data) => String(data.materiel_pose?.["traverse_13t"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "traverse_13t", "13t", "traverse13t"),
     },
 
     traverse_15t: {
@@ -1331,7 +1676,7 @@
       type: "number",
       attrPatterns: [/^traverse_?15t/i, /^15t/i],
       labelKeywords: ["traverse 15t", "15t"],
-      valueExtractor: (data) => String(data.materiel_pose?.["traverse_15t"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "traverse_15t", "15t", "traverse15t"),
     },
 
     semelle: {
@@ -1341,7 +1686,7 @@
       type: "number",
       attrPatterns: [/^semelle/i],
       labelKeywords: ["semelle", "semelle eq"],
-      valueExtractor: (data) => String(data.materiel_pose?.["semelle_eq"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "semelle_eq", "semelle", "semelles"),
     },
 
     boulons: {
@@ -1351,7 +1696,7 @@
       type: "number",
       attrPatterns: [/^boulon/i],
       labelKeywords: ["boulons", "boulon"],
-      valueExtractor: (data) => String(data.materiel_pose?.["boulons"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "boulons", "boulon"),
     },
 
     agrafe: {
@@ -1361,11 +1706,11 @@
       type: "number",
       attrPatterns: [/^agrafe/i],
       labelKeywords: ["agrafe", "agrafes"],
-      valueExtractor: (data) => String(data.materiel_pose?.["agrafe"] ?? 0),
+      valueExtractor: (data) => getMaterielQuantity(data, "agrafe", "agrafes"),
     },
 
     // ----------------------------------------------------
-    // 9. CelPros Étape 3 : Tests de Services & Débits
+    // 10. CelPros Étape 3 : Tests de Services & Débits
     // ----------------------------------------------------
     test_appel_sortant: {
       key: "test_appel_sortant",
@@ -1374,7 +1719,7 @@
       type: "boolean",
       attrPatterns: [/^appel_?sortant/i, /^sortant/i],
       labelKeywords: ["appel sortant - envoi numero", "appel sortant", "envoi numero"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.test_appel_sortant ? true : null),
     },
 
     test_appel_entrant: {
@@ -1384,7 +1729,7 @@
       type: "boolean",
       attrPatterns: [/^appel_?entrant/i, /^entrant/i],
       labelKeywords: ["appel entrant - affichage numero", "appel entrant", "affichage numero"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.test_appel_entrant ? true : null),
     },
 
     debit_montant: {
@@ -1393,8 +1738,8 @@
       category: "Tests",
       type: "number",
       attrPatterns: [/^montant/i, /^debit_?montant/i],
-      labelKeywords: ["montant"],
-      valueExtractor: () => "50",
+      labelKeywords: ["montant", "debit montant", "upload"],
+      valueExtractor: (data) => (data?.debit_montant || data?.debit_upload ? String(data.debit_montant || data.debit_upload).trim() : ""),
     },
 
     debit_descendant: {
@@ -1403,8 +1748,8 @@
       category: "Tests",
       type: "number",
       attrPatterns: [/^descendant/i, /^debit_?descendant/i],
-      labelKeywords: ["descendant"],
-      valueExtractor: () => "100",
+      labelKeywords: ["descendant", "debit descendant", "download"],
+      valueExtractor: (data) => (data?.debit_descendant || data?.debit_download ? String(data.debit_descendant || data.debit_download).trim() : ""),
     },
 
     debit_ping: {
@@ -1413,12 +1758,12 @@
       category: "Tests",
       type: "number",
       attrPatterns: [/^ping/i],
-      labelKeywords: ["ping"],
-      valueExtractor: () => "12",
+      labelKeywords: ["ping", "latence"],
+      valueExtractor: (data) => (data?.debit_ping || data?.ping ? String(data.debit_ping || data.ping).trim() : ""),
     },
 
     // ----------------------------------------------------
-    // 10. CelPros Étape 4 : Branchement & Rattachement
+    // 11. CelPros Étape 4 : Branchement & Rattachement
     // ----------------------------------------------------
     etiquetage: {
       key: "etiquetage",
@@ -1427,7 +1772,7 @@
       type: "boolean",
       attrPatterns: [/^etiquetage/i],
       labelKeywords: ["etiquetage"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.etiquetage ? true : null),
     },
 
     nettoyage: {
@@ -1437,7 +1782,7 @@
       type: "boolean",
       attrPatterns: [/^nettoyage/i],
       labelKeywords: ["nettoyage"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.nettoyage ? true : (data?.travail_propre ? true : null)),
     },
 
     depose: {
@@ -1447,7 +1792,7 @@
       type: "boolean",
       attrPatterns: [/^depose/i],
       labelKeywords: ["depose"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.depose ? true : null),
     },
 
     colliers_serres: {
@@ -1455,9 +1800,9 @@
       label: "Colliers serrés",
       category: "Branchement",
       type: "boolean",
-      attrPatterns: [/^collier/i],
+      attrPatterns: [/^colliers?_?serres?/i, /^field_colliers?_?serres?/i],
       labelKeywords: ["colliers serres", "collier serre"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.colliers_serres ? true : null),
     },
 
     fat_normalise: {
@@ -1467,7 +1812,7 @@
       type: "boolean",
       attrPatterns: [/^fat_?normalise/i],
       labelKeywords: ["fat normalise"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.fat_normalise ? true : null),
     },
 
     tutorat: {
@@ -1477,7 +1822,7 @@
       type: "boolean",
       attrPatterns: [/^tutorat/i],
       labelKeywords: ["tutorat"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.tutorat ? true : null),
     },
 
     plaque: {
@@ -1487,7 +1832,7 @@
       type: "text",
       attrPatterns: [/^plaque/i],
       labelKeywords: ["plaque"],
-      valueExtractor: (data) => data.msan || "PL140",
+      valueExtractor: (data) => (data?.plaque ? String(data.plaque).trim() : ""),
     },
 
     service_internet: {
@@ -1497,7 +1842,7 @@
       type: "boolean",
       attrPatterns: [/^service_?internet/i, /^internet$/i],
       labelKeywords: ["internet"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.service_internet ? true : (data?.service_fonctionne ? true : null)),
     },
 
     service_voip: {
@@ -1507,12 +1852,11 @@
       type: "boolean",
       attrPatterns: [/^service_?voip/i, /^voip$/i],
       labelKeywords: ["voip"],
-      valueExtractor: (data) =>
-        Boolean((data.offre_souscrite || "").toLowerCase().includes("pro") || (data.offre_souscrite || "").toLowerCase().includes("office")),
+      valueExtractor: (data) => (data?.service_voip ? true : null),
     },
 
     // ----------------------------------------------------
-    // 11. CelPros Étape 5 : Signature du rapport
+    // 12. CelPros Étape 5 : Signature du rapport
     // ----------------------------------------------------
     confirme_signature_rapport: {
       key: "confirme_signature_rapport",
@@ -1521,58 +1865,9 @@
       type: "boolean",
       attrPatterns: [/^confirme_?signature/i, /^signature_?rapport/i],
       labelKeywords: ["je confirme la signature du rapport", "confirme signature", "signature du rapport"],
-      valueExtractor: () => true,
+      valueExtractor: (data) => (data?.confirme_signature_rapport ? true : (data?.signature_client ? true : null)),
     },
   };
-
-  // Helper pour extraire le point GPS FAT
-  function extractFatGpsPoint(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const fat = list.find((p) => p && normalizeText(p.type).includes("fat"));
-    if (!fat) return null;
-    const lat = typeof fat.lat === "string" ? parseFloat(fat.lat.replace(",", ".")) : Number(fat.lat);
-    const lng = typeof fat.lng === "string" ? parseFloat(fat.lng.replace(",", ".")) : Number(fat.lng);
-    if (isNaN(lat) || isNaN(lng)) return null;
-    return { ...fat, lat, lng };
-  }
-
-  // Helper pour compter les poteaux SBEE
-  function countSbeePoles(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const sbee = list.filter((p) => p && p.type === "Poteau" && normalizeText(p.proprietaire).includes("sbee")).length;
-    if (sbee > 0) return String(sbee);
-    const mp = data?.materiel_pose || {};
-    const count = Number(mp.poteau_sbee_non_arme || 0) + Number(mp.poteau_sbee_arme || 0);
-    if (count > 0) return String(count);
-    return String(data?.nb_poteaux_traverses || 0);
-  }
-
-  // Helper pour compter les poteaux Petit Jean
-  function countPetitJeanPoles(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const pj = list.filter((p) => p && p.type === "Poteau" && (normalizeText(p.proprietaire).includes("petit") || normalizeText(p.proprietaire).includes("jean"))).length;
-    return String(pj);
-  }
-
-  // Extraction du point GPS de référence (Abonné en priorité, sinon le dernier point relevé)
-  function extractTargetGpsPoint(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    if (!list.length) return null;
-    const abonne = list.find((p) => {
-      if (!p || !p.type) return false;
-      const t = normalizeText(p.type);
-      return t.includes("abonne") || t.includes("client");
-    });
-    const point = abonne || list[list.length - 1] || null;
-    if (!point) return null;
-    const rawLat = point.lat ?? point.latitude ?? null;
-    const rawLng = point.lng ?? point.longitude ?? null;
-    if (rawLat === null || rawLng === null || rawLat === undefined || rawLng === undefined) return null;
-    const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
-    const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
-    if (isNaN(lat) || isNaN(lng)) return null;
-    return { ...point, lat, lng };
-  }
 
   // Inspection des attributs d'un élément HTML
   function getElementAttributeCandidates(element) {
@@ -1658,7 +1953,8 @@
   }
 
   // Algorithme d'appariement d'un élément DOM vers une clé de définition de champ
-  function matchElementToField(element) {
+  // Supporte également la correspondance dynamique pour tout matériau réel présent dans data.materiel_pose
+  function matchElementToField(element, interventionData = null) {
     if (!element) return null;
 
     const attributes = getElementAttributeCandidates(element);
@@ -1700,7 +1996,6 @@
           if (normalizedLabel === normKw) {
             score = Math.max(score, 95);
           } else if (normalizedLabel.includes(normKw)) {
-            // Favorise les mots-clés plus spécifiques
             const bonus = Math.min(20, normKw.length);
             score = Math.max(score, 70 + bonus);
           }
@@ -1710,6 +2005,44 @@
       if (score > highestScore && score >= 70) {
         highestScore = score;
         bestMatch = { definition: def, score, matchedBy: highestScore >= 90 ? "attribute" : "label" };
+      }
+    }
+
+    // Correspondance dynamique de secours pour tout matériau personnalisé enregistré dans FibreTrack
+    if (!bestMatch && interventionData?.materiel_pose && typeof interventionData.materiel_pose === "object") {
+      for (const [rawKey, rawVal] of Object.entries(interventionData.materiel_pose)) {
+        const numVal = Number(rawVal);
+        if (isNaN(numVal) || numVal <= 0) continue;
+        const normMat = normalizeText(rawKey);
+        if (!normMat || normMat.length < 3) continue;
+
+        let matched = false;
+        for (const attr of attributes) {
+          const normAttr = normalizeText(attr);
+          if (normAttr === normMat || normAttr.includes(normMat) || normMat.includes(normAttr)) {
+            matched = true;
+            break;
+          }
+        }
+        if (!matched && normalizedLabel) {
+          if (normalizedLabel === normMat || normalizedLabel.includes(normMat) || normMat.includes(normalizedLabel)) {
+            matched = true;
+          }
+        }
+
+        if (matched) {
+          return {
+            definition: {
+              key: `dynamic_materiel_${normMat}`,
+              label: rawKey,
+              category: "Accessoires",
+              type: "number",
+              valueExtractor: () => String(numVal),
+            },
+            score: 80,
+            matchedBy: "dynamic_materiel",
+          };
+        }
       }
     }
 
@@ -1724,5 +2057,9 @@
     getElementLabelText,
     matchElementToField,
     extractTargetGpsPoint,
+    extractFatGpsPoint,
+    getMaterielQuantity,
+    countSbeePoles,
+    countPetitJeanPoles,
   };
 });

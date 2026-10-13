@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../content/field-mapping.js';
+import '../content/photo-filler.js';
 import '../content/form-filler.js';
 
 const FormFiller = globalThis.FormFiller;
+const PhotoFiller = globalThis.PhotoFiller;
 
 // Mock DOM pour tester les mécanismes d'injection et de dispatch d'événements
 class MockEvent {
@@ -243,3 +245,65 @@ test('FormFiller - setNativeSelectValue handles null, undefined, empty safely', 
   assert.equal(FormFiller.setNativeSelectValue(select, undefined), false);
   assert.equal(FormFiller.setNativeSelectValue(select, ''), false);
 });
+
+test('PhotoFiller - Does NOT invent photos or reuse generic indices when photos do not exist', () => {
+  const emptyIntv = {
+    points_gps: [],
+    whatsapp_photos: [],
+  };
+
+  for (const rule of PhotoFiller.PHOTO_SLOT_RULES) {
+    const photo = rule.getPhoto(emptyIntv);
+    assert.equal(photo, null, `Slot ${rule.key} should NOT return any photo for empty intervention`);
+  }
+});
+
+test('PhotoFiller - Returns photo only for corresponding matching slot', () => {
+  const realFatIntv = {
+    points_gps: [
+      { type: 'FAT', photo: 'data:image/jpeg;base64,12345' },
+    ],
+    whatsapp_photos: [],
+    signature_client: 'data:image/png;base64,signaturedata123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345',
+  };
+
+  const fatRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'fat');
+  const ontRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'ont_sn');
+  const contratRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'contrat_client');
+  const cableRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'cable_interne');
+
+  assert.ok(fatRule.getPhoto(realFatIntv));
+  assert.equal(fatRule.getPhoto(realFatIntv).name, 'fat_raccordement.jpg');
+  assert.equal(ontRule.getPhoto(realFatIntv), null); // Pas d'abonné -> aucun fallback fictif
+  assert.equal(cableRule.getPhoto(realFatIntv), null); // Pas de photo de câble -> aucun fallback
+  assert.ok(contratRule.getPhoto(realFatIntv)); // Vraie signature client
+});
+
+test('FormFiller - autofillPage leaves unrecorded fields empty and does not invent data', async () => {
+  const elNom = new MockElement('input', { id: 'field_nomClient', name: 'nomClient', value: '' });
+  const elOffre = new MockElement('select', { id: 'field_offre', name: 'offre', options: [{ value: '', textContent: '--' }, { value: 'Fibre Pro', textContent: 'Fibre Pro' }] });
+  const elPiton = new MockElement('input', { id: 'field_piton', name: 'piton', type: 'number', value: '' });
+  const elPince = new MockElement('input', { id: 'field_pince', name: 'pince', type: 'number', value: '' });
+  const elPuissance = new MockElement('input', { id: 'field_puissanceFat', name: 'puissanceFat', type: 'number', value: '' });
+
+  const doc = new MockDocument([elNom, elOffre, elPiton, elPince, elPuissance]);
+
+  // Intervention avec UNIQUEMENT le nom et 5 pitons dans materiel_pose
+  const partialIntervention = {
+    nom_client: 'AKPOVI Serge',
+    materiel_pose: { piton: 5 },
+    // puissance_fat_dbm: 0 (non mesuré)
+    // offre_souscrite: '' (non renseigné)
+  };
+
+  const report = await FormFiller.autofillPage(partialIntervention, doc);
+
+  assert.ok(report.success);
+  assert.equal(report.filledCount, 2); // Uniquement nom et piton
+  assert.equal(elNom.value, 'AKPOVI Serge');
+  assert.equal(elPiton.value, '5'); // 5 pitons réels
+  assert.equal(elPince.value, ''); // Pince non renseignée -> reste vide
+  assert.equal(elPuissance.value, ''); // Puissance 0/non renseignée -> reste vide
+  assert.equal(elOffre.value, ''); // Pas d'offre souscrite -> reste vide
+});
+

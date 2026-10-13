@@ -307,15 +307,16 @@
         processedRadioGroups.add(el.name);
       }
 
-      // Appariement intelligent du champ
-      const match = FieldMapping.matchElementToField(el);
+      // Appariement intelligent du champ (avec support des matériels dynamiques réels)
+      const match = FieldMapping.matchElementToField(el, interventionData);
 
       if (match && match.definition) {
         const { definition } = match;
         const val = definition.valueExtractor(interventionData);
 
-        // Ne pas écraser si la valeur est vide et qu'il y a déjà une saisie existante pertinente
-        if (val !== undefined && val !== null && val !== "") {
+        // RÈGLE ABSOLUE : Si la valeur n'est pas renseignée (vide, null, undefined, false),
+        // NE PAS remplir le champ sur CelPros (le laisser intact/vide).
+        if (val !== undefined && val !== null && val !== "" && val !== false) {
           const filled = fillElement(el, val, definition);
           if (filled) {
             filledDetails.push({
@@ -372,39 +373,41 @@
       ? `• Coordonnées GPS : ${gpsPoint.lat.toFixed(6)}, ${gpsPoint.lng.toFixed(6)} (https://maps.google.com/?q=${gpsPoint.lat},${gpsPoint.lng})`
       : "";
     const photosCount = Array.isArray(data.whatsapp_photos) ? data.whatsapp_photos.length : 0;
+    const fatVal = data.puissance_fat_dbm && Number(data.puissance_fat_dbm) !== 0 ? `${data.puissance_fat_dbm} dBm` : "N/A";
+    const ptoVal = data.puissance_pto_dbm && Number(data.puissance_pto_dbm) !== 0 ? `${data.puissance_pto_dbm} dBm` : "N/A";
 
     return [
       `*RAPPORT D'INTERVENTION FIBRE - CELTIIS*`,
       `📅 Date : ${dateFormatted}`,
       `👤 Technicien : ${data.nom_technicien || "Non spécifié"}`,
-      `🏢 Équipe : ${data.nom_equipe || "TELECOM BTP Services"}`,
+      `🏢 Équipe : ${data.nom_equipe || "Non spécifiée"}`,
       `---------------------------------`,
       `*CLIENT*`,
       `• Nom : ${data.nom_client || "N/A"}`,
       `• Adresse : ${data.adresse_zone || "N/A"}`,
       `• Mobile : ${data.mobile || "N/A"}`,
-      `• Offre : ${data.offre_souscrite || "Fibre Pro"}`,
+      `• Offre : ${data.offre_souscrite || "N/A"}`,
       `---------------------------------`,
       `*RÉSEAU & FAT*`,
-      `• État PON : ${data.etat || "PON"}`,
+      `• État PON : ${data.etat || "N/A"}`,
       `• MSAN : ${data.msan || "N/A"}`,
       `• Réf FAT / PBO : ${data.fat_ref || "N/A"}`,
       `• Port raccordé : ${data.port || "N/A"}`,
       `• Ports disponibles : ${data.ports_disponibles || data.port_disponible || "N/A"}`,
-      `• Puissance FAT : ${data.puissance_fat_dbm ?? "N/A"} dBm`,
+      `• Puissance FAT : ${fatVal}`,
       `---------------------------------`,
       `*CÂBLAGE & POTEAUX*`,
-      `• Type câble : ${data.type_cable || "Drop 1FO"}`,
+      `• Type câble : ${data.type_cable || "N/A"}`,
       `• Métrage départ : ${data.depart_m ?? 0} m | Arrivée : ${data.arrivee_m ?? 0} m`,
       `• Linéaire utilisé : ${data.lineaire_m ?? 0} m`,
       `• Poteaux : ${data.nb_poteaux_traverses ?? 0} traversés | ${data.nb_poteaux_implantes ?? 0} implantés | ${data.nb_poteaux_armes ?? 0} armés`,
       `---------------------------------`,
       `*MESURES & ÉQUIPEMENTS*`,
-      `• Puissance PTO : ${data.puissance_pto_dbm ?? "N/A"} dBm`,
-      `• Qté PTO : ${data.pto_qte ?? 1} | Répéteur WiFi : ${data.repeteur_wifi_qte ?? 0}`,
+      `• Puissance PTO : ${ptoVal}`,
+      `• Qté PTO : ${data.pto_qte ?? 0} | Répéteur WiFi : ${data.repeteur_wifi_qte ?? 0}`,
       `• SN ONT : ${data.sn || data.ont_sn || "N/A"}`,
       `• MAC ONT : ${data.mac || "N/A"}`,
-      `• Emplacement ONT : ${data.emplacement_ont || "Salon"}`,
+      `• Emplacement ONT : ${data.emplacement_ont || "N/A"}`,
       `---------------------------------`,
       `*LOCALISATION & PHOTOS*`,
       ...(gpsLine ? [gpsLine] : []),
@@ -413,7 +416,7 @@
       `*CONFORMITÉ*`,
       `• Travaux conformes : ${data.travaux_conformes ? "OUI ✅" : "NON ⚠️"}`,
       `• Service testé & fonctionnel : ${data.service_fonctionne ? "OUI ✅" : "NON ⚠️"}`,
-      `• Qualité globale : ${data.qualite || "Satisfait"}`,
+      `• Qualité globale : ${data.qualite || "N/A"}`,
     ].join("\n");
   }
 

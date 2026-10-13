@@ -1,6 +1,8 @@
 // Photo Filler Engine pour CelPros (Celtiis) et FAT Automation
-// Injecte automatiquement les photos d'intervention (points GPS, photos WhatsApp, étiquette ONT, photomètre, contrat)
+// Injecte automatiquement les vraies photos d'intervention existantes (points GPS, photos WhatsApp, étiquette ONT, photomètre, contrat)
 // dans les zones d'upload de la plateforme CelPros.
+// RÈGLE ABSOLUE : N'injecter QUE de vraies photos existantes dans l'intervention réelle.
+// Ne JAMAIS injecter de fausses photos, ni réutiliser aveuglément la même photo par index arbitraire.
 
 (function (root, factory) {
   const exports = factory();
@@ -16,11 +18,22 @@
 })(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
+  function normalizeText(str) {
+    if (!str || typeof str !== "string") return "";
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .trim();
+  }
+
   // Convertit une data URL base64 en objet File standard
   function dataUrlToFile(dataUrl, filename = "photo.jpg") {
     if (!dataUrl || typeof dataUrl !== "string") return null;
     try {
       const arr = dataUrl.split(",");
+      if (arr.length < 2) return null;
       const mimeMatch = arr[0].match(/:(.*?);/);
       const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
       const bstr = atob(arr[1]);
@@ -38,12 +51,16 @@
 
   // Convertit une URL HTTP ou dataURL en File
   async function srcToFile(src, filename = "photo.jpg") {
-    if (!src) return null;
+    if (!src || typeof src !== "string") return null;
     if (src.startsWith("data:")) {
       return dataUrlToFile(src, filename);
     }
+    let url = src;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = `https://fibretrack.mantota.com/api/${url.replace(/^\/+/, "")}`;
+    }
     try {
-      const res = await fetch(src);
+      const res = await fetch(url);
       const blob = await res.blob();
       return new File([blob], filename, { type: blob.type || "image/jpeg" });
     } catch (err) {
@@ -52,22 +69,64 @@
     }
   }
 
+  // Helper pour extraire une description complète d'une photo de FibreTrack (name, label, type, etc.)
+  function getPhotoDescription(p) {
+    if (!p || typeof p !== "object") return "";
+    return [
+      p.name,
+      p.nom,
+      p.title,
+      p.titre,
+      p.type,
+      p.sous_type,
+      p.label,
+      p.caption,
+      p.description,
+      p.lieu,
+      p.proprietaire,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+  }
+
+  // Helper pour récupérer l'URL ou dataURL d'une photo
+  function getPhotoSource(p) {
+    if (!p) return null;
+    if (typeof p === "string" && (p.startsWith("data:") || p.startsWith("http") || p.startsWith("uploads/"))) {
+      return p;
+    }
+    if (typeof p === "object") {
+      const src = p.url || p.photo || p.src || p.dataUrl || p.file_path || p.path;
+      if (typeof src === "string" && src.length > 10) return src;
+    }
+    return null;
+  }
+
   // Règles de reconnaissance des zones d'upload CelPros
+  // Chaque règle n'extrait la photo QUE si elle existe réellement dans l'intervention FibreTrack.
   const PHOTO_SLOT_RULES = [
     {
       key: "ont_sn",
       label: "Photo numéro de série ONT",
-      keywords: ["photo numero de serie", "numero de serie", "photo sn", "sn ont", "ont *", "etiquette ont", "box ont"],
+      keywords: ["photo numero de serie", "numero de serie", "photo sn", "sn ont", "ont *", "etiquette ont", "box ont", "photo ont"],
       getPhoto: (data) => {
         // 1. Photo du point Abonné dans points_gps
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const abonne = pts.find((p) => p && p.type === "Abonné" && p.photo);
-        if (abonne?.photo) return { src: abonne.photo, name: "etiquette_ont.jpg" };
+        const abonne = pts.find((p) => p && (normalizeText(p.type).includes("abonne") || normalizeText(p.type).includes("client") || normalizeText(p.type).includes("ont")) && getPhotoSource(p.photo));
+        if (abonne) {
+          const src = getPhotoSource(abonne.photo);
+          if (src) return { src, name: "etiquette_ont.jpg" };
+        }
 
-        // 2. Première photo de whatsapp_photos
+        // 2. Photo spécifiquement étiquetée ONT dans whatsapp_photos
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        const ontPhoto = wa.find((p) => p && (p.url || p.photo));
-        if (ontPhoto) return { src: ontPhoto.url || ontPhoto.photo, name: "ont_sn.jpg" };
+        const ontPhoto = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("ont") || desc.includes("sn") || desc.includes("serie") || desc.includes("box") || desc.includes("abonne") || desc.includes("client");
+        });
+        if (ontPhoto) return { src: getPhotoSource(ontPhoto), name: "ont_sn.jpg" };
 
         return null;
       },
@@ -78,11 +137,20 @@
       keywords: ["image fat", "photo fat", "boitier fat", "fat *"],
       getPhoto: (data) => {
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const fatPt = pts.find((p) => p && p.type === "FAT" && p.photo);
-        if (fatPt?.photo) return { src: fatPt.photo, name: "fat_raccordement.jpg" };
+        const fatPt = pts.find((p) => p && normalizeText(p.type).includes("fat") && getPhotoSource(p.photo));
+        if (fatPt) {
+          const src = getPhotoSource(fatPt.photo);
+          if (src) return { src, name: "fat_raccordement.jpg" };
+        }
 
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa[0]) return { src: wa[0].url || wa[0].photo, name: "fat.jpg" };
+        const fatPhoto = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("fat") || desc.includes("pbo");
+        });
+        if (fatPhoto) return { src: getPhotoSource(fatPhoto), name: "fat.jpg" };
+
         return null;
       },
     },
@@ -91,12 +159,13 @@
       label: "Image Scan FAT",
       keywords: ["image scan fat", "scan fat", "code barre fat", "etiquette fat"],
       getPhoto: (data) => {
-        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const fatPt = pts.find((p) => p && p.type === "FAT" && p.photo);
-        if (fatPt?.photo) return { src: fatPt.photo, name: "scan_fat.jpg" };
-
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa[1]) return { src: wa[1].url || wa[1].photo, name: "scan_fat.jpg" };
+        const scanPhoto = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("scan") || desc.includes("code barre") || desc.includes("barcode") || desc.includes("etiquette fat");
+        });
+        if (scanPhoto) return { src: getPhotoSource(scanPhoto), name: "scan_fat.jpg" };
         return null;
       },
     },
@@ -106,8 +175,12 @@
       keywords: ["entree cable interne", "cable interne", "image entree cable interne", "interne"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 2) return { src: wa[2].url || wa[2].photo, name: "cable_interne.jpg" };
-        if (wa.length > 0) return { src: wa[wa.length - 1].url || wa[wa.length - 1].photo, name: "cable_interne.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("interne");
+        });
+        if (match) return { src: getPhotoSource(match), name: "cable_interne.jpg" };
         return null;
       },
     },
@@ -117,8 +190,12 @@
       keywords: ["entree cable externe", "cable externe", "image entree cable externe", "externe"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 3) return { src: wa[3].url || wa[3].photo, name: "cable_externe.jpg" };
-        if (wa.length > 1) return { src: wa[1].url || wa[1].photo, name: "cable_externe.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("externe");
+        });
+        if (match) return { src: getPhotoSource(match), name: "cable_externe.jpg" };
         return null;
       },
     },
@@ -127,11 +204,13 @@
       label: "Image fibre au FAT",
       keywords: ["image fibre au fat", "fibre au fat", "fibre fat"],
       getPhoto: (data) => {
-        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const fatPt = pts.find((p) => p && p.type === "FAT" && p.photo);
-        if (fatPt?.photo) return { src: fatPt.photo, name: "fibre_fat.jpg" };
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa[0]) return { src: wa[0].url || wa[0].photo, name: "fibre_fat.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("fibre au fat") || desc.includes("fibre_fat");
+        });
+        if (match) return { src: getPhotoSource(match), name: "fibre_fat.jpg" };
         return null;
       },
     },
@@ -141,8 +220,12 @@
       keywords: ["image mesure au fat", "mesure au fat", "mesure fat", "photometre fat"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 4) return { src: wa[4].url || wa[4].photo, name: "mesure_fat.jpg" };
-        if (wa.length > 0) return { src: wa[0].url || wa[0].photo, name: "mesure_fat.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("mesure fat") || desc.includes("photometre fat");
+        });
+        if (match) return { src: getPhotoSource(match), name: "mesure_fat.jpg" };
         return null;
       },
     },
@@ -152,8 +235,12 @@
       keywords: ["image mesure pto", "mesure pto", "mesure au pto", "photometre pto"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 5) return { src: wa[5].url || wa[5].photo, name: "mesure_pto.jpg" };
-        if (wa.length > 1) return { src: wa[wa.length - 1].url || wa[wa.length - 1].photo, name: "mesure_pto.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("mesure pto") || desc.includes("photometre pto");
+        });
+        if (match) return { src: getPhotoSource(match), name: "mesure_pto.jpg" };
         return null;
       },
     },
@@ -163,7 +250,12 @@
       keywords: ["image test debit cable", "test debit cable", "debit cable"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 6) return { src: wa[6].url || wa[6].photo, name: "test_debit_cable.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("debit cable") || desc.includes("speedtest cable");
+        });
+        if (match) return { src: getPhotoSource(match), name: "test_debit_cable.jpg" };
         return null;
       },
     },
@@ -173,7 +265,12 @@
       keywords: ["image test debit wifi", "test debit wifi", "debit wifi"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 7) return { src: wa[7].url || wa[7].photo, name: "test_debit_wifi.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("debit wifi") || desc.includes("speedtest wifi");
+        });
+        if (match) return { src: getPhotoSource(match), name: "test_debit_wifi.jpg" };
         return null;
       },
     },
@@ -183,7 +280,12 @@
       keywords: ["image combine", "combine", "photo combine"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 1) return { src: wa[1].url || wa[1].photo, name: "combine.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("combine") && !desc.includes("fiche");
+        });
+        if (match) return { src: getPhotoSource(match), name: "combine.jpg" };
         return null;
       },
     },
@@ -193,7 +295,12 @@
       keywords: ["image fiche combine", "fiche combine", "fiche raccordement"],
       getPhoto: (data) => {
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 2) return { src: wa[2].url || wa[2].photo, name: "fiche_combine.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("fiche combine") || desc.includes("fiche raccordement");
+        });
+        if (match) return { src: getPhotoSource(match), name: "fiche_combine.jpg" };
         return null;
       },
     },
@@ -202,9 +309,16 @@
       label: "Photo du contrat client",
       keywords: ["photo du contrat client", "photo contrat", "contrat client", "signature du rapport", "contrat"],
       getPhoto: (data) => {
-        if (data?.signature_client) return { src: data.signature_client, name: "signature_client.png" };
+        if (data?.signature_client && typeof data.signature_client === "string" && data.signature_client.trim().length > 100) {
+          return { src: data.signature_client, name: "signature_client.png" };
+        }
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
-        if (wa.length > 0) return { src: wa[wa.length - 1].url || wa[wa.length - 1].photo, name: "contrat_signe.jpg" };
+        const match = wa.find((p) => {
+          if (!getPhotoSource(p)) return false;
+          const desc = getPhotoDescription(p);
+          return desc.includes("contrat") || desc.includes("signature");
+        });
+        if (match) return { src: getPhotoSource(match), name: "contrat_signe.jpg" };
         return null;
       },
     },
@@ -231,8 +345,11 @@
     // 3. label avec 'for'
     const label = container.closest("label") || container.querySelector("label");
     if (label && label.htmlFor) {
-      const el = document.getElementById(label.htmlFor);
-      if (el && el.type === "file") return el;
+      const doc = container.ownerDocument || (typeof document !== "undefined" ? document : null);
+      if (doc) {
+        const el = doc.getElementById(label.htmlFor);
+        if (el && el.type === "file") return el;
+      }
     }
 
     return null;
@@ -281,12 +398,15 @@
 
     // Éviter d'ajouter plusieurs badges
     if (!container.querySelector(".chaptech-photo-injected-badge")) {
-      const badge = document.createElement("div");
-      badge.className = "chaptech-photo-injected-badge";
-      badge.innerHTML = `✅ Photo injectée (${fileName})`;
-      badge.style.cssText =
-        "background: #16a34a; color: #fff; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-top: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);";
-      container.appendChild(badge);
+      const doc = container.ownerDocument || (typeof document !== "undefined" ? document : null);
+      if (doc) {
+        const badge = doc.createElement("div");
+        badge.className = "chaptech-photo-injected-badge";
+        badge.innerHTML = `✅ Photo injectée (${fileName})`;
+        badge.style.cssText =
+          "background: #16a34a; color: #fff; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-top: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);";
+        container.appendChild(badge);
+      }
     }
   }
 
@@ -309,17 +429,19 @@
   }
 
   // Recherche tous les conteneurs d'upload de photo sur la page courante
-  function findAllUploadContainers(root = document) {
+  function findAllUploadContainers(root = (typeof document !== "undefined" ? document : null)) {
+    if (!root) return [];
     const list = [];
     const seen = new Set();
 
     // 1. Tous les input[type="file"]
     const fileInputs = Array.from(root.querySelectorAll('input[type="file"]'));
     for (const input of fileInputs) {
-      const parent = input.closest(".upload-box, .dropzone, [class*='upload'], [class*='photo'], [class*='drop'], div") || input.parentElement;
-      if (parent && !seen.has(parent)) {
-        seen.add(parent);
-        list.push({ container: parent, input });
+      const parent = input.closest ? input.closest(".upload-box, .dropzone, [class*='upload'], [class*='photo'], [class*='drop'], div") : input.parentElement;
+      const targetParent = parent || input.parentElement;
+      if (targetParent && !seen.has(targetParent)) {
+        seen.add(targetParent);
+        list.push({ container: targetParent, input });
       }
     }
 
@@ -328,7 +450,7 @@
       if (seen.has(el)) return false;
       const txt = (el.innerText || "").toLowerCase();
       const hasPhotoKeyword = txt.includes("photo") || txt.includes("importer") || txt.includes("appareil photo");
-      const isCard = el.clientWidth > 120 && el.clientHeight > 60;
+      const isCard = (el.clientWidth || 0) > 120 && (el.clientHeight || 0) > 60;
       return hasPhotoKeyword && isCard;
     });
 
@@ -343,8 +465,8 @@
     return list;
   }
 
-  // Fonction principale : remplit automatiquement toutes les photos de la page
-  async function fillPhotosOnPage(interventionData, root = document) {
+  // Fonction principale : remplit automatiquement les photos de la page uniquement si elles existent dans l'intervention
+  async function fillPhotosOnPage(interventionData, root = (typeof document !== "undefined" ? document : null)) {
     if (!interventionData || !root) {
       return { success: false, injectedCount: 0, details: [] };
     }
@@ -388,38 +510,60 @@
     };
   }
 
-  // Gère l'ajout et l'injection des photos de poteaux géolocalisés
-  async function handlePoteauxPhotos(interventionData, root = document) {
+  // Gère l'ajout et l'injection des photos de poteaux géolocalisés (uniquement si elles existent)
+  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null)) {
     const details = [];
+    if (!root) return details;
+
+    const polePhotos = [];
     const pts = Array.isArray(interventionData?.points_gps) ? interventionData.points_gps : [];
-    const poles = pts.filter((p) => p && p.type === "Poteau" && p.photo);
-    if (!poles.length) return details;
+    for (const p of pts) {
+      if (p && normalizeText(p.type).includes("poteau")) {
+        const src = getPhotoSource(p.photo);
+        if (src) {
+          polePhotos.push({ src, name: `poteau_${p.numero || polePhotos.length + 1}.jpg` });
+        }
+      }
+    }
+    const wa = Array.isArray(interventionData?.whatsapp_photos) ? interventionData.whatsapp_photos : [];
+    for (const p of wa) {
+      const src = getPhotoSource(p);
+      if (!src) continue;
+      const desc = getPhotoDescription(p);
+      if (desc.includes("poteau")) {
+        if (!polePhotos.some((existing) => existing.src === src)) {
+          polePhotos.push({ src, name: `${p.name ? normalizeText(p.name) : "poteau"}.jpg` });
+        }
+      }
+    }
+
+    if (!polePhotos.length) return details;
 
     // Cherche la section Poteaux
     const headers = Array.from(root.querySelectorAll("h3, h4, strong, div, span"));
     const poteauxHeader = headers.find((h) => (h.innerText || "").toLowerCase().trim() === "poteaux");
     if (!poteauxHeader) return details;
 
-    const section = poteauxHeader.closest("div, section") || poteauxHeader.parentElement;
+    const section = poteauxHeader.closest ? (poteauxHeader.closest("div, section") || poteauxHeader.parentElement) : poteauxHeader.parentElement;
     if (!section) return details;
 
     // Injecte sur chaque zone de poteau existante
     const poleSlots = Array.from(section.querySelectorAll(".upload-box, [class*='upload'], [class*='photo'], label, div")).filter(
-      (el) => (el.innerText || "").toLowerCase().includes("photo") && el.clientHeight > 50
+      (el) => (el.innerText || "").toLowerCase().includes("photo") && (el.clientHeight || 0) > 50
     );
 
-    for (let i = 0; i < Math.min(poles.length, poleSlots.length || 1); i++) {
-      const pole = poles[i];
+    for (let i = 0; i < Math.min(polePhotos.length, poleSlots.length || 1); i++) {
+      const pole = polePhotos[i];
       const slotContainer = poleSlots[i] || section;
       const input = findFileInputForContainer(slotContainer);
-      if (input && pole.photo) {
-        const file = dataUrlToFile(pole.photo, `poteau_${pole.numero || i + 1}.jpg`);
+      if (input && pole.src) {
+        const file = await srcToFile(pole.src, pole.name);
         if (file) {
           const ok = injectFileIntoInput(input, file, slotContainer);
           if (ok) {
             details.push({
               slot: `poteau_${i + 1}`,
-              label: `Poteau ${pole.sous_type || ""} ${pole.numero || i + 1}`,
+              label: `Poteau ${i + 1}`,
               fileName: file.name,
               sizeKb: Math.round(file.size / 1024),
             });

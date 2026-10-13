@@ -203,3 +203,98 @@ test('FieldMapping - getElementLabelText identifies fieldset legend for radio gr
   assert.ok(match);
   assert.equal(match.definition.key, 'travaux_conformes');
 });
+
+test('FieldMapping - Empty intervention extracts NO fake/invented values', () => {
+  const emptyIntervention = {};
+  const defs = FieldMapping.FIELD_DEFINITIONS;
+
+  // No fake plan/offer/technology/place
+  assert.equal(defs.offre_souscrite.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.etat.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.type_cable.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.emplacement_ont.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.nom_equipe.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.date.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.plaque.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.interlocuteur.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.configurations_type.valueExtractor(emptyIntervention), '');
+
+  // No fake measurements / zeros
+  assert.equal(defs.puissance_fat_dbm.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.puissance_pto_dbm.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.puissance_fat_dbm.valueExtractor({ puissance_fat_dbm: 0 }), '');
+  assert.equal(defs.puissance_pto_dbm.valueExtractor({ puissance_pto_dbm: '0.00' }), '');
+  assert.equal(defs.depart_m.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.arrivee_m.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.lineaire_m.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.lineaire_m.valueExtractor({ lineaire_m: 0 }), '');
+  assert.equal(defs.pto_qte.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.pto_qte.valueExtractor({ pto_qte: 0 }), '');
+  assert.equal(defs.repeteur_wifi_qte.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.port_disponible.valueExtractor(emptyIntervention), '');
+
+  // No fake pole counts
+  assert.equal(defs.nb_poteaux_traverses.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.nb_poteaux_implantes.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.nb_poteaux_armes.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.poteaux_sbee_utilises.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.poteaux_petit_jean_utilises.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.poteaux_utilises.valueExtractor(emptyIntervention), '');
+
+  // No fake speedtest / tests
+  assert.equal(defs.debit_montant.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.debit_descendant.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.debit_ping.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.test_appel_sortant.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.test_appel_entrant.valueExtractor(emptyIntervention), null);
+
+  // No fake conformities
+  assert.equal(defs.travaux_conformes.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.service_teste.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.service_fonctionne.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.etiquetage.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.nettoyage.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.depose.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.colliers_serres.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.fat_normalise.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.tutorat.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.confirme_signature_rapport.valueExtractor(emptyIntervention), null);
+  assert.equal(defs.qualite.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.delais.valueExtractor(emptyIntervention), '');
+  assert.equal(defs.professionnalisme.valueExtractor(emptyIntervention), '');
+});
+
+test('FieldMapping - Dynamic materiel_pose and piton extraction works with real quantities', () => {
+  const defs = FieldMapping.FIELD_DEFINITIONS;
+
+  // Real 5 pitons in materiel_pose
+  const intvWithPitons = {
+    materiel_pose: { piton: 5, pince: 3, closer: 1 },
+    nb_poteaux_traverses: 3,
+    nb_poteaux_implantes: 2,
+  };
+
+  assert.equal(defs.piton.valueExtractor(intvWithPitons), '5');
+  assert.equal(defs.pince.valueExtractor(intvWithPitons), '3');
+  assert.equal(defs.connecteur.valueExtractor(intvWithPitons), '1');
+  assert.equal(defs.crochets.valueExtractor(intvWithPitons), ''); // Non utilisé -> chaîne vide
+  assert.equal(defs.poteaux_utilises.valueExtractor(intvWithPitons), '5'); // 3 + 2 poteaux
+
+  // Dynamic matching for custom material
+  const intvWithCustom = {
+    materiel_pose: {
+      collier_serrage: 8,
+    },
+  };
+
+  const elCustom = {
+    id: 'field_collierSerrage',
+    name: 'collier_serrage',
+    getAttribute: () => null,
+  };
+
+  const matched = FieldMapping.matchElementToField(elCustom, intvWithCustom);
+  assert.ok(matched);
+  assert.equal(matched.definition.valueExtractor(intvWithCustom), '8');
+});
+
