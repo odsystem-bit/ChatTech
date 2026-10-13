@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { validateCode, setCurrentAccount } from "../models/Account";
+import InstallPwaButton from "../components/InstallPwaButton";
 
 const ADMIN_CODE = "9999";
 
@@ -105,14 +106,18 @@ export default function LoginScreen({ onLogin }) {
         </form>
       </div>
 
-      <a href="/chaptech-v2.9.apk" download className="btn-secondary btn-large apk-download-btn">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-          <polyline points="7 10 12 15 17 10" />
-          <line x1="12" y1="15" x2="12" y2="3" />
-        </svg>
-        Télécharger l'application APK
-      </a>
+      <div style={{ marginTop: 16, width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+        <InstallPwaButton />
+
+        <a href="/chaptech-v2.9.apk" download className="btn-secondary btn-large apk-download-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Télécharger l'application APK
+        </a>
+      </div>
     </div>
   );
 }

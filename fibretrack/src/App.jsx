@@ -14,6 +14,7 @@ import {
   deleteIntervention,
 } from "./models/Intervention";
 import { formatDateFR } from "./lib/date";
+import InstallPwaButton from "./components/InstallPwaButton";
 
 export default function App() {
   const [user, setUser] = useState(getCurrentAccount());
@@ -189,6 +190,7 @@ export default function App() {
       </header>
 
       <main>
+        <InstallPwaButton variant="banner" />
         <div className="home-actions">
           <button type="button" className="home-action-card" onClick={startNewIntervention} disabled={creatingNew}>
             <div className="icon primary">
