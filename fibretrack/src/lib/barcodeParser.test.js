@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseBarcode, cleanRawBarcode, extractOntDataFromText } from "./barcodeParser.js";
+import { parseBarcode, cleanRawBarcode, extractOntDataFromText, extractFatAndMsanFromText } from "./barcodeParser.js";
+import { formatAddressZone } from "./geo.js";
 
 describe("cleanRawBarcode", () => {
   it("cleans MAC prefix while preserving -AE(17) suffix", () => {
@@ -164,3 +165,126 @@ describe("extractOntDataFromText (OCR extraction)", () => {
     assert.deepEqual(parseBarcode(null), { type: "unknown", value: "", raw: "" });
   });
 });
+
+describe("extractFatAndMsanFromText (FAT OCR extraction)", () => {
+  it("extracts labeled FAT and MSAN correctly", () => {
+    const text = `
+      MSAN: OGA-04
+      FAT: FAT-123
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "OGA-04");
+    assert.equal(res.fat_ref, "FAT-123");
+  });
+
+  it("extracts MSAN on top and FAT below without colons", () => {
+    const text = `
+      OGA-CADJEHOUN-02
+      FAT 04
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "OGA-CADJEHOUN-02");
+    assert.equal(res.fat_ref, "FAT 04");
+  });
+
+  it("extracts MSAN and FAT codes with slashes and dots", () => {
+    const text = `
+      MSAN : OGA_10/01
+      REF FAT : FAT-02/A.
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "OGA_10/01");
+    assert.equal(res.fat_ref, "FAT-02/A");
+  });
+
+  it("extracts standalone OGA and FAT codes", () => {
+    const text = "Photo PBO OGA01 et FAT-08 sur poteau";
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "OGA01");
+    assert.equal(res.fat_ref, "FAT-08");
+  });
+
+  it("handles MSAN on top and raw number on line below", () => {
+    const text = `
+      OGA-12
+      04
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "OGA-12");
+    assert.equal(res.fat_ref, "FAT-04");
+  });
+
+  it("corrects OCR confusion 0GA to OGA", () => {
+    const text = `
+      0GA-05
+      FAT-01
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "OGA-05");
+    assert.equal(res.fat_ref, "FAT-01");
+  });
+
+  it("handles null, empty, or undefined input safely", () => {
+    assert.deepEqual(extractFatAndMsanFromText(null), { fat_ref: null, msan: null });
+    assert.deepEqual(extractFatAndMsanFromText(""), { fat_ref: null, msan: null });
+    assert.deepEqual(extractFatAndMsanFromText(undefined), { fat_ref: null, msan: null });
+  });
+});
+
+describe("formatAddressZone (Reverse Geocoding Zone)", () => {
+  it("formats suburb and city correctly", () => {
+    const json = {
+      address: {
+        suburb: "Haie Vive",
+        city: "Cotonou",
+        country: "Bénin",
+      },
+    };
+    assert.equal(formatAddressZone(json), "Haie Vive, Cotonou");
+  });
+
+  it("formats neighbourhood and town correctly", () => {
+    const json = {
+      address: {
+        neighbourhood: "Fidjrossè",
+        city: "Cotonou",
+      },
+    };
+    assert.equal(formatAddressZone(json), "Fidjrossè, Cotonou");
+  });
+
+  it("handles quarter with municipality or district", () => {
+    const json = {
+      address: {
+        quarter: "Agla",
+        municipality: "Cotonou",
+      },
+    };
+    assert.equal(formatAddressZone(json), "Agla, Cotonou");
+  });
+
+  it("does not repeat if suburb and city have the same name", () => {
+    const json = {
+      address: {
+        suburb: "Cotonou",
+        city: "Cotonou",
+      },
+    };
+    assert.equal(formatAddressZone(json), "Cotonou");
+  });
+
+  it("falls back to first parts of display_name if address details missing", () => {
+    const json = {
+      display_name: "Zone Résidentielle, Cotonou, Littoral, Bénin",
+    };
+    assert.equal(formatAddressZone(json), "Zone Résidentielle, Cotonou");
+  });
+
+  it("handles null and empty objects gracefully", () => {
+    assert.equal(formatAddressZone(null), "");
+    assert.equal(formatAddressZone({}), "");
+    assert.equal(formatAddressZone(undefined), "");
+  });
+});
+
+

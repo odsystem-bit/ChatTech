@@ -237,3 +237,106 @@ export function extractOntDataFromText(text) {
 
   return { mac: foundMac, sn: foundSn };
 }
+
+/**
+ * Analyse un texte OCR extrait d'une photo de boîtier FAT
+ * pour en extraire automatiquement la Référence FAT et le MSAN.
+ *
+ * Règle métier :
+ * - Le MSAN commence généralement par "OGA..." (ou préfixé par MSAN:)
+ * - La référence FAT commence par "FAT..." (ou préfixé par FAT/REF:)
+ * - Sur la photo, le MSAN est généralement au-dessus et le FAT en dessous.
+ * - Tolérance aux erreurs OCR courantes (ex: 0GA au lieu de OGA).
+ *
+ * @param {string} text
+ * @returns {{ fat_ref: string|null, msan: string|null }}
+ */
+export function extractFatAndMsanFromText(text) {
+  if (!text || typeof text !== "string") {
+    return { fat_ref: null, msan: null };
+  }
+
+  let foundFat = null;
+  let foundMsan = null;
+
+  // 0. Correction préliminaire des confusions OCR fréquentes
+  // "0GA" -> "OGA" en début de mot
+  const normalized = text
+    .replace(/\b0GA(?=[-_0-9A-Za-z]|\b)/gi, "OGA")
+    .replace(/\bF4T\b/gi, "FAT");
+
+  // 1. Recherche explicite par préfixes textuels (MSAN: ..., REF FAT: ...)
+  const msanPrefixMatch = normalized.match(
+    /(?:MSAN|M\.S\.A\.N)[\s.:=-]+([A-Za-z0-9_\-\.\/]+(?:[ \t]+[A-Za-z0-9_\-\.\/]+)?)/i
+  );
+  if (msanPrefixMatch && msanPrefixMatch[1]) {
+    const raw = msanPrefixMatch[1].trim();
+    if (raw.length >= 2) {
+      foundMsan = raw;
+    }
+  }
+
+  const fatPrefixMatch = normalized.match(
+    /(?:R[EÉ]F(?:[EÉ]RENCE)?\s*(?:FAT)?|R[EÉ]F\s*FAT|BOITIER\s*FAT)[\s.:=-]+([A-Za-z0-9_\-\.\/]+(?:[ \t]+[A-Za-z0-9_\-\.\/]+)?)/i
+  );
+  if (fatPrefixMatch && fatPrefixMatch[1]) {
+    const raw = fatPrefixMatch[1].trim();
+    if (raw.length >= 1) {
+      foundFat = /^FAT/i.test(raw) ? raw : `FAT-${raw}`;
+    }
+  }
+
+  // 2. Recherche par signature de code OGA (ex: OGA-01, OGA 02, OGA04, OGA-CADJEHOUN-02, OGA_12, OGA/01)
+  if (!foundMsan) {
+    const ogaMatch = normalized.match(/\b(OGA[\s\-_.:]?[A-Za-z0-9]+(?:[\-_.\/][A-Za-z0-9]+)*)\b/i);
+    if (ogaMatch && ogaMatch[1]) {
+      foundMsan = ogaMatch[1].trim();
+    }
+  }
+
+  // 3. Recherche par signature de code FAT (ex: FAT-04, FAT 04, FAT04, FAT_12, FAT-01/02)
+  if (!foundFat) {
+    const fatMatch = normalized.match(/\b(FAT[\s\-_.:]?[0-9A-Za-z]+(?:[\-_.\/][0-9A-Za-z]+)*)\b/i);
+    if (fatMatch && fatMatch[1]) {
+      foundFat = fatMatch[1].trim();
+    }
+  }
+
+  // 4. Analyse multi-lignes positionnelle (MSAN au-dessus, FAT en dessous)
+  const lines = normalized
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (!foundMsan && /^OGA/i.test(line)) {
+      foundMsan = line;
+    }
+
+    if (!foundFat && /^FAT/i.test(line)) {
+      foundFat = line;
+    }
+
+    // Si on a un MSAN sur cette ligne et pas encore de FAT, vérifier la ligne suivante
+    if (foundMsan && !foundFat && i + 1 < lines.length) {
+      const nextLine = lines[i + 1];
+      if (/^FAT/i.test(nextLine)) {
+        foundFat = nextLine;
+      } else if (/^\d{1,4}[A-Za-z]?$/.test(nextLine)) {
+        foundFat = `FAT-${nextLine}`;
+      }
+    }
+  }
+
+  // Nettoyage ponctuation résiduelle en fin de chaîne
+  if (foundFat) {
+    foundFat = foundFat.replace(/[.,;:"'`]+$/, "").trim();
+  }
+  if (foundMsan) {
+    foundMsan = foundMsan.replace(/[.,;:"'`]+$/, "").trim();
+  }
+
+  return { fat_ref: foundFat, msan: foundMsan };
+}

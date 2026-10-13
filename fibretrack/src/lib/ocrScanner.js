@@ -1,5 +1,5 @@
 import { createWorker } from "tesseract.js";
-import { extractOntDataFromText } from "./barcodeParser";
+import { extractOntDataFromText, extractFatAndMsanFromText } from "./barcodeParser";
 
 let workerPromise = null;
 
@@ -138,5 +138,100 @@ export async function recognizeOntFromVideo(video, cropRect) {
   } catch (err) {
     console.warn("Erreur reconnaissance OCR:", err);
     return { mac: null, sn: null, rawText: "", error: err?.message, confidence: 0 };
+  }
+}
+
+/**
+ * Prétraite une image (data URL, blob, etc.) pour étirer le contraste et maximiser
+ * la lisibilité des chiffres et lettres gravés ou écrits sur les boîtiers FAT en extérieur.
+ * @param {string} imageSrc
+ * @returns {Promise<HTMLCanvasElement|string>}
+ */
+export async function preprocessImageSourceForOcr(imageSrc) {
+  if (typeof document === "undefined" || typeof Image === "undefined") {
+    return imageSrc;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const maxDim = 1600;
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) {
+            h = Math.round((h * maxDim) / w);
+            w = maxDim;
+          } else {
+            w = Math.round((w * maxDim) / h);
+            h = maxDim;
+          }
+        }
+        canvas.width = Math.max(1, w);
+        canvas.height = Math.max(1, h);
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const d = imgData.data;
+        const len = d.length;
+        let minLum = 255;
+        let maxLum = 0;
+        const step = 4 * 4;
+        for (let i = 0; i < len; i += step) {
+          const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+          if (lum < minLum) minLum = lum;
+          if (lum > maxLum) maxLum = lum;
+        }
+
+        const range = maxLum - minLum;
+        if (range > 20) {
+          const scale = 255 / range;
+          for (let i = 0; i < len; i += 4) {
+            const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+            const stretched = Math.max(0, Math.min(255, (lum - minLum) * scale));
+            d[i] = stretched;
+            d[i + 1] = stretched;
+            d[i + 2] = stretched;
+          }
+          ctx.putImageData(imgData, 0, 0);
+        }
+        resolve(canvas);
+      } catch {
+        resolve(imageSrc);
+      }
+    };
+    img.onerror = () => resolve(imageSrc);
+    img.src = imageSrc;
+  });
+}
+
+/**
+ * Analyse une photo de boîtier FAT (data URL ou image) pour en extraire fidèlement
+ * la Référence FAT et le MSAN.
+ * @param {string} imageSrc
+ * @returns {Promise<{ fat_ref: string|null, msan: string|null, rawText: string, confidence: number }>}
+ */
+export async function recognizeFatAndMsanFromImage(imageSrc) {
+  if (!imageSrc) {
+    return { fat_ref: null, msan: null, rawText: "", confidence: 0 };
+  }
+  try {
+    const worker = await getOcrWorker();
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc);
+    const result = await worker.recognize(preprocessed);
+    const text = result?.data?.text || "";
+    const extracted = extractFatAndMsanFromText(text);
+    return {
+      fat_ref: extracted.fat_ref,
+      msan: extracted.msan,
+      rawText: text,
+      confidence: result?.data?.confidence || 0,
+    };
+  } catch (err) {
+    console.warn("Erreur reconnaissance OCR FAT & MSAN:", err);
+    return { fat_ref: null, msan: null, rawText: "", error: err?.message, confidence: 0 };
   }
 }

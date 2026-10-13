@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Tabs from "../components/Tabs";
-import { TextField, CheckField, SelectField, ScannableField } from "../components/FormField";
+import { TextField, CheckField, SelectField, ScannableField, GeocodableField } from "../components/FormField";
 import SignaturePad from "../components/SignaturePad";
 import {
   getInterventionLight,
@@ -16,8 +16,12 @@ import {
   readFileAsDataUrl,
   embedGpsOnPhoto,
   reverseGeocode,
+  reverseGeocodeZone,
   PRECISION_WARNING_THRESHOLD_M,
 } from "../lib/geo";
+import {
+  recognizeFatAndMsanFromImage,
+} from "../lib/ocrScanner";
 import {
   getDesignations,
   resolveOrCreateDesignation,
@@ -25,10 +29,106 @@ import {
 } from "../lib/stock";
 
 const TABS = [
-  { id: "rapport", label: "Rapport rapide" },
-  { id: "gps", label: "GPS" },
-  { id: "mise_en_service", label: "Mise en service" },
-  { id: "satisfaction", label: "Satisfaction" },
+  { id: "rapport", label: "📋 Rapport" },
+  { id: "photos", label: "📸 Photos CelPros" },
+  { id: "gps", label: "📍 Poteaux & GPS" },
+  { id: "mise_en_service", label: "⚙️ Mise en service" },
+  { id: "satisfaction", label: "✍️ Satisfaction" },
+];
+
+export const CELPROS_PHOTO_SLOTS = [
+  {
+    key: "fat",
+    label: "Boîtier FAT",
+    icon: "📦",
+    description: "Boîtier FAT / PBO extérieur (lecture auto Référence FAT & MSAN)",
+    hasOcr: true,
+    keywords: ["image fat", "photo fat", "boitier fat", "fat"],
+  },
+  {
+    key: "scan_fat",
+    label: "Scan / Code-barres FAT",
+    icon: "🏷️",
+    description: "Code-barres ou numéro de série gravé sur le FAT",
+    keywords: ["scan fat", "code barre fat", "etiquette fat", "barcode fat"],
+  },
+  {
+    key: "cable_interne",
+    label: "Entrée câble interne",
+    icon: "🏠",
+    description: "Pénétration du câble fibre à l'intérieur du bâtiment",
+    keywords: ["entree cable interne", "cable interne", "interne"],
+  },
+  {
+    key: "cable_externe",
+    label: "Entrée câble externe",
+    icon: "🌳",
+    description: "Point de pénétration extérieur en façade du bâtiment",
+    keywords: ["entree cable externe", "cable externe", "externe"],
+  },
+  {
+    key: "fibre_fat",
+    label: "Fibre au FAT",
+    icon: "🧵",
+    description: "Raccordement de la fibre optique sur le port du FAT",
+    keywords: ["fibre au fat", "fibre fat"],
+  },
+  {
+    key: "mesure_fat",
+    label: "Mesure puissance au FAT",
+    icon: "📊",
+    description: "Écran du photomètre optique mesurant au FAT (dBm)",
+    keywords: ["mesure fat", "photometre fat", "puissance fat"],
+  },
+  {
+    key: "mesure_pto",
+    label: "Mesure puissance au PTO",
+    icon: "📊",
+    description: "Écran du photomètre optique mesurant au PTO (dBm)",
+    keywords: ["mesure pto", "photometre pto", "puissance pto"],
+  },
+  {
+    key: "debit_cable",
+    label: "Test débit câble RJ45",
+    icon: "⚡",
+    description: "Capture du test de débit réalisé par câble Ethernet",
+    keywords: ["debit cable", "test debit cable", "speedtest cable"],
+  },
+  {
+    key: "debit_wifi",
+    label: "Test débit Wi-Fi",
+    icon: "📶",
+    description: "Capture du test de débit réalisé en Wi-Fi",
+    keywords: ["debit wifi", "test debit wifi", "speedtest wifi"],
+  },
+  {
+    key: "ont_sn",
+    label: "Étiquette Box ONT (MAC & SN)",
+    icon: "🏷️",
+    description: "Étiquette constructeur avec codes-barres MAC et numéro de série",
+    keywords: ["photo ont", "etiquette ont", "box ont", "ont sn", "sn ont"],
+  },
+  {
+    key: "combine",
+    label: "Combiné téléphonique",
+    icon: "📞",
+    description: "Photo du combiné ou téléphone fixe raccordé",
+    keywords: ["combine", "photo combine", "telephone"],
+  },
+  {
+    key: "fiche_combine",
+    label: "Fiche combiné",
+    icon: "🔌",
+    description: "Prise ou fiche de raccordement du combiné",
+    keywords: ["fiche combine", "fiche raccordement"],
+  },
+  {
+    key: "contrat_client",
+    label: "Photo contrat client",
+    icon: "📝",
+    description: "Contrat ou fiche d'intervention signée par le client",
+    keywords: ["photo contrat", "contrat client", "signature"],
+  },
 ];
 
 const OFFRES = ["Fibre Pro", "Pro Max", "Pro Mega", "Office Max", "Office Mega"];
@@ -89,6 +189,23 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [scannerTarget, setScannerTarget] = useState("both");
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
+
+  // Géolocalisation automatique de la zone (Quartier, Ville)
+  const [detectingZone, setDetectingZone] = useState(false);
+  const [zoneStatus, setZoneStatus] = useState("");
+  const [zoneStatusType, setZoneStatusType] = useState("info");
+
+  // Détection OCR automatique sur photo FAT (fat_ref & msan)
+  const [ocrNotification, setOcrNotification] = useState(null);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+
+  // Gestion des boîtes de photos structurées CelPros
+  const slotCameraInputRef = useRef(null);
+  const slotGalleryInputRef = useRef(null);
+  const currentSlotKeyRef = useRef(null);
+  const [slotCapturing, setSlotCapturing] = useState(false);
+  const [slotActionFeedback, setSlotActionFeedback] = useState("");
+
   const selectedPorts = (data.ports_disponibles || "")
     .split(",")
     .map((port) => port.trim())
@@ -348,8 +465,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     // Also add the photo to the terrain gallery (hors rapport)
     if (pendingCapture.photo) {
+      const isFat = resolvedType === "FAT";
+      const isAbonne = resolvedType === "Abonné";
+      const isPoteau = resolvedType === "Poteau";
+      const slot = isFat ? "fat" : isAbonne ? "ont_sn" : isPoteau ? "poteau" : undefined;
       const galleryPhoto = {
         id: crypto.randomUUID(),
+        ...(slot
+          ? {
+              slot,
+              type: slot,
+              label: isFat ? "Boîtier FAT" : isAbonne ? "Étiquette Box ONT (MAC & SN)" : `Poteau ${sousType} ${point.numero}`,
+              name: `${slot}.jpg`,
+              description: `${isFat ? "Boîtier FAT" : isAbonne ? "Étiquette Box ONT (MAC & SN)" : `Poteau ${sousType}`} - ${data.nom_client || "Intervention"}`,
+            }
+          : {}),
         url: pendingCapture.photo,
         lat: pendingCapture.lat,
         lng: pendingCapture.lng,
@@ -361,6 +491,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       };
       setWhatsappPhotos((prev) => [...prev, galleryPhoto]);
       markDirty("whatsapp_photos");
+
+      if (isFat) {
+        runFatOcrOnPhoto(pendingCapture.photo);
+      }
     }
 
     setPendingCapture(null);
@@ -430,6 +564,225 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       delete next[designation];
       return { ...prev, materiel_pose: next };
     });
+  }
+
+  // ===== Détection automatique de Zone (Reverse Geocoding) =====
+
+  async function handleDetectZone() {
+    setDetectingZone(true);
+    setZoneStatus("Géolocalisation GPS en cours…");
+    setZoneStatusType("info");
+    try {
+      const pos = await getCurrentPositionHighAccuracy();
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      setZoneStatus("Recherche du quartier / zone…");
+      const zone = await reverseGeocodeZone(lat, lng);
+      if (zone) {
+        update("adresse_zone", zone);
+        setZoneStatus(`✓ ${zone}`);
+        setZoneStatusType("success");
+      } else {
+        const fallback = `Zone GPS (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+        update("adresse_zone", fallback);
+        setZoneStatus(`✓ ${fallback}`);
+        setZoneStatusType("success");
+      }
+    } catch (err) {
+      setZoneStatus(`Erreur GPS : ${err.message || "Indisponible"}`);
+      setZoneStatusType("error");
+    } finally {
+      setDetectingZone(false);
+    }
+  }
+
+  // ===== OCR automatique sur photo du boîtier FAT =====
+
+  const runFatOcrOnPhoto = useCallback(async (photoDataUrl) => {
+    if (!photoDataUrl) return;
+    setOcrProcessing(true);
+    try {
+      const ocrResult = await recognizeFatAndMsanFromImage(photoDataUrl);
+      let foundAny = false;
+      if (ocrResult.fat_ref) {
+        update("fat_ref", ocrResult.fat_ref);
+        foundAny = true;
+      }
+      if (ocrResult.msan) {
+        update("msan", ocrResult.msan);
+        foundAny = true;
+      }
+      let msg = "";
+      if (ocrResult.fat_ref && ocrResult.msan) {
+        msg = `✅ OCR FAT : FAT = "${ocrResult.fat_ref}" et MSAN = "${ocrResult.msan}" détectés et enregistrés automatiquement !`;
+      } else if (ocrResult.fat_ref) {
+        msg = `✅ OCR FAT : Référence FAT = "${ocrResult.fat_ref}" détectée et enregistrée automatiquement !`;
+      } else if (ocrResult.msan) {
+        msg = `✅ OCR FAT : MSAN = "${ocrResult.msan}" détecté et enregistré automatiquement !`;
+      } else {
+        msg = "ℹ️ Photo FAT enregistrée. Renseignez Référence FAT et MSAN manuellement si non lisibles sur la boîte.";
+      }
+      setOcrNotification({ text: msg, success: foundAny });
+      setTimeout(() => setOcrNotification(null), 9000);
+    } catch (err) {
+      console.warn("OCR FAT error:", err);
+    } finally {
+      setOcrProcessing(false);
+    }
+  }, []);
+
+  // ===== Gestion des Boîtes de Photos CelPros =====
+
+  function getPhotoForSlot(slotKey) {
+    // 1. Recherche par slot ou type direct dans whatsapp_photos
+    const direct = whatsappPhotos.find((p) => p && (p.slot === slotKey || p.type === slotKey));
+    if (direct) return direct;
+
+    // 2. Recherche dans les points GPS pour FAT ou Abonné (ONT)
+    if (slotKey === "fat") {
+      const fatPt = (data.points_gps || []).find((p) => p && String(p.type).toUpperCase() === "FAT" && p.photo);
+      if (fatPt) {
+        return {
+          id: `gps_fat_${fatPt.numero || 1}`,
+          url: fatPt.photo,
+          lat: fatPt.lat,
+          lng: fatPt.lng,
+          precision_m: fatPt.precision_m,
+          horodatage: fatPt.horodatage,
+          lieu: fatPt.lieu,
+          from_gps: true,
+        };
+      }
+    }
+    if (slotKey === "ont_sn") {
+      const abonnePt = (data.points_gps || []).find((p) => p && (String(p.type).toUpperCase() === "ABONNÉ" || String(p.type).toUpperCase() === "ONT") && p.photo);
+      if (abonnePt) {
+        return {
+          id: `gps_abonne_${abonnePt.numero || 1}`,
+          url: abonnePt.photo,
+          lat: abonnePt.lat,
+          lng: abonnePt.lng,
+          precision_m: abonnePt.precision_m,
+          horodatage: abonnePt.horodatage,
+          lieu: abonnePt.lieu,
+          from_gps: true,
+        };
+      }
+    }
+
+    // 3. Repli par mots-clés dans les métadonnées de la photo
+    const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
+    if (slotDef) {
+      const match = whatsappPhotos.find((p) => {
+        const desc = `${p.name || ""} ${p.label || ""} ${p.description || ""} ${p.type || ""}`.toLowerCase();
+        return slotDef.keywords.some((kw) => desc.includes(kw));
+      });
+      if (match) return match;
+    }
+    return null;
+  }
+
+  function openSlotCamera(slotKey) {
+    currentSlotKeyRef.current = slotKey;
+    if (slotCameraInputRef.current) {
+      slotCameraInputRef.current.value = "";
+      slotCameraInputRef.current.click();
+    }
+  }
+
+  function openSlotGallery(slotKey) {
+    currentSlotKeyRef.current = slotKey;
+    if (slotGalleryInputRef.current) {
+      slotGalleryInputRef.current.value = "";
+      slotGalleryInputRef.current.click();
+    }
+  }
+
+  async function handleSlotPhotoSelected(e) {
+    const file = e.target.files?.[0];
+    const slotKey = currentSlotKeyRef.current;
+    if (!file || !slotKey) return;
+
+    const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
+    const slotLabel = slotDef?.label || slotKey;
+
+    setSlotCapturing(true);
+    setSlotActionFeedback(`Capture et géolocalisation pour "${slotLabel}"…`);
+    try {
+      const [photoDataUrl, pos] = await Promise.all([
+        readFileAsDataUrl(file),
+        getCurrentPositionHighAccuracy(),
+      ]);
+
+      if (e.target) e.target.value = "";
+
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const precision_m = pos.coords.accuracy;
+      const horodatage = new Date().toISOString();
+
+      setSlotActionFeedback(`Géocodage de l'adresse…`);
+      const lieu = await reverseGeocode(lat, lng);
+
+      const embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
+        type: `${slotLabel} - ${data.nom_client || "Intervention"}`,
+        lieu,
+        lat,
+        lng,
+        precision_m,
+        horodatage,
+      });
+
+      const newPhoto = {
+        id: crypto.randomUUID(),
+        slot: slotKey,
+        type: slotKey,
+        label: slotLabel,
+        name: `${slotKey}.jpg`,
+        description: `${slotLabel} - ${data.nom_client || "Intervention"}`,
+        url: embeddedPhoto,
+        lat,
+        lng,
+        precision_m,
+        horodatage,
+        lieu,
+        added: new Date().toISOString(),
+      };
+
+      setWhatsappPhotos((prev) => {
+        const filtered = prev.filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
+        const next = [...filtered, newPhoto];
+        saveInterventionLocally({ ...data, whatsapp_photos: next });
+        return next;
+      });
+      markDirty("whatsapp_photos");
+      setSaveStatus("✓ Photo enregistrée");
+      setSlotActionFeedback(`✓ Photo "${slotLabel}" enregistrée.`);
+
+      // Si c'est la photo du boîtier FAT, extraction automatique OCR de Référence FAT et MSAN !
+      if (slotKey === "fat") {
+        runFatOcrOnPhoto(embeddedPhoto);
+      }
+    } catch (err) {
+      setSlotActionFeedback(`Erreur : ${err.message}`);
+    } finally {
+      setSlotCapturing(false);
+    }
+  }
+
+  function removeSlotPhoto(slotKey) {
+    const existing = getPhotoForSlot(slotKey);
+    if (!existing) return;
+    if (confirm(`Supprimer la photo de la case "${slotKey}" ?`)) {
+      markDirty("whatsapp_photos");
+      if (existing.id) deletedWhatsappPhotoIdsRef.current.add(existing.id);
+      setWhatsappPhotos((prev) => {
+        const next = prev.filter((p) => p.id !== existing.id && p.slot !== slotKey && p.type !== slotKey);
+        saveInterventionLocally({ ...data, whatsapp_photos: next });
+        return next;
+      });
+      setSaveStatus("✓ Modifié");
+    }
   }
 
   // ===== WhatsApp Photos (geolocalisees, hors rapport) =====
@@ -666,164 +1019,585 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
       <div className="tab-content">
         {activeTab === "rapport" && (
-          <section>
-            <TextField label="Nom du client" value={data.nom_client} onChange={(v) => update("nom_client", v)} />
-            <TextField label="Adresse / Zone" value={data.adresse_zone} onChange={(v) => update("adresse_zone", v)} />
-            <TextField label="Téléphone ligne" value={data.telephone_ligne} onChange={(v) => update("telephone_ligne", v)} />
-            <TextField label="Mobile" value={data.mobile} onChange={(v) => update("mobile", v)} />
+          <section className="form-section-stack">
+            {ocrNotification && (
+              <div className={`ocr-banner ${ocrNotification.success ? "success" : "info"}`}>
+                <span>{ocrNotification.text}</span>
+                <button type="button" onClick={() => setOcrNotification(null)}>✕</button>
+              </div>
+            )}
 
-            <SelectField label="État" value={data.etat} options={["PON", "Cuivre", "Autre"]} onChange={(v) => update("etat", v)} />
-            <TextField label="MSAN" value={data.msan} onChange={(v) => update("msan", v)} />
-            <TextField label="Référence FAT" value={data.fat_ref} onChange={(v) => update("fat_ref", v)} />
-            <TextField label="Port" value={data.port} onChange={(v) => update("port", v)} />
-            <div className="form-field">
-              <span>Ports disponibles (1 à 8)</span>
-              {PORTS_DISPONIBLES.map((port) => (
-                <CheckField
-                  key={port}
-                  label={port}
-                  checked={selectedPorts.includes(port)}
-                  onChange={() => togglePortDisponible(port)}
+            {/* Carte 1 : Client & Localisation */}
+            <div className="form-card">
+              <div className="form-card-header">
+                <div className="form-card-icon user-icon">👤</div>
+                <div>
+                  <h3>Client & Localisation</h3>
+                  <p className="form-card-sub">Identité de l'abonné et détection GPS automatique de la zone</p>
+                </div>
+              </div>
+              <div className="form-card-body">
+                <TextField
+                  label="Nom du client"
+                  placeholder="Ex: Entreprise Mantota ou Nom de l'abonné"
+                  value={data.nom_client}
+                  onChange={(v) => update("nom_client", v)}
                 />
-              ))}
-              {!data.ports_disponibles && Number(data.port_disponible) > 0 && (
-                <small>Ancienne fiche : {data.port_disponible} port(s) enregistré(s), ports précis non définis.</small>
+
+                <GeocodableField
+                  label="Adresse / Zone"
+                  placeholder="Ex: Haie Vive, Cotonou ou Fidjrossè"
+                  value={data.adresse_zone}
+                  onChange={(v) => update("adresse_zone", v)}
+                  onDetectGps={handleDetectZone}
+                  detecting={detectingZone}
+                  statusMessage={zoneStatus}
+                  statusType={zoneStatusType}
+                />
+
+                <div className="form-row-2">
+                  <TextField
+                    label="Téléphone ligne"
+                    type="tel"
+                    placeholder="Ex: 21 30 00 00"
+                    value={data.telephone_ligne}
+                    onChange={(v) => update("telephone_ligne", v)}
+                  />
+                  <TextField
+                    label="Mobile"
+                    type="tel"
+                    placeholder="Ex: 97 00 00 00"
+                    value={data.mobile}
+                    onChange={(v) => update("mobile", v)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Carte 2 : Raccordement & Paramètres Optiques */}
+            <div className="form-card">
+              <div className="form-card-header">
+                <div className="form-card-icon fiber-icon">⚡</div>
+                <div>
+                  <h3>Raccordement & Optique</h3>
+                  <p className="form-card-sub">Liaison fibre, ports et mesures de puissance optique</p>
+                </div>
+              </div>
+              <div className="form-card-body">
+                <div className="form-row-3">
+                  <SelectField
+                    label="État"
+                    value={data.etat}
+                    options={["PON", "Cuivre", "Autre"]}
+                    onChange={(v) => update("etat", v)}
+                  />
+                  <TextField
+                    label="MSAN"
+                    placeholder="Ex: OGA-12"
+                    value={data.msan}
+                    onChange={(v) => update("msan", v)}
+                  />
+                  <TextField
+                    label="Référence FAT"
+                    placeholder="Ex: FAT-04"
+                    value={data.fat_ref}
+                    onChange={(v) => update("fat_ref", v)}
+                  />
+                </div>
+
+                <div className="form-row-2">
+                  <TextField
+                    label="Port raccordé"
+                    placeholder="Ex: Port 2"
+                    value={data.port}
+                    onChange={(v) => update("port", v)}
+                  />
+                  <TextField
+                    label="Type de câble"
+                    placeholder="Ex: Câble 2FO DROP"
+                    value={data.type_cable}
+                    onChange={(v) => update("type_cable", v)}
+                  />
+                </div>
+
+                <div className="form-field">
+                  <div className="field-label-row">
+                    <span>Ports disponibles (1 à 8)</span>
+                    <span className="badge-count">{selectedPorts.length} sélectionné(s)</span>
+                  </div>
+                  <div className="ports-toggle-grid">
+                    {PORTS_DISPONIBLES.map((port) => (
+                      <button
+                        key={port}
+                        type="button"
+                        className={`port-pill ${selectedPorts.includes(port) ? "active" : ""}`}
+                        onClick={() => togglePortDisponible(port)}
+                      >
+                        {port}
+                      </button>
+                    ))}
+                  </div>
+                  {!data.ports_disponibles && Number(data.port_disponible) > 0 && (
+                    <small className="field-hint">Ancienne fiche : {data.port_disponible} port(s) enregistré(s).</small>
+                  )}
+                </div>
+
+                <div className="form-row-3">
+                  <TextField
+                    label="Départ (m)"
+                    type="number"
+                    value={data.depart_m}
+                    onChange={(v) => update("depart_m", v)}
+                  />
+                  <TextField
+                    label="Arrivée (m)"
+                    type="number"
+                    value={data.arrivee_m}
+                    onChange={(v) => update("arrivee_m", v)}
+                  />
+                  <TextField
+                    label="Linéaire calculé (m)"
+                    type="number"
+                    value={data.lineaire_m}
+                    onChange={() => {}}
+                  />
+                </div>
+
+                <div className="form-row-2">
+                  <TextField
+                    label="Puissance FAT (dBm)"
+                    type="number"
+                    placeholder="Ex: -18.5"
+                    value={data.puissance_fat_dbm}
+                    onChange={(v) => update("puissance_fat_dbm", v)}
+                  />
+                  <TextField
+                    label="Puissance PTO (dBm)"
+                    type="number"
+                    placeholder="Ex: -19.2"
+                    value={data.puissance_pto_dbm}
+                    onChange={(v) => update("puissance_pto_dbm", v)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Carte 3 : Équipements Box / ONT */}
+            <div className="form-card">
+              <div className="form-card-header">
+                <div className="form-card-icon ont-icon">🏷️</div>
+                <div>
+                  <h3>Équipements Box / ONT</h3>
+                  <p className="form-card-sub">Identification et numérisation des codes MAC et SN</p>
+                </div>
+              </div>
+              <div className="form-card-body">
+                <ScannableField
+                  label="Adresse MAC (Box / ONT)"
+                  value={data.mac}
+                  placeholder="Ex: 18D6DDF6719E-AE(17)"
+                  scanLabel="Scanner MAC"
+                  onChange={(v) => update("mac", v)}
+                  onScanClick={() => {
+                    setScannerTarget("mac");
+                    setScannerOpen(true);
+                  }}
+                />
+
+                <ScannableField
+                  label="SN (Numéro de série ONT)"
+                  value={data.sn}
+                  placeholder="Ex: 485754437572231B8"
+                  scanLabel="Scanner SN"
+                  onChange={(v) => {
+                    update("sn", v);
+                    if (!data.ont_sn) update("ont_sn", v);
+                  }}
+                  onScanClick={() => {
+                    setScannerTarget("sn");
+                    setScannerOpen(true);
+                  }}
+                />
+
+                <button
+                  type="button"
+                  className="btn-dual-scan"
+                  onClick={() => {
+                    setScannerTarget("both");
+                    setScannerOpen(true);
+                  }}
+                >
+                  📷 Scanner les deux codes (MAC + SN) en un seul scan
+                </button>
+              </div>
+            </div>
+
+            {/* Carte 4 : Poteaux & Matériel Posé */}
+            <div className="form-card">
+              <div className="form-card-header">
+                <div className="form-card-icon tool-icon">🛠️</div>
+                <div>
+                  <h3>Poteaux & Matériel Posé</h3>
+                  <p className="form-card-sub">Calcul automatique des poteaux et comptage du matériel terrain</p>
+                </div>
+              </div>
+              <div className="form-card-body">
+                <div className="poteaux-summary-badges">
+                  <div className="poteau-badge-item">
+                    <span className="poteau-badge-num">{String(data.nb_poteaux_traverses).padStart(2, "0")}</span>
+                    <span className="poteau-badge-label">Traversés</span>
+                  </div>
+                  <div className="poteau-badge-item">
+                    <span className="poteau-badge-num">{String(data.nb_poteaux_implantes).padStart(2, "0")}</span>
+                    <span className="poteau-badge-label">Implantés</span>
+                  </div>
+                  <div className="poteau-badge-item">
+                    <span className="poteau-badge-num">{String(data.nb_poteaux_armes ?? 0).padStart(2, "0")}</span>
+                    <span className="poteau-badge-label">Armés</span>
+                  </div>
+                </div>
+
+                <h4 style={{ margin: "16px 0 10px", fontSize: 14 }}>Matériel standard</h4>
+                <div className="materiel-grid">
+                  {MATERIEL_STANDARD.map(({ key, label }) => (
+                    <div key={key} className="materiel-card-stepper">
+                      <span className="materiel-label">{label}</span>
+                      <div className="stepper-controls">
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => updateMateriel(key, Math.max(0, (Number(data.materiel_pose[key]) || 0) - 1))}
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          min="0"
+                          value={data.materiel_pose[key] ?? 0}
+                          onChange={(e) => updateMateriel(key, Math.max(0, Number(e.target.value) || 0))}
+                        />
+                        <button
+                          type="button"
+                          className="btn-step"
+                          onClick={() => updateMateriel(key, (Number(data.materiel_pose[key]) || 0) + 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <h4 style={{ margin: "18px 0 8px", fontSize: 14 }}>Autre matériel (facultatif)</h4>
+                <form className="stock-form-modern" onSubmit={handleAddMateriel}>
+                  <input
+                    type="text"
+                    list="designations-list-form"
+                    placeholder="Ex: Piton, ONT, Jarretière..."
+                    value={newMaterielName}
+                    onChange={(e) => setNewMaterielName(e.target.value)}
+                  />
+                  <datalist id="designations-list-form">
+                    {getDesignations().map((d) => (
+                      <option key={d} value={d} />
+                    ))}
+                  </datalist>
+                  <input
+                    type="number"
+                    min="1"
+                    style={{ width: 80 }}
+                    value={newMaterielQte}
+                    onChange={(e) => setNewMaterielQte(e.target.value)}
+                  />
+                  <button type="submit" className="btn-primary" style={{ padding: "8px 14px", minHeight: 44 }}>
+                    + Ajouter
+                  </button>
+                </form>
+                {materielFeedback && <p className="gps-status" style={{ marginTop: 8 }}>{materielFeedback}</p>}
+
+                {Object.entries(data.materiel_pose)
+                  .filter(([d]) => !MATERIEL_STANDARD.some((m) => m.key === d))
+                  .map(([d, qte]) => (
+                    <div key={d} className="materiel-extra-item">
+                      <span>{d} : <strong>{qte}</strong></span>
+                      <button type="button" className="btn-secondary" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => removeMateriel(d)}>
+                        Retirer
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {activeTab === "photos" && (
+          <section className="photos-tab-section">
+            <input
+              ref={slotCameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={handleSlotPhotoSelected}
+            />
+            <input
+              ref={slotGalleryInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handleSlotPhotoSelected}
+            />
+
+            {ocrNotification && (
+              <div className={`ocr-banner ${ocrNotification.success ? "success" : "info"}`}>
+                <span>{ocrNotification.text}</span>
+                <button type="button" onClick={() => setOcrNotification(null)}>✕</button>
+              </div>
+            )}
+
+            {ocrProcessing && (
+              <div className="ocr-banner info pulse">
+                <span>🔍 Reconnaissance OCR en cours sur la photo du FAT…</span>
+              </div>
+            )}
+
+            <div className="photos-progress-card">
+              <div className="photos-progress-header">
+                <div>
+                  <h3>Boîte à Photos CelPros</h3>
+                  <p className="photos-progress-sub">
+                    {CELPROS_PHOTO_SLOTS.filter((s) => !!getPhotoForSlot(s.key)?.url).length} sur {CELPROS_PHOTO_SLOTS.length} photos obligatoires prêtes pour l'envoi CelPros
+                  </p>
+                </div>
+                <div className="photos-progress-percent">
+                  {Math.round((CELPROS_PHOTO_SLOTS.filter((s) => !!getPhotoForSlot(s.key)?.url).length / CELPROS_PHOTO_SLOTS.length) * 100)}%
+                </div>
+              </div>
+              <div className="progress-bar-track">
+                <div
+                  className="progress-bar-fill"
+                  style={{
+                    width: `${(CELPROS_PHOTO_SLOTS.filter((s) => !!getPhotoForSlot(s.key)?.url).length / CELPROS_PHOTO_SLOTS.length) * 100}%`
+                  }}
+                />
+              </div>
+              {slotActionFeedback && (
+                <p className="slot-feedback-hint">{slotActionFeedback}</p>
               )}
             </div>
 
-            <TextField label="Type de câble" value={data.type_cable} onChange={(v) => update("type_cable", v)} />
-            <TextField label="Départ (m)" type="number" value={data.depart_m} onChange={(v) => update("depart_m", v)} />
-            <TextField label="Arrivée (m)" type="number" value={data.arrivee_m} onChange={(v) => update("arrivee_m", v)} />
-            <TextField label="Linéaire (m, calculé)" type="number" value={data.lineaire_m} onChange={() => {}} />
+            <div className="celpros-photos-grid">
+              {CELPROS_PHOTO_SLOTS.map((slot) => {
+                const photo = getPhotoForSlot(slot.key);
+                const isTaken = !!photo?.url;
 
-            <TextField label="Puissance FAT (dBm)" type="number" value={data.puissance_fat_dbm} onChange={(v) => update("puissance_fat_dbm", v)} />
-            <TextField label="Puissance PTO (dBm)" type="number" value={data.puissance_pto_dbm} onChange={(v) => update("puissance_pto_dbm", v)} />
-            <div style={{ display: "flex", flexDirection: "column", gap: 12, margin: "6px 0 10px" }}>
-              <ScannableField
-                label="Adresse MAC (Box / ONT)"
-                value={data.mac}
-                placeholder="Ex: 18D6DDF6719E-AE(17)"
-                scanLabel="Scanner MAC"
-                onChange={(v) => update("mac", v)}
-                onScanClick={() => {
-                  setScannerTarget("mac");
-                  setScannerOpen(true);
-                }}
-              />
+                return (
+                  <div key={slot.key} className={`photo-slot-card ${isTaken ? "taken" : "pending"}`}>
+                    <div className="photo-slot-header">
+                      <span className="photo-slot-icon">{slot.icon}</span>
+                      <div className="photo-slot-titles">
+                        <h4>{slot.label}</h4>
+                        <p>{slot.description}</p>
+                      </div>
+                      <span className={`photo-slot-badge ${isTaken ? "badge-success" : "badge-pending"}`}>
+                        {isTaken ? "✓ Prête" : "En attente"}
+                      </span>
+                    </div>
 
-              <ScannableField
-                label="SN (Numéro de série ONT)"
-                value={data.sn}
-                placeholder="Ex: 485754437572231B8"
-                scanLabel="Scanner SN"
-                onChange={(v) => {
-                  update("sn", v);
-                  if (!data.ont_sn) update("ont_sn", v);
-                }}
-                onScanClick={() => {
-                  setScannerTarget("sn");
-                  setScannerOpen(true);
-                }}
-              />
+                    {isTaken ? (
+                      <div className="photo-slot-preview-box">
+                        <div
+                          className="photo-slot-img-wrap"
+                          onClick={() => {
+                            setViewingPhoto({
+                              url: photo.url,
+                              title: slot.label,
+                              subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
+                              info: [
+                                { label: "Catégorie CelPros", val: slot.label },
+                                ...(photo.lat ? [{ label: "Coordonnées GPS", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
+                                ...(photo.precision_m ? [{ label: "Précision GPS", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
+                                ...(photo.horodatage ? [{ label: "Prise le", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                                ...(photo.lieu ? [{ label: "Adresse / Lieu", val: photo.lieu }] : []),
+                                ...(slot.key === "fat" && data.fat_ref ? [{ label: "Référence FAT", val: data.fat_ref }] : []),
+                                ...(slot.key === "fat" && data.msan ? [{ label: "MSAN", val: data.msan }] : []),
+                              ],
+                            });
+                          }}
+                        >
+                          <img src={photo.url} alt={slot.label} />
+                          <span className="zoom-hint-chip">🔍 Agrandir</span>
+                        </div>
 
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{
-                  fontSize: 13,
-                  padding: "10px 14px",
-                  alignSelf: "flex-start",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontWeight: 600,
-                  color: "var(--primary)",
-                  borderColor: "var(--primary)",
-                  background: "var(--primary-bg)",
-                }}
-                onClick={() => {
-                  setScannerTarget("both");
-                  setScannerOpen(true);
-                }}
-              >
-                📷 Scanner les deux codes (MAC + SN) en un seul scan
-              </button>
+                        {slot.hasOcr && (data.fat_ref || data.msan) && (
+                          <div className="fat-ocr-detected-chip">
+                            <span>⚡ FAT : <strong>{data.fat_ref || "N/A"}</strong> | MSAN : <strong>{data.msan || "N/A"}</strong></span>
+                          </div>
+                        )}
+
+                        <div className="photo-slot-actions">
+                          {slot.hasOcr && (
+                            <button
+                              type="button"
+                              className="btn-slot-subtle"
+                              disabled={ocrProcessing}
+                              onClick={() => runFatOcrOnPhoto(photo.url)}
+                              title="Relancer l'extraction OCR"
+                            >
+                              🔍 {ocrProcessing ? "Lecture…" : "Re-scanner OCR"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="btn-slot-subtle"
+                            disabled={slotCapturing}
+                            onClick={() => openSlotCamera(slot.key)}
+                          >
+                            🔄 Reprendre
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-slot-subtle danger"
+                            onClick={() => removeSlotPhoto(slot.key)}
+                          >
+                            ✕ Retirer
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="photo-slot-upload-box">
+                        <button
+                          type="button"
+                          className="btn-slot-upload btn-camera"
+                          disabled={slotCapturing}
+                          onClick={() => openSlotCamera(slot.key)}
+                        >
+                          📷 Prendre photo
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-slot-upload btn-gallery"
+                          disabled={slotCapturing}
+                          onClick={() => openSlotGallery(slot.key)}
+                        >
+                          🖼️ Importer
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            <p className="gps-status">
-              Poteaux traversés : <strong>{String(data.nb_poteaux_traverses).padStart(2, "0")}</strong>
-              {"  -  "}
-              Poteaux implantés : <strong>{String(data.nb_poteaux_implantes).padStart(2, "0")}</strong>
-              {"  -  "}
-              Poteaux armés : <strong>{String(data.nb_poteaux_armes ?? 0).padStart(2, "0")}</strong>
-              <br />
-              <small>Calculé automatiquement à partir des points GPS relevés.</small>
-            </p>
+            <div className="other-photos-card">
+              <div className="form-card-header">
+                <div className="form-card-icon wa-icon">💬</div>
+                <div>
+                  <h3>Autres photos terrain & WhatsApp</h3>
+                  <p className="form-card-sub">Photos additionnelles (partageables en un clic sur WhatsApp)</p>
+                </div>
+              </div>
 
-            <h3>Matériel posé (champs du rapport WhatsApp)</h3>
-            <div className="materiel-grid">
-              {MATERIEL_STANDARD.map(({ key, label }) => (
-                <label key={key} className="materiel-item">
-                  <span>{label}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={data.materiel_pose[key] ?? 0}
-                    onChange={(e) => updateMateriel(key, e.target.value)}
-                  />
-                </label>
-              ))}
-            </div>
+              <div className="gps-buttons" style={{ margin: "14px 0" }}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={waCapturing}
+                  onClick={openWaCamera}
+                >
+                  {waCapturing ? "Capture..." : "📷 Prendre photo additionnelle"}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={waCapturing}
+                  onClick={openWaGallery}
+                >
+                  🖼️ Importer de la galerie
+                </button>
+              </div>
 
-            <h3>Autre matériel (facultatif)</h3>
-            <form className="stock-form" onSubmit={handleAddMateriel}>
-              <label className="form-field">
-                <span>Matériau (existant ou nouveau)</span>
-                <input
-                  type="text"
-                  list="designations-list-form"
-                  placeholder="Ex: Piton, ONT, Jarretière..."
-                  value={newMaterielName}
-                  onChange={(e) => setNewMaterielName(e.target.value)}
-                />
-                <datalist id="designations-list-form">
-                  {getDesignations().map((d) => (
-                    <option key={d} value={d} />
-                  ))}
-                </datalist>
-              </label>
-              <label className="form-field">
-                <span>Quantité</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={newMaterielQte}
-                  onChange={(e) => setNewMaterielQte(e.target.value)}
-                />
-              </label>
-              <button type="submit" className="btn-primary">
-                + Ajouter
-              </button>
-            </form>
-            {materielFeedback && <p className="gps-status">{materielFeedback}</p>}
-
-            <div className="materiel-grid">
-              {Object.entries(data.materiel_pose)
-                .filter(([d]) => !MATERIEL_STANDARD.some((m) => m.key === d))
-                .map(([d, qte]) => (
-                  <label key={d} className="materiel-item">
-                    <span>{d}</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={qte}
-                      onChange={(e) => updateMateriel(d, e.target.value)}
-                    />
-                    <button type="button" className="btn-secondary" onClick={() => removeMateriel(d)}>
-                      Retirer
+              {whatsappPhotos.length > 0 && (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: 13, padding: "8px 12px" }}
+                      onClick={selectAllPhotos}
+                    >
+                      {selectedPhotoIds.size === whatsappPhotos.length ? "Tout désélectionner" : "Tout sélectionner"}
                     </button>
-                  </label>
-                ))}
+                    <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                      {selectedPhotoIds.size} sélectionnée(s) / {whatsappPhotos.length} total
+                    </span>
+                  </div>
+
+                  <div className="whatsapp-photos-grid">
+                    {whatsappPhotos.map((photo) => (
+                      <div
+                        key={photo.id}
+                        className="whatsapp-photo-item"
+                        onClick={() => togglePhotoSelection(photo.id)}
+                        style={{
+                          cursor: "pointer",
+                          border: selectedPhotoIds.has(photo.id) ? "2px solid var(--primary)" : "2px solid transparent"
+                        }}
+                      >
+                        <img src={photo.url} alt="Photo terrain" />
+                        {photo.label && (
+                          <span className="photo-tag-pill">{photo.label}</span>
+                        )}
+                        {selectedPhotoIds.has(photo.id) && (
+                          <div className="selected-check">✓</div>
+                        )}
+                        <button
+                          type="button"
+                          className="zoom-photo-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingPhoto({
+                              url: photo.url,
+                              title: photo.label || "Photo terrain",
+                              subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
+                              info: [
+                                ...(photo.label ? [{ label: "Catégorie", val: photo.label }] : []),
+                                ...(photo.lat ? [{ label: "Coordonnées", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
+                                ...(photo.precision_m ? [{ label: "Précision", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
+                                ...(photo.horodatage ? [{ label: "Date & Heure", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                                ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
+                              ],
+                            });
+                          }}
+                          title="Agrandir"
+                        >
+                          🔍
+                        </button>
+                        <button
+                          type="button"
+                          className="remove-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeWhatsappPhoto(photo.id);
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn-primary btn-large"
+                    onClick={sendPhotosViaWhatsapp}
+                    disabled={selectedPhotoIds.size === 0}
+                    style={{ marginTop: 12 }}
+                  >
+                    Envoyer sur WhatsApp ({selectedPhotoIds.size})
+                  </button>
+                </>
+              )}
             </div>
           </section>
         )}

@@ -1,14 +1,15 @@
 {
-  "version": "2.5.1",
-  "buildTime": "2026-10-13T18:10:00Z",
+  "version": "2.6.0",
+  "buildTime": "2026-10-13T22:45:00Z",
   "features": [
+    "Ergonomie mobile/tablette moderne avec cartes thématiques et contrôles tactiles optimisés",
+    "Détection GPS 1-clic de l'Adresse / Zone avec reverse géocodage OpenStreetMap / Nominatim (Quartier, Ville)",
+    "Extraction OCR automatique des références FAT et MSAN depuis la photo du FAT (OGA, FAT, multi-lignes)",
+    "Galerie photos CelPros structurée alignée 1:1 sur les 13 emplacements réglementaires CelPros",
+    "Compatibilité directe avec l'extension CelPros par taggage explicite de slot et type sur les photos",
+    "Steppers tactiles ergonomiques pour le métrage câble et comptage de matériel sur le terrain",
     "Scan instantané et continu dès l'ouverture de la caméra (BarcodeDetector W3C GPU + découpage 5 zones ZXing + OCR automatique)",
     "Reconnaissance optique du texte (OCR) au-dessus des codes-barres pour MAC et SN en cas de code flou, rayé ou abîmé",
-    "Nettoyage des artefacts d'espacement et normalisation sans perte de forme : MAC 18D6DDF6719E-AE(17) et SN 485754437572231B8",
-    "Protection anti-régression : une MAC complète avec suffixe n'est jamais écrasée par une lecture tronquée",
-    "Bouton de zoom matériel 2x pour codes-barres et textes miniatures",
-    "Support hors-ligne intégral avec repli automatique sur core standard local si SIMD absent",
-    "Flux vidéo stable sans redémarrage intempestif lors des saisies ou synchronisations",
-    "Retour visuel en direct (badge vert/violet) et sonore immédiat dès détection"
+    "Support hors-ligne intégral avec repli automatique sur core standard local si SIMD absent"
   ]
 }

@@ -133,6 +133,76 @@ export async function reverseGeocode(lat, lng) {
 }
 
 /**
+ * Extrait une zone lisible et concise (Quartier, Ville) depuis la réponse Nominatim.
+ * Exemples : "Haie Vive, Cotonou", "Fidjrossè, Cotonou", "Agla, Cotonou", "Akpakpa, Cotonou".
+ * @param {object} json
+ * @returns {string}
+ */
+export function formatAddressZone(json) {
+  if (!json || typeof json !== "object") return "";
+  const addr = json.address || {};
+
+  const quartier =
+    addr.suburb ||
+    addr.neighbourhood ||
+    addr.quarter ||
+    addr.residential ||
+    addr.subdivision ||
+    addr.city_district ||
+    addr.road ||
+    "";
+
+  const ville =
+    addr.city ||
+    addr.town ||
+    addr.village ||
+    addr.municipality ||
+    addr.county ||
+    addr.state ||
+    "";
+
+  if (quartier && ville) {
+    if (quartier.toLowerCase() === ville.toLowerCase()) return ville;
+    return `${quartier}, ${ville}`;
+  }
+  if (quartier) return quartier;
+  if (ville) return ville;
+  if (json.display_name) {
+    const parts = json.display_name.split(",").map((s) => s.trim()).filter(Boolean);
+    return parts.slice(0, 2).join(", ");
+  }
+  return "";
+}
+
+/**
+ * Géocodage inversé ciblé pour le champ "Adresse / Zone".
+ * Convertit instantanément des coordonnées GPS en Quartier, Ville.
+ * @param {number} lat
+ * @param {number} lng
+ * @returns {Promise<string>}
+ */
+export async function reverseGeocodeZone(lat, lng) {
+  try {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      {
+        headers: { Accept: "application/json" },
+        ...(controller ? { signal: controller.signal } : {}),
+      }
+    );
+    if (timer) clearTimeout(timer);
+    if (!res.ok) return "";
+    const json = await res.json();
+    return formatAddressZone(json);
+  } catch (err) {
+    console.warn("reverseGeocodeZone error:", err);
+    return "";
+  }
+}
+
+/**
  * Incruste un bandeau (type, lieu, coordonnées, précision, date) en bas d'une
  * photo, façon "GPS Map Camera"
  * @param {string} photoDataUrl data URL de la photo source

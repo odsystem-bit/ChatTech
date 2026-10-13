@@ -82,3 +82,71 @@ export function ScannableField({ label, value, onChange, onScanClick, scanLabel 
   );
 }
 
+/**
+ * Champ texte avec détection automatique de la Zone / Adresse par GPS (Reverse-Geocoding)
+ * @param {{
+ *   label: string,
+ *   value: string,
+ *   onChange: (v: string) => void,
+ *   onDetectGps: () => void,
+ *   detecting?: boolean,
+ *   statusMessage?: string,
+ *   statusType?: 'success'|'error'|'info',
+ *   placeholder?: string
+ * }} props
+ */
+export function GeocodableField({
+  label,
+  value,
+  onChange,
+  onDetectGps,
+  detecting = false,
+  statusMessage = "",
+  statusType = "info",
+  placeholder = "Ex: Haie Vive, Cotonou",
+}) {
+  return (
+    <div className="form-field geocodable-field">
+      <div className="field-label-row">
+        <span>{label}</span>
+        {statusMessage && (
+          <span className={`field-status-hint ${statusType}`}>
+            {statusMessage}
+          </span>
+        )}
+      </div>
+      <div className="geocodable-input-group">
+        <input
+          type="text"
+          value={value ?? ""}
+          placeholder={placeholder}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          className="btn-gps-detect"
+          onClick={onDetectGps}
+          disabled={detecting}
+          title="Détecter la zone par GPS en un clic"
+        >
+          {detecting ? (
+            <>
+              <span className="spinner-mini" />
+              <span>Détection…</span>
+            </>
+          ) : (
+            <>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              <span>Détecter GPS</span>
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
