@@ -59,6 +59,8 @@ export default function BarcodeScannerModal({
   const [ocrRunning, setOcrRunning] = useState(false);
   const [flashOn, setFlashOn] = useState(false);
   const [hasTorch, setHasTorch] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [maxZoom, setMaxZoom] = useState(1);
   const [cameras, setCameras] = useState([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
 
@@ -68,13 +70,24 @@ export default function BarcodeScannerModal({
   const scanLoopActiveRef = useRef(false);
   const zxingReaderRef = useRef(null);
   const canvasRef = useRef(null);
+  const rafIdRef = useRef(null);
 
-  // Références directes pour éviter tout retard ou état obsolète dans la boucle de scan
+  // Références directes pour éviter toute recréation de fonctions et état obsolète
+  const onScanRef = useRef(onScan);
+  const onCloseRef = useRef(onClose);
+  const targetFieldRef = useRef(targetField);
   const detectedMacRef = useRef(currentMac || "");
   const detectedSnRef = useRef(currentSn || "");
   const isClosingRef = useRef(false);
   const lastOcrTimeRef = useRef(0);
   const ocrInProgressRef = useRef(false);
+
+  // Maintien à jour des refs de props sans re-render
+  useEffect(() => {
+    onScanRef.current = onScan;
+    onCloseRef.current = onClose;
+    targetFieldRef.current = targetField;
+  }, [onScan, onClose, targetField]);
 
   // Synchronisation lors de l'ouverture
   useEffect(() => {
@@ -91,6 +104,9 @@ export default function BarcodeScannerModal({
       setOcrRunning(false);
       isClosingRef.current = false;
       lastOcrTimeRef.current = Date.now();
+
+      // Pré-chauffage du worker OCR en arrière-plan dès l'ouverture du modal
+      getOcrWorker().catch(() => {});
     }
   }, [isOpen, currentMac, currentSn]);
 
@@ -99,26 +115,34 @@ export default function BarcodeScannerModal({
     (type, value, source = "barcode") => {
       if (!value || isClosingRef.current) return;
 
+      const currentTgt = targetFieldRef.current;
+      let effectiveType = type;
+
+      // Résolution intelligente si type "unknown"
+      if (effectiveType === "unknown") {
+        if (currentTgt === "mac" || (currentTgt === "both" && !detectedMacRef.current && detectedSnRef.current)) {
+          effectiveType = "mac";
+        } else if (currentTgt === "sn" || (currentTgt === "both" && !detectedSnRef.current && detectedMacRef.current)) {
+          effectiveType = "sn";
+        }
+      }
+
       let changed = false;
-      if (type === "mac") {
-        if (detectedMacRef.current !== value) {
+
+      if (effectiveType === "mac") {
+        const prev = detectedMacRef.current;
+        // Règle d'or : ne JAMAIS rétrograder une MAC complète (ex: 18D6DDF6719E-AE(17)) vers une MAC tronquée (18D6DDF6719E)
+        const isUpgrade = !prev || (value.length > prev.length && value.startsWith(prev.replace(/[-_()].*$/, "")));
+        if (!prev || isUpgrade || (prev !== value && !prev.includes(value))) {
           detectedMacRef.current = value;
           setDetectedMac(value);
           changed = true;
         }
-      } else if (type === "sn") {
-        if (detectedSnRef.current !== value) {
-          detectedSnRef.current = value;
-          setDetectedSn(value);
-          changed = true;
-        }
-      } else {
-        // Type non explicitement étiqueté, appliquer selon le champ ciblé
-        if (targetField === "mac" && !detectedMacRef.current) {
-          detectedMacRef.current = value;
-          setDetectedMac(value);
-          changed = true;
-        } else if (targetField === "sn" && !detectedSnRef.current) {
+      } else if (effectiveType === "sn") {
+        const prev = detectedSnRef.current;
+        // Ne jamais rétrograder un SN Huawei hex complet (ex: 48575443...) vers un extrait partiel
+        const isUpgrade = !prev || (value.length > prev.length && value.startsWith("48575443"));
+        if (!prev || isUpgrade || (prev !== value && !prev.includes(value))) {
           detectedSnRef.current = value;
           setDetectedSn(value);
           changed = true;
@@ -129,7 +153,7 @@ export default function BarcodeScannerModal({
         playSuccessBeep();
         triggerVibration();
         setLastScannedText(value);
-        setLastScannedType(type);
+        setLastScannedType(effectiveType);
         setLastScannedSource(source);
       }
 
@@ -137,27 +161,27 @@ export default function BarcodeScannerModal({
       const snVal = detectedSnRef.current;
 
       // Vérification d'achèvement automatique
-      if (targetField === "mac" && macVal) {
+      if (currentTgt === "mac" && macVal) {
         isClosingRef.current = true;
         setTimeout(() => {
-          onScan({ mac: macVal, ...(snVal ? { sn: snVal } : {}) });
-          onClose();
+          onScanRef.current?.({ mac: macVal, ...(snVal ? { sn: snVal } : {}) });
+          onCloseRef.current?.();
+        }, 300);
+      } else if (currentTgt === "sn" && snVal) {
+        isClosingRef.current = true;
+        setTimeout(() => {
+          onScanRef.current?.({ sn: snVal, ...(macVal ? { mac: macVal } : {}) });
+          onCloseRef.current?.();
+        }, 300);
+      } else if (currentTgt === "both" && macVal && snVal) {
+        isClosingRef.current = true;
+        setTimeout(() => {
+          onScanRef.current?.({ mac: macVal, sn: snVal });
+          onCloseRef.current?.();
         }, 350);
-      } else if (targetField === "sn" && snVal) {
-        isClosingRef.current = true;
-        setTimeout(() => {
-          onScan({ sn: snVal, ...(macVal ? { mac: macVal } : {}) });
-          onClose();
-        }, 350);
-      } else if (targetField === "both" && macVal && snVal) {
-        isClosingRef.current = true;
-        setTimeout(() => {
-          onScan({ mac: macVal, sn: snVal });
-          onClose();
-        }, 400);
       }
     },
-    [targetField, onScan, onClose]
+    []
   );
 
   // Exécution d'une passe OCR manuelle ou en arrière-plan
@@ -173,11 +197,11 @@ export default function BarcodeScannerModal({
       try {
         const vw = video.videoWidth;
         const vh = video.videoHeight;
-        // Recadrage sur la zone du viseur (80% largeur, 55% hauteur)
+        // Recadrage sur la zone du viseur (82% largeur, 56% hauteur)
         const crop = {
-          sx: Math.floor(vw * 0.1),
+          sx: Math.floor(vw * 0.09),
           sy: Math.floor(vh * 0.22),
-          sw: Math.floor(vw * 0.8),
+          sw: Math.floor(vw * 0.82),
           sh: Math.floor(vh * 0.56),
         };
 
@@ -201,43 +225,43 @@ export default function BarcodeScannerModal({
     [registerFoundValue]
   );
 
-  // Boucle de scan ultra-réactive (BarcodeDetector natif + ZXing haute-définition + Auto OCR)
-  const startScanLoop = useCallback(async () => {
+  // Boucle de scan continue ultra-performante (BarcodeDetector matériel natif + ZXing multi-tranches + Auto OCR)
+  const runScanLoop = useCallback(async () => {
     scanLoopActiveRef.current = true;
 
-    // 1. Initialiser BarcodeDetector natif si présent
+    // 1. Initialiser BarcodeDetector natif avec formats strictement validés selon la spec W3C
     let nativeDetector = null;
     if ("BarcodeDetector" in window) {
       try {
-        nativeDetector = new window.BarcodeDetector({
-          formats: [
-            "code_128",
-            "code_39",
-            "code_93",
-            "qr_code",
-            "data_matrix",
-            "ean_13",
-            "ean_8",
-          ],
-        });
-      } catch (e) {
-        console.warn("BarcodeDetector non disponible:", e);
+        const supported = (await window.BarcodeDetector.getSupportedFormats().catch(() => [])) || [];
+        const desired = ["code_128", "code_39", "qr_code", "data_matrix", "ean_13", "ean_8"];
+        const validFormats = desired.filter((f) => supported.includes(f));
+        if (validFormats.length > 0) {
+          nativeDetector = new window.BarcodeDetector({ formats: validFormats });
+        } else {
+          nativeDetector = new window.BarcodeDetector();
+        }
+      } catch {
+        try {
+          nativeDetector = new window.BarcodeDetector();
+        } catch {
+          nativeDetector = null;
+        }
       }
     }
 
-    // 2. Initialiser ZXing BrowserMultiFormatReader avec priorité absolue Code 128
+    // 2. Initialiser ZXing BrowserMultiFormatReader avec priorité Code 128
     if (!zxingReaderRef.current) {
       const hints = new Map();
       hints.set(DecodeHintType.POSSIBLE_FORMATS, [
         BarcodeFormat.CODE_128,
         BarcodeFormat.CODE_39,
-        BarcodeFormat.CODE_93,
         BarcodeFormat.QR_CODE,
         BarcodeFormat.DATA_MATRIX,
         BarcodeFormat.EAN_13,
       ]);
       hints.set(DecodeHintType.TRY_HARDER, true);
-      zxingReaderRef.current = new BrowserMultiFormatReader(hints, 60);
+      zxingReaderRef.current = new BrowserMultiFormatReader(hints, 50);
     }
 
     let frameIndex = 0;
@@ -251,7 +275,7 @@ export default function BarcodeScannerModal({
         const vh = video.videoHeight;
         let barcodeFoundThisFrame = false;
 
-        // A. Essayer d'abord l'accélération matérielle native
+        // A. Détecteur matériel natif accéléré GPU (lit TOUS les codes de l'image en 1 passe)
         if (nativeDetector) {
           try {
             const barcodes = await nativeDetector.detect(video);
@@ -267,7 +291,7 @@ export default function BarcodeScannerModal({
           }
         }
 
-        // B. Si BarcodeDetector n'a rien détecté ou n'existe pas, exécuter ZXing sans délai
+        // B. Moteur ZXing multi-tranches haute résolution pour étiquettes superposées ou côte-à-côte
         if (!barcodeFoundThisFrame && zxingReaderRef.current) {
           try {
             let canvas = canvasRef.current;
@@ -276,27 +300,33 @@ export default function BarcodeScannerModal({
               canvasRef.current = canvas;
             }
 
-            // Calcul du viseur central (80% largeur, 55% hauteur)
-            const rx = Math.floor(vw * 0.1);
-            const rw = Math.floor(vw * 0.8);
-            const ry = Math.floor(vh * 0.22);
-            const rh = Math.floor(vh * 0.56);
+            const rx = Math.floor(vw * 0.08);
+            const rw = Math.floor(vw * 0.84);
+            const ry = Math.floor(vh * 0.20);
+            const rh = Math.floor(vh * 0.60);
 
-            // Pour les étiquettes ONT avec 2 codes empilés :
-            // Alterner l'analyse du demi-haut (MAC), du demi-bas (SN), et de la zone entière
-            const cycle = frameIndex % 3;
             let sx = rx;
             let sw = rw;
             let sy = ry;
             let sh = rh;
 
-            if (cycle === 0 && !detectedMacRef.current) {
-              // Demi-haut (souvent MAC)
+            // Découpage tournant : 
+            // 0: Demi-haut (MAC empilée)
+            // 1: Demi-bas (SN empilé)
+            // 2: Demi-gauche (MAC latérale)
+            // 3: Demi-droite (SN latéral)
+            // 4: Zone complète
+            const cycle = frameIndex % 5;
+            if (cycle === 0) {
               sh = Math.floor(rh * 0.52);
-            } else if (cycle === 1 && !detectedSnRef.current) {
-              // Demi-bas (souvent SN)
+            } else if (cycle === 1) {
               sy = ry + Math.floor(rh * 0.48);
               sh = Math.floor(rh * 0.52);
+            } else if (cycle === 2) {
+              sw = Math.floor(rw * 0.52);
+            } else if (cycle === 3) {
+              sx = rx + Math.floor(rw * 0.48);
+              sw = Math.floor(rw * 0.52);
             }
 
             canvas.width = sw;
@@ -311,16 +341,17 @@ export default function BarcodeScannerModal({
               registerFoundValue(parsed.type, parsed.value || text, "barcode");
             }
           } catch {
-            // Exception normale quand aucun code n'est visible sur la frame
+            // Normal quand aucun code n'est décodé sur cette région
           }
         }
 
-        // C. Déclencheur Auto-OCR si l'un des champs tarde à être lu par code-barres optique (> 1400ms)
+        // C. Déclencheur Auto-OCR si l'un des codes optiques tarde (> 1100ms)
         const now = Date.now();
-        const needMac = !detectedMacRef.current && (targetField === "both" || targetField === "mac");
-        const needSn = !detectedSnRef.current && (targetField === "both" || targetField === "sn");
+        const tgt = targetFieldRef.current;
+        const needMac = !detectedMacRef.current && (tgt === "both" || tgt === "mac");
+        const needSn = !detectedSnRef.current && (tgt === "both" || tgt === "sn");
 
-        if ((needMac || needSn) && now - lastOcrTimeRef.current > 1400 && !ocrInProgressRef.current) {
+        if ((needMac || needSn) && now - lastOcrTimeRef.current > 1100 && !ocrInProgressRef.current) {
           triggerOcrPass(false);
         }
 
@@ -328,14 +359,14 @@ export default function BarcodeScannerModal({
       }
 
       if (scanLoopActiveRef.current && !isClosingRef.current) {
-        requestAnimationFrame(() => {
-          setTimeout(scanFrame, 40); // ~25 fps pour un scan instantané
+        rafIdRef.current = requestAnimationFrame(() => {
+          setTimeout(scanFrame, 35); // ~28 fps pour réactivité maximale
         });
       }
     }
 
     scanFrame();
-  }, [registerFoundValue, targetField, triggerOcrPass]);
+  }, [registerFoundValue, triggerOcrPass]);
 
   // Démarrer le flux vidéo caméra
   const startCamera = useCallback(
@@ -344,15 +375,19 @@ export default function BarcodeScannerModal({
         setCameraError("");
         setLoadingCamera(true);
 
-        // Arrêter l'ancien flux
+        // Arrêter l'ancien flux si existant
         if (streamRef.current) {
           streamRef.current.getTracks().forEach((t) => t.stop());
           streamRef.current = null;
         }
 
-        // Configuration caméra haute définition pour netteté maximale des codes 1D
+        // Priorité à la caméra arrière haute résolution avec focus macro
         const videoConstraints = deviceId
-          ? { deviceId: { exact: deviceId } }
+          ? {
+              deviceId: { exact: deviceId },
+              width: { ideal: 1920, min: 1280 },
+              height: { ideal: 1080, min: 720 },
+            }
           : {
               facingMode: { ideal: "environment" },
               width: { ideal: 1920, min: 1280 },
@@ -366,7 +401,7 @@ export default function BarcodeScannerModal({
             audio: false,
           });
         } catch {
-          // Repli avec contraintes standards
+          // Repli avec contraintes de base
           try {
             stream = await navigator.mediaDevices.getUserMedia({
               video: { facingMode: { ideal: "environment" } },
@@ -387,7 +422,7 @@ export default function BarcodeScannerModal({
           await videoRef.current.play().catch(() => {});
         }
 
-        // Détection autofocus continu et flash/torche
+        // Capacités matérielles (autofocus continu, torche, zoom macro)
         const track = stream.getVideoTracks()[0];
         if (track) {
           const caps = track.getCapabilities?.() || {};
@@ -395,9 +430,16 @@ export default function BarcodeScannerModal({
             await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
           }
           setHasTorch(!!caps.torch);
+
+          if (caps.zoom) {
+            setMaxZoom(caps.zoom.max || 1);
+            setZoomLevel(1);
+          } else {
+            setMaxZoom(1);
+          }
         }
 
-        // Découvrir les caméras
+        // Découvrir les caméras disponibles
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           const videoDevices = devices.filter((d) => d.kind === "videoinput");
@@ -407,25 +449,25 @@ export default function BarcodeScannerModal({
         }
 
         setLoadingCamera(false);
-        startScanLoop();
+        runScanLoop();
       } catch (err) {
         console.error("Erreur ouverture caméra:", err);
         setLoadingCamera(false);
         if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
           setCameraError(
-            "Accès caméra refusé. Veuillez autoriser la caméra dans les paramètres de votre navigateur."
+            "Accès caméra refusé. Veuillez autoriser l'accès à la caméra dans les réglages de votre navigateur."
           );
         } else if (err.name === "NotFoundError" || err.name === "DevicesNotFoundError") {
-          setCameraError("Aucune caméra trouvée sur cet appareil.");
+          setCameraError("Aucune caméra détectée sur cet appareil.");
         } else {
           setCameraError(`Impossible d'ouvrir la caméra : ${err.message || err.name}`);
         }
       }
     },
-    [startScanLoop]
+    [runScanLoop]
   );
 
-  // Cycle de vie modal
+  // Cycle de vie : démarre uniquement lors de l'ouverture ou du changement d'ID caméra
   useEffect(() => {
     if (!isOpen) return;
 
@@ -433,6 +475,10 @@ export default function BarcodeScannerModal({
 
     return () => {
       scanLoopActiveRef.current = false;
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -450,6 +496,19 @@ export default function BarcodeScannerModal({
       setFlashOn(next);
     } catch (e) {
       console.warn("Erreur torche:", e);
+    }
+  }
+
+  // Zoom matériel (1x <-> 2x pour étiquettes miniatures)
+  async function toggleZoom() {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track || maxZoom <= 1) return;
+    try {
+      const nextZoom = zoomLevel >= 2 ? 1 : Math.min(2, maxZoom);
+      await track.applyConstraints({ advanced: [{ zoom: nextZoom }] });
+      setZoomLevel(nextZoom);
+    } catch (e) {
+      console.warn("Erreur zoom:", e);
     }
   }
 
@@ -475,12 +534,10 @@ export default function BarcodeScannerModal({
 
       let foundAny = false;
 
-      // 1. Analyse BarcodeDetector
+      // 1. Analyse BarcodeDetector sur l'image importée
       if ("BarcodeDetector" in window) {
         try {
-          const detector = new window.BarcodeDetector({
-            formats: ["code_128", "code_39", "code_93", "ean_13", "qr_code", "data_matrix"],
-          });
+          const detector = new window.BarcodeDetector();
           const barcodes = await detector.detect(img);
           if (barcodes && barcodes.length > 0) {
             for (const b of barcodes) {
@@ -494,7 +551,7 @@ export default function BarcodeScannerModal({
         }
       }
 
-      // 2. Analyse ZXing
+      // 2. Analyse ZXing sur canvas
       const canvas = document.createElement("canvas");
       canvas.width = img.width;
       canvas.height = img.height;
@@ -513,7 +570,7 @@ export default function BarcodeScannerModal({
         // Ignorer
       }
 
-      // 3. Analyse OCR sur la photo complète
+      // 3. Analyse OCR complète sur la photo importée
       try {
         const worker = await getOcrWorker();
         const ocrResult = await worker.recognize(canvas);
@@ -543,13 +600,13 @@ export default function BarcodeScannerModal({
     }
   }
 
-  // Validation manuelle
+  // Validation manuelle de la saisie
   function handleConfirm() {
     const res = {};
     if (detectedMacRef.current) res.mac = detectedMacRef.current;
     if (detectedSnRef.current) res.sn = detectedSnRef.current;
-    onScan(res);
-    onClose();
+    onScanRef.current?.(res);
+    onCloseRef.current?.();
   }
 
   if (!isOpen) return null;
@@ -612,7 +669,7 @@ export default function BarcodeScannerModal({
                   animation: "spin 0.8s linear infinite",
                 }}
               />
-              <span style={{ fontSize: 13 }}>Démarrage ultra-rapide de la caméra…</span>
+              <span style={{ fontSize: 13 }}>Démarrage instantané de la caméra…</span>
             </div>
           )}
 
@@ -643,19 +700,30 @@ export default function BarcodeScannerModal({
             {ocrRunning ? "⏳ Analyse OCR…" : "⚡ Détecter texte (OCR)"}
           </button>
 
+          {maxZoom > 1 && (
+            <button
+              type="button"
+              className={`btn-barcode-ctrl ${zoomLevel > 1 ? "active" : ""}`}
+              onClick={toggleZoom}
+              title="Agrandir pour les codes-barres miniatures"
+            >
+              🔍 {zoomLevel > 1 ? "Zoom 1x" : "Zoom 2x"}
+            </button>
+          )}
+
           {hasTorch && (
             <button
               type="button"
               className={`btn-barcode-ctrl ${flashOn ? "active" : ""}`}
               onClick={toggleTorch}
             >
-              🔦 {flashOn ? "Éteindre flash" : "Flash"}
+              🔦 {flashOn ? "Éteindre" : "Flash"}
             </button>
           )}
 
           {cameras.length > 1 && (
             <button type="button" className="btn-barcode-ctrl" onClick={handleSwitchCamera}>
-              🔄 Changer caméra
+              🔄 Caméra
             </button>
           )}
 
@@ -671,7 +739,7 @@ export default function BarcodeScannerModal({
             className="btn-barcode-ctrl"
             onClick={() => fileInputRef.current?.click()}
           >
-            🖼️ Importer photo
+            🖼️ Photo
           </button>
         </div>
 

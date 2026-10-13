@@ -1194,7 +1194,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             <ScannableField
               label="ONT / SN"
               value={data.ont_sn}
-              placeholder="Ex: ZTEGC8923412 ou HWTC..."
+              placeholder="Ex: 485754437572231B8"
               scanLabel="Scanner SN"
               onChange={(v) => {
                 update("ont_sn", v);

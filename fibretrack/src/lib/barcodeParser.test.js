@@ -113,6 +113,51 @@ describe("extractOntDataFromText (OCR extraction)", () => {
     assert.equal(resSn.value, "485754437572231b8");
   });
 
+  it("handles noisy spaces around hyphens and parentheses in OCR", () => {
+    const text1 = "MAC: 18D6DDF6719E - AE(17)\nSN: 485754437572231B8";
+    const res1 = extractOntDataFromText(text1);
+    assert.equal(res1.mac, "18D6DDF6719E-AE(17)");
+
+    const text2 = "MAC: 18D6DDF6719E-AE (17)\nSN: 485754437572231B8";
+    const res2 = extractOntDataFromText(text2);
+    assert.equal(res2.mac, "18D6DDF6719E-AE(17)");
+  });
+
+  it("handles spaces inside SN from OCR segmentation", () => {
+    const text = "MAC: 18D6DDF6719E-AE(17)\nSN: 4857 5443 7572 231B 8";
+    const res = extractOntDataFromText(text);
+    assert.equal(res.sn, "485754437572231B8");
+  });
+
+  it("handles parenthetical vendor SN on label", () => {
+    const text = "SN: 485754437572231B8 (HWTC7572231B)\nMAC: 18D6DDF6719E-AE(17)";
+    const res = extractOntDataFromText(text);
+    assert.equal(res.mac, "18D6DDF6719E-AE(17)");
+    assert.equal(res.sn, "485754437572231B8");
+  });
+
+  it("handles trailing punctuation artifacts without corrupting codes", () => {
+    const text = "MAC: 18D6DDF6719E-AE(17).\nSN: 485754437572231B8,";
+    const res = extractOntDataFromText(text);
+    assert.equal(res.mac, "18D6DDF6719E-AE(17)");
+    assert.equal(res.sn, "485754437572231B8");
+
+    const pMac = parseBarcode("18D6DDF6719E-AE(17).");
+    assert.equal(pMac.type, "mac");
+    assert.equal(pMac.value, "18D6DDF6719E-AE(17)");
+
+    const pSn = parseBarcode("485754437572231B8.");
+    assert.equal(pSn.type, "sn");
+    assert.equal(pSn.value, "485754437572231B8");
+  });
+
+  it("extracts embedded codes without labels and preserves closing parenthesis", () => {
+    const text = "ONT BOX 18D6DDF6719E-AE(17) 485754437572231B8";
+    const res = extractOntDataFromText(text);
+    assert.equal(res.mac, "18D6DDF6719E-AE(17)");
+    assert.equal(res.sn, "485754437572231B8");
+  });
+
   it("handles null, empty, and undefined gracefully", () => {
     assert.deepEqual(extractOntDataFromText(null), { mac: null, sn: null });
     assert.deepEqual(extractOntDataFromText(""), { mac: null, sn: null });

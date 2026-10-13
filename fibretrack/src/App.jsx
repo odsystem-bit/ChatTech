@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./App.css";
 import LoginScreen from "./screens/LoginScreen";
 import AdminScreen from "./screens/AdminScreen";
@@ -14,7 +14,6 @@ import {
   saveInterventionLocally,
   getStoredIntervention,
   ensureInterventionDefaults,
-  getCached,
   deleteIntervention,
 } from "./models/Intervention";
 import { formatDateFR } from "./lib/date";

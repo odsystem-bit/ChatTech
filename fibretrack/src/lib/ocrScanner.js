@@ -6,10 +6,13 @@ let workerPromise = null;
 /**
  * Initialise le worker Tesseract de manière unique (singleton)
  * Priorité aux fichiers locaux pour fonctionnement 100% hors-ligne.
+ * En cas d'incompatibilité matérielle SIMD sur certains téléphones,
+ * bascule automatiquement sur le core standard local non-SIMD.
  */
 export async function getOcrWorker() {
   if (!workerPromise) {
     workerPromise = (async () => {
+      // 1. Essai Core SIMD local ultra-rapide
       try {
         const worker = await createWorker("eng", 1, {
           workerPath: "/tesseract/worker.min.js",
@@ -20,29 +23,52 @@ export async function getOcrWorker() {
         });
         await worker.setParameters({
           tessedit_char_whitelist:
-            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-/(). ",
+            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-/(). _",
           tessedit_pageseg_mode: "6", // Bloc de texte uniforme
         });
         return worker;
-      } catch (err) {
-        console.warn("Échec chargement Tesseract local, repli CDN:", err);
+      } catch (simdErr) {
+        console.warn("Tesseract SIMD non disponible, essai core local standard:", simdErr?.message || simdErr);
+      }
+
+      // 2. Repli Core local standard (sans SIMD, 100% hors-ligne)
+      try {
         const worker = await createWorker("eng", 1, {
+          workerPath: "/tesseract/worker.min.js",
+          corePath: "/tesseract/tesseract-core.wasm.js",
+          langPath: "/tesseract",
+          cachePath: "/tesseract",
           logger: () => {},
         });
         await worker.setParameters({
           tessedit_char_whitelist:
-            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-/(). ",
+            "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-/(). _",
           tessedit_pageseg_mode: "6",
         });
         return worker;
+      } catch (localErr) {
+        console.warn("Échec Tesseract local, repli CDN:", localErr?.message || localErr);
       }
+
+      // 3. Repli CDN si les fichiers locaux ne peuvent être servis
+      const worker = await createWorker("eng", 1, {
+        logger: () => {},
+      });
+      await worker.setParameters({
+        tessedit_char_whitelist:
+          "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-/(). _",
+        tessedit_pageseg_mode: "6",
+      });
+      return worker;
     })();
   }
   return workerPromise;
 }
 
 /**
- * Prétraite une région vidéo pour maximiser le contraste du texte (noir sur blanc).
+ * Prétraite une région vidéo pour maximiser la lisibilité du texte (noir sur blanc)
+ * par étirement d'histogramme dynamique (contrast stretching) sans destruction
+ * des traits fins indispensables aux parenthèses et tirets de l'ONT.
  * @param {HTMLVideoElement} video
  * @param {{ sx: number, sy: number, sw: number, sh: number }} crop
  * @returns {HTMLCanvasElement}
@@ -58,24 +84,33 @@ export function preprocessCanvasForOcr(video, crop) {
   try {
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     const d = imgData.data;
-    let sum = 0;
     const len = d.length;
-    for (let i = 0; i < len; i += 4) {
-      sum += (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
-    }
-    const avg = sum / (len / 4);
-    const threshold = Math.max(70, Math.min(190, avg * 0.92));
 
-    for (let i = 0; i < len; i += 4) {
-      const gray = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
-      const val = gray > threshold ? 255 : 0;
-      d[i] = val;
-      d[i + 1] = val;
-      d[i + 2] = val;
+    // Calcul de la distribution de luminosité pour étirement de contraste
+    let minLum = 255;
+    let maxLum = 0;
+    const step = 4 * 4; // Échantillonnage rapide
+    for (let i = 0; i < len; i += step) {
+      const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+      if (lum < minLum) minLum = lum;
+      if (lum > maxLum) maxLum = lum;
     }
-    ctx.putImageData(imgData, 0, 0);
+
+    const range = maxLum - minLum;
+    if (range > 20) {
+      const scale = 255 / range;
+      for (let i = 0; i < len; i += 4) {
+        const lum = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+        // Étirement de contraste linéaire centré
+        const stretched = Math.max(0, Math.min(255, (lum - minLum) * scale));
+        d[i] = stretched;
+        d[i + 1] = stretched;
+        d[i + 2] = stretched;
+      }
+      ctx.putImageData(imgData, 0, 0);
+    }
   } catch {
-    // Garder le dessin brut en cas d'erreur
+    // Conserver l'image originale en cas de restriction de contexte
   }
 
   return canvas;
@@ -85,7 +120,7 @@ export function preprocessCanvasForOcr(video, crop) {
  * Analyse une image ou flux vidéo avec OCR Tesseract pour extraire MAC & SN
  * @param {HTMLVideoElement} video
  * @param {{ sx: number, sy: number, sw: number, sh: number }} cropRect
- * @returns {Promise<{ mac: string|null, sn: string|null, rawText: string }>}
+ * @returns {Promise<{ mac: string|null, sn: string|null, rawText: string, confidence: number }>}
  */
 export async function recognizeOntFromVideo(video, cropRect) {
   try {
@@ -102,6 +137,6 @@ export async function recognizeOntFromVideo(video, cropRect) {
     };
   } catch (err) {
     console.warn("Erreur reconnaissance OCR:", err);
-    return { mac: null, sn: null, rawText: "", error: err?.message };
+    return { mac: null, sn: null, rawText: "", error: err?.message, confidence: 0 };
   }
 }
