@@ -73,6 +73,7 @@
   function getPhotoDescription(p) {
     if (!p || typeof p !== "object") return "";
     return [
+      p.slot,
       p.name,
       p.nom,
       p.title,
@@ -123,6 +124,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const ontPhoto = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "ont_sn" || p.type === "ont_sn") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("ont") || desc.includes("sn") || desc.includes("serie") || desc.includes("box") || desc.includes("abonne") || desc.includes("client");
         });
@@ -146,6 +148,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const fatPhoto = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "fat" || p.type === "fat") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("fat") || desc.includes("pbo");
         });
@@ -162,6 +165,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const scanPhoto = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "scan_fat" || p.type === "scan_fat") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("scan") || desc.includes("code barre") || desc.includes("barcode") || desc.includes("etiquette fat");
         });
@@ -177,6 +181,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "cable_interne" || p.type === "cable_interne") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("interne");
         });
@@ -192,6 +197,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "cable_externe" || p.type === "cable_externe") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("externe");
         });
@@ -207,6 +213,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "fibre_fat" || p.type === "fibre_fat") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("fibre au fat") || desc.includes("fibre_fat");
         });
@@ -222,6 +229,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "mesure_fat" || p.type === "mesure_fat") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("mesure fat") || desc.includes("photometre fat");
         });
@@ -237,6 +245,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "mesure_pto" || p.type === "mesure_pto") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("mesure pto") || desc.includes("photometre pto");
         });
@@ -252,6 +261,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "debit_cable" || p.type === "debit_cable") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("debit cable") || desc.includes("speedtest cable");
         });
@@ -267,6 +277,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "debit_wifi" || p.type === "debit_wifi") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("debit wifi") || desc.includes("speedtest wifi");
         });
@@ -282,6 +293,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "combine" || p.type === "combine") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("combine") && !desc.includes("fiche");
         });
@@ -297,6 +309,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "fiche_combine" || p.type === "fiche_combine") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("fiche combine") || desc.includes("fiche raccordement");
         });
@@ -315,6 +328,7 @@
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
+          if (p.slot === "contrat_client" || p.type === "contrat_client") return true;
           const desc = getPhotoDescription(p);
           return desc.includes("contrat") || desc.includes("signature");
         });

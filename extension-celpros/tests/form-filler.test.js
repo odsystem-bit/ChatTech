@@ -279,6 +279,27 @@ test('PhotoFiller - Returns photo only for corresponding matching slot', () => {
   assert.ok(contratRule.getPhoto(realFatIntv)); // Vraie signature client
 });
 
+test('PhotoFiller - Correctly matches photos by explicit slot tag', () => {
+  const structuredIntv = {
+    points_gps: [],
+    whatsapp_photos: [
+      { slot: 'cable_interne', url: 'data:image/jpeg;base64,cable123' },
+      { slot: 'mesure_fat', url: 'data:image/jpeg;base64,mesurefat123' },
+      { slot: 'scan_fat', url: 'data:image/jpeg;base64,scanfat123' },
+    ],
+  };
+
+  const cableRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'cable_interne');
+  const mesureFatRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'mesure_fat');
+  const scanFatRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'scan_fat');
+  const debitRule = PhotoFiller.PHOTO_SLOT_RULES.find(r => r.key === 'debit_cable');
+
+  assert.equal(cableRule.getPhoto(structuredIntv)?.src, 'data:image/jpeg;base64,cable123');
+  assert.equal(mesureFatRule.getPhoto(structuredIntv)?.src, 'data:image/jpeg;base64,mesurefat123');
+  assert.equal(scanFatRule.getPhoto(structuredIntv)?.src, 'data:image/jpeg;base64,scanfat123');
+  assert.equal(debitRule.getPhoto(structuredIntv), null);
+});
+
 test('FormFiller - autofillPage leaves unrecorded fields empty and does not invent data', async () => {
   const elNom = new MockElement('input', { id: 'field_nomClient', name: 'nomClient', value: '' });
   const elOffre = new MockElement('select', { id: 'field_offre', name: 'offre', options: [{ value: '', textContent: '--' }, { value: 'Fibre Pro', textContent: 'Fibre Pro' }] });

@@ -270,6 +270,39 @@
         </div>
       </div>
 
+      <!-- 3bis. MATÉRIELS LIVRÉS & ACCESSOIRES -->
+      <div class="form-section">
+        <div class="section-title">3bis. Matériels Livrés &amp; Accessoires Posés</div>
+        <div class="row">
+          <div class="col">
+            <label for="field_poteauxUtilises">Combien de poteaux utilisés ?</label>
+            <input type="number" id="field_poteauxUtilises" name="poteauxUtilises" formcontrolname="poteauxUtilises" placeholder="Ex: 5" />
+          </div>
+          <div class="col">
+            <label for="field_piton">Nombre de pitons utilisés</label>
+            <input type="number" id="field_piton" name="piton" formcontrolname="piton" placeholder="Ex: 5" />
+          </div>
+          <div class="col">
+            <label for="field_pince">Nombre de pinces</label>
+            <input type="number" id="field_pince" name="pince" formcontrolname="pince" placeholder="Ex: 3" />
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_crochets">Crochets</label>
+            <input type="number" id="field_crochets" name="crochets" formcontrolname="crochets" placeholder="Ex: 4" />
+          </div>
+          <div class="col">
+            <label for="field_cheville">Chevilles</label>
+            <input type="number" id="field_cheville" name="cheville" formcontrolname="cheville" placeholder="Ex: 2" />
+          </div>
+          <div class="col">
+            <label for="field_jarretiere">Jarretière optique</label>
+            <input type="number" id="field_jarretiere" name="jarretiere" formcontrolname="jarretiere" placeholder="Ex: 1" />
+          </div>
+        </div>
+      </div>
+
       <!-- 4. MESURES PTO & MATÉRIEL CLIENT -->
       <div class="form-section">
         <div class="section-title">4. Matériel &amp; Mesure Client</div>
@@ -280,7 +313,7 @@
           </div>
           <div class="col">
             <label for="field_ptoQte">Quantité PTO</label>
-            <input type="number" id="field_ptoQte" name="ptoQte" formcontrolname="ptoQte" value="1" />
+            <input type="number" id="field_ptoQte" name="ptoQte" formcontrolname="ptoQte" />
           </div>
           <div class="col">
             <label for="field_emplacementOnt">Emplacement ONT / Box</label>
@@ -295,6 +328,31 @@
           <div class="col">
             <label for="field_sn">Numéro de série ONT (SN) *</label>
             <input type="text" id="field_sn" name="sn" formcontrolname="sn" placeholder="Ex: ALCLB1234567" />
+          </div>
+        </div>
+      </div>
+
+      <!-- 4bis. PHOTOS & JUSTIFICATIFS TERRAIN -->
+      <div class="form-section">
+        <div class="section-title">4bis. Photos &amp; Justificatifs Terrain</div>
+        <div class="row">
+          <div class="col">
+            <label>Photo numéro de série ONT</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 16px; text-align: center; background: #fafafa;">
+              <input type="file" name="photoOnt" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label>Image FAT</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 16px; text-align: center; background: #fafafa;">
+              <input type="file" name="photoFat" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label>Photo du contrat client</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 16px; text-align: center; background: #fafafa;">
+              <input type="file" name="photoContrat" accept="image/*" />
+            </div>
           </div>
         </div>
       </div>
