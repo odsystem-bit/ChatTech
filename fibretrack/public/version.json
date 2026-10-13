@@ -1,12 +1,13 @@
 {
-  "version": "2.2.0",
-  "buildTime": "2026-10-13T11:25:00Z",
+  "version": "2.3.0",
+  "buildTime": "2026-10-13T14:26:00Z",
   "features": [
+    "Native hardware-accelerated video barcode scanner for ONT MAC & SN",
+    "Dual-engine decoding (native BarcodeDetector + ZXing MultiFormat fallback)",
+    "Torch/flash toggle and multi-camera switcher",
     "Instant 0ms local auto-save",
     "PhotoViewerModal for GPS points & WhatsApp photos on mobile",
     "PWA install button for Mobile & Desktop PC",
-    "Hardware-accelerated Barcode Scanner for ONT MAC & SN",
-    "Automatic barcode distinction (MAC hex format vs SN format)",
     "LiteSpeed cache busting headers (.htaccess)"
   ]
 }
