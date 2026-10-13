@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Tabs from "../components/Tabs";
-import { TextField, CheckField, SelectField } from "../components/FormField";
+import { TextField, CheckField, SelectField, ScannableField } from "../components/FormField";
 import SignaturePad from "../components/SignaturePad";
 import { getInterventionLight, saveIntervention, saveInterventionLocally } from "../models/Intervention";
+import PhotoViewerModal from "../components/PhotoViewerModal";
+import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import {
   getCurrentPositionHighAccuracy,
   findNearbyPoint,
@@ -75,6 +77,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const waGalleryInputRef = useRef(null);
   const [waCapturing, setWaCapturing] = useState(false);
   const [saveStatus, setSaveStatus] = useState("");
+  const [viewingPhoto, setViewingPhoto] = useState(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerTarget, setScannerTarget] = useState("both");
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
   const selectedPorts = (data.ports_disponibles || "")
@@ -685,8 +690,57 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
             <TextField label="Puissance FAT (dBm)" type="number" value={data.puissance_fat_dbm} onChange={(v) => update("puissance_fat_dbm", v)} />
             <TextField label="Puissance PTO (dBm)" type="number" value={data.puissance_pto_dbm} onChange={(v) => update("puissance_pto_dbm", v)} />
-            <TextField label="MAC" value={data.mac} onChange={(v) => update("mac", v)} />
-            <TextField label="SN (ONT)" value={data.sn} onChange={(v) => update("sn", v)} />
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, margin: "6px 0 10px" }}>
+              <ScannableField
+                label="Adresse MAC (Box / ONT)"
+                value={data.mac}
+                placeholder="Ex: 54:83:3A:4B:2C:1D"
+                scanLabel="Scanner MAC"
+                onChange={(v) => update("mac", v)}
+                onScanClick={() => {
+                  setScannerTarget("mac");
+                  setScannerOpen(true);
+                }}
+              />
+
+              <ScannableField
+                label="SN (Numéro de série ONT)"
+                value={data.sn}
+                placeholder="Ex: ZTEGC8923412 ou HWTC..."
+                scanLabel="Scanner SN"
+                onChange={(v) => {
+                  update("sn", v);
+                  if (!data.ont_sn) update("ont_sn", v);
+                }}
+                onScanClick={() => {
+                  setScannerTarget("sn");
+                  setScannerOpen(true);
+                }}
+              />
+
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{
+                  fontSize: 13,
+                  padding: "10px 14px",
+                  alignSelf: "flex-start",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontWeight: 600,
+                  color: "var(--primary)",
+                  borderColor: "var(--primary)",
+                  background: "var(--primary-bg)",
+                }}
+                onClick={() => {
+                  setScannerTarget("both");
+                  setScannerOpen(true);
+                }}
+              >
+                📷 Scanner les deux codes (MAC + SN) en un seul scan
+              </button>
+            </div>
 
             <p className="gps-status">
               Poteaux traversés : <strong>{String(data.nb_poteaux_traverses).padStart(2, "0")}</strong>
@@ -898,8 +952,56 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             <ul className="gps-list">
               {data.points_gps.map((point, idx) => (
                 <li key={idx}>
-                  <img src={point.photo} alt={point.type} className="gps-thumb" />
-                  <div>
+                  {point.photo ? (
+                    <button
+                      type="button"
+                      className="gps-thumb-btn"
+                      onClick={() => {
+                        setViewingPhoto({
+                          url: point.photo,
+                          title: `${point.type} ${point.sous_type ? `(${point.sous_type})` : ""} ${point.numero}`,
+                          subtitle: point.lieu || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`,
+                          info: [
+                            { label: "Coordonnées", val: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` },
+                            { label: "Précision", val: `±${point.precision_m.toFixed(1)} m` },
+                            { label: "Date & Heure", val: new Date(point.horodatage).toLocaleString() },
+                            { label: "Ajouté par", val: point.ajoute_par || "Technicien" },
+                            ...(point.proprietaire ? [{ label: "Propriétaire", val: point.proprietaire }] : []),
+                            ...(point.lieu ? [{ label: "Lieu", val: point.lieu }] : []),
+                          ],
+                        });
+                      }}
+                      aria-label="Agrandir la photo"
+                    >
+                      <img
+                        src={point.photo}
+                        alt={point.type}
+                        className="gps-thumb"
+                      />
+                      <span className="gps-thumb-zoom-badge">🔍</span>
+                    </button>
+                  ) : null}
+                  <div
+                    role={point.photo ? "button" : undefined}
+                    tabIndex={point.photo ? 0 : undefined}
+                    style={{ flex: 1, cursor: point.photo ? "pointer" : "default", touchAction: "manipulation" }}
+                    onClick={() => {
+                      if (!point.photo) return;
+                      setViewingPhoto({
+                        url: point.photo,
+                        title: `${point.type} ${point.sous_type ? `(${point.sous_type})` : ""} ${point.numero}`,
+                        subtitle: point.lieu || `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`,
+                        info: [
+                          { label: "Coordonnées", val: `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}` },
+                          { label: "Précision", val: `±${point.precision_m.toFixed(1)} m` },
+                          { label: "Date & Heure", val: new Date(point.horodatage).toLocaleString() },
+                          { label: "Ajouté par", val: point.ajoute_par || "Technicien" },
+                          ...(point.proprietaire ? [{ label: "Propriétaire", val: point.proprietaire }] : []),
+                          ...(point.lieu ? [{ label: "Lieu", val: point.lieu }] : []),
+                        ],
+                      });
+                    }}
+                  >
                     <strong>
                       {point.type} {point.sous_type ? `(${point.sous_type})` : ""} {point.numero}
                       {point.proprietaire ? ` - ${point.proprietaire}` : ""}
@@ -913,6 +1015,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     )}
                     <br />
                     ±{point.precision_m.toFixed(1)} m - {new Date(point.horodatage).toLocaleString()} - {point.ajoute_par}
+                    <br />
+                    <span style={{ fontSize: 11, color: "var(--primary)", fontWeight: 600 }}>🔍 Toucher pour agrandir</span>
                   </div>
                   <button
                     type="button"
@@ -1008,6 +1112,44 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                         )}
                         <button
                           type="button"
+                          className="zoom-photo-btn"
+                          style={{
+                            position: "absolute",
+                            bottom: 4,
+                            right: 4,
+                            width: 26,
+                            height: 26,
+                            borderRadius: "50%",
+                            background: "rgba(0, 0, 0, 0.65)",
+                            color: "#fff",
+                            border: "none",
+                            fontSize: 12,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            zIndex: 3,
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingPhoto({
+                              url: photo.url,
+                              title: "Photo terrain",
+                              subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
+                              info: [
+                                ...(photo.lat ? [{ label: "Coordonnées", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
+                                ...(photo.precision_m ? [{ label: "Précision", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
+                                ...(photo.horodatage ? [{ label: "Date & Heure", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                                ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
+                              ],
+                            });
+                          }}
+                          title="Agrandir"
+                        >
+                          🔍
+                        </button>
+                        <button
+                          type="button"
                           className="remove-btn"
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1041,7 +1183,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
         {activeTab === "mise_en_service" && (
           <section>
-            <TextField label="ONT / SN" value={data.ont_sn} onChange={(v) => update("ont_sn", v)} />
+            <ScannableField
+              label="ONT / SN"
+              value={data.ont_sn}
+              placeholder="Ex: ZTEGC8923412 ou HWTC..."
+              scanLabel="Scanner SN"
+              onChange={(v) => {
+                update("ont_sn", v);
+                if (!data.sn) update("sn", v);
+              }}
+              onScanClick={() => {
+                setScannerTarget("sn");
+                setScannerOpen(true);
+              }}
+            />
             <TextField label="Qté PTO" type="number" value={data.pto_qte} onChange={(v) => update("pto_qte", v)} />
             <TextField label="Qté répéteur WiFi" type="number" value={data.repeteur_wifi_qte} onChange={(v) => update("repeteur_wifi_qte", v)} />
             <TextField label="Emplacement ONT" value={data.emplacement_ont} onChange={(v) => update("emplacement_ont", v)} />
@@ -1089,6 +1244,25 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           {finishing ? "Finalisation en cours…" : "Terminer l'intervention"}
         </button>
       </footer>
+
+      <PhotoViewerModal photo={viewingPhoto} onClose={() => setViewingPhoto(null)} />
+
+      <BarcodeScannerModal
+        isOpen={scannerOpen}
+        targetField={scannerTarget}
+        currentMac={data.mac}
+        currentSn={data.sn || data.ont_sn}
+        onScan={({ mac, sn }) => {
+          if (mac) {
+            update("mac", mac);
+          }
+          if (sn) {
+            update("sn", sn);
+            update("ont_sn", sn);
+          }
+        }}
+        onClose={() => setScannerOpen(false)}
+      />
     </div>
   );
 }

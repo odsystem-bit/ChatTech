@@ -4,7 +4,9 @@ export default function InstallPwaButton({ variant = "button", className = "" })
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
+  const [showDesktopModal, setShowDesktopModal] = useState(false);
 
   useEffect(() => {
     // Vérifier si déjà en mode autonome (PWA déjà installée)
@@ -17,10 +19,12 @@ export default function InstallPwaButton({ variant = "button", className = "" })
       return;
     }
 
-    // Détecter iOS
+    // Détecter l'appareil
     const userAgent = window.navigator.userAgent || "";
     const isIosDevice = /iPhone|iPad|iPod/.test(userAgent) && !window.MSStream;
+    const isMobileDevice = /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(userAgent);
     setIsIOS(isIosDevice);
+    setIsDesktop(!isMobileDevice);
 
     // Écouter l'événement standard d'installation (Android / Chrome / Edge)
     const handleBeforeInstallPrompt = (e) => {
@@ -44,24 +48,31 @@ export default function InstallPwaButton({ variant = "button", className = "" })
 
   async function handleInstallClick() {
     if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === "accepted") {
-        setIsInstalled(true);
+      try {
+        await deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === "accepted") {
+          setIsInstalled(true);
+        }
+        setDeferredPrompt(null);
+        return;
+      } catch (err) {
+        console.warn("PWA install error:", err);
       }
-      setDeferredPrompt(null);
-    } else if (isIOS) {
+    }
+
+    if (isIOS) {
       setShowIOSModal(true);
+    } else if (isDesktop) {
+      setShowDesktopModal(true);
     } else {
-      // Fallback si le navigateur ne déclenche pas l'événement
-      alert("Pour installer l'application sur cet appareil, ouvrez le menu de votre navigateur (les 3 points en haut à droite) et appuyez sur 'Installer l'application' ou 'Ajouter à l'écran d'accueil'.");
+      setShowDesktopModal(true);
     }
   }
 
-  // Ne rien afficher si l'app est déjà installée
+  // Ne rien afficher si l'app est déjà installée en mode autonome
   if (isInstalled) return null;
 
-  // Si ni Android prompt ni iOS, on affiche quand même un bouton d'installation assistée
   return (
     <>
       {variant === "banner" ? (
@@ -70,7 +81,7 @@ export default function InstallPwaButton({ variant = "button", className = "" })
             <span className="pwa-install-icon">📲</span>
             <div>
               <strong>Installer CHAPTECH</strong>
-              <p>Accédez à l'application directement depuis votre écran d'accueil.</p>
+              <p>Accédez à l'application directement depuis votre écran d'accueil ou votre PC.</p>
             </div>
           </div>
           <button type="button" onClick={handleInstallClick} className="btn-install-pwa">
@@ -90,6 +101,59 @@ export default function InstallPwaButton({ variant = "button", className = "" })
           </svg>
           Installer l'application (PWA)
         </button>
+      )}
+
+      {/* Modale d'instructions pour Desktop PC (Chrome / Edge) */}
+      {showDesktopModal && (
+        <div className="ios-install-backdrop" onClick={() => setShowDesktopModal(false)} role="dialog" aria-modal="true">
+          <div className="ios-install-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+            <div className="ios-install-header">
+              <h3>Installer CHAPTECH sur PC</h3>
+              <button
+                type="button"
+                className="btn-close-modal"
+                onClick={() => setShowDesktopModal(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ fontSize: 14, color: "#334155", lineHeight: 1.6 }}>
+              <p style={{ margin: "0 0 12px" }}>
+                Sur ordinateur (Google Chrome ou Microsoft Edge), l'installation est immédiate :
+              </p>
+              
+              <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: 12, marginBottom: 10, border: "1px solid #e2e8f0", borderLeft: "4px solid #2563eb" }}>
+                <strong style={{ color: "#1e293b", display: "block", marginBottom: 4 }}>
+                  👉 Option 1 : Dans la barre d'adresse (recommandé)
+                </strong>
+                <span>
+                  Regardez <strong>tout à droite</strong> de la barre d'adresse (où est affiché l'URL <code>https://fibretrack.mantota.com/</code>). Cliquez sur l'icône d'ordinateur avec une flèche vers le bas 📥 <strong>« Installer CHAPTECH »</strong>.
+                </span>
+              </div>
+
+              <div style={{ background: "#f8fafc", padding: "12px 14px", borderRadius: 12, marginBottom: 12, border: "1px solid #e2e8f0", borderLeft: "4px solid #10b981" }}>
+                <strong style={{ color: "#1e293b", display: "block", marginBottom: 4 }}>
+                  👉 Option 2 : Dans le menu du navigateur
+                </strong>
+                <span>
+                  Cliquez sur les <strong>3 points verticaux ⋮</strong> (en haut à droite de Chrome/Edge) &rarr; Cliquez sur <strong>« Installer CHAPTECH… »</strong> (ou « Applications » &gt; « Installer ce site en tant qu'application »).
+                </span>
+              </div>
+
+              <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
+                💡 Une fois installée, CHAPTECH s'ouvre dans sa propre fenêtre sans barre d'adresse, et un raccourci est créé sur votre Bureau Windows.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ width: "100%", marginTop: 16 }}
+              onClick={() => setShowDesktopModal(false)}
+            >
+              J'ai compris
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Modale d'instructions pour iOS */}

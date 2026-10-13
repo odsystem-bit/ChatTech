@@ -1,4 +1,4 @@
-const CACHE_NAME = 'chaptech-pwa-v1';
+const CACHE_NAME = 'chaptech-pwa-v2.1';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',

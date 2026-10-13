@@ -1,0 +1,12 @@
+{
+  "version": "2.2.0",
+  "buildTime": "2026-10-13T11:25:00Z",
+  "features": [
+    "Instant 0ms local auto-save",
+    "PhotoViewerModal for GPS points & WhatsApp photos on mobile",
+    "PWA install button for Mobile & Desktop PC",
+    "Hardware-accelerated Barcode Scanner for ONT MAC & SN",
+    "Automatic barcode distinction (MAC hex format vs SN format)",
+    "LiteSpeed cache busting headers (.htaccess)"
+  ]
+}

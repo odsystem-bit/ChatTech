@@ -1255,3 +1255,389 @@
   color: var(--text);
 }
 
+/* ===== Photo Viewer Lightbox ===== */
+.gps-thumb {
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gps-thumb:active {
+  transform: scale(0.95);
+}
+
+.photo-viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(6px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.photo-viewer-card {
+  background: #fff;
+  border-radius: 20px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  animation: scaleUp 0.2s ease-out;
+}
+
+@keyframes scaleUp {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.photo-viewer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+
+.photo-viewer-title h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.photo-viewer-title p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.btn-close-viewer {
+  background: #f1f5f9;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.photo-viewer-img-container {
+  flex: 1;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  max-height: 55vh;
+}
+
+.photo-viewer-img {
+  width: 100%;
+  height: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+}
+
+.photo-viewer-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  padding: 14px 20px;
+  background: #f8fafc;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.photo-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.photo-info-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.photo-info-val {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.photo-viewer-actions {
+  padding: 12px 20px 16px;
+  background: #fff;
+}
+
+/* ===== Scannable Fields ===== */
+.scannable-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.scannable-input-group input {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-scan-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+  background: linear-gradient(135deg, #1e40af 0%, #2563eb 100%);
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  min-height: 52px;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+  touch-action: manipulation;
+}
+
+.btn-scan-trigger:active {
+  transform: scale(0.96);
+  opacity: 0.9;
+}
+
+/* ===== Barcode Scanner Modal ===== */
+.barcode-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.2s ease-out;
+  touch-action: manipulation;
+}
+
+.barcode-modal-card {
+  background: #fff;
+  border-radius: 24px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+  animation: scaleUp 0.2s ease-out;
+}
+
+.barcode-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.barcode-modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.barcode-modal-subtitle {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.barcode-viewport-wrapper {
+  position: relative;
+  background: #000;
+  width: 100%;
+  min-height: 240px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.barcode-viewport {
+  width: 100%;
+}
+
+.barcode-scan-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.barcode-scan-reticle {
+  width: 85%;
+  height: 140px;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-radius: 12px;
+  position: relative;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.barcode-laser-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444, 0 0 12px #f87171;
+  animation: scanLaser 1.8s ease-in-out infinite alternate;
+}
+
+@keyframes scanLaser {
+  0% { top: 10%; }
+  100% { top: 90%; }
+}
+
+.barcode-scan-hint {
+  margin-top: 12px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  background: rgba(0, 0, 0, 0.6);
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+.barcode-controls-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.btn-barcode-ctrl {
+  background: #fff;
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn-barcode-ctrl.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.barcode-error-banner {
+  background: #fef2f2;
+  color: #b91c1c;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-bottom: 1px solid #fecaca;
+}
+
+.barcode-live-detected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #ecfdf5;
+  border-bottom: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 13px;
+}
+
+.live-type-tag {
+  font-size: 11px;
+  font-weight: 700;
+  background: #10b981;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.barcode-summary-box {
+  padding: 14px 16px;
+  background: #f8fafc;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.barcode-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.barcode-summary-row.filled {
+  border-color: #10b981;
+  background: #f0fdf4;
+}
+
+.summary-label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.summary-value {
+  font-family: monospace;
+  font-size: 14px;
+}
+
+.summary-check {
+  color: #10b981;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.barcode-modal-actions {
+  display: flex;
+  gap: 10px;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+
+
