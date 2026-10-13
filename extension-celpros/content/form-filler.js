@@ -12,7 +12,17 @@
     }
   };
 
-  const exports = factory(getMapping());
+  const getPhotoFiller = () => {
+    if (typeof root !== "undefined" && root && root.PhotoFiller) return root.PhotoFiller;
+    if (typeof globalThis !== "undefined" && globalThis.PhotoFiller) return globalThis.PhotoFiller;
+    try {
+      return require("./photo-filler.js");
+    } catch {
+      return null;
+    }
+  };
+
+  const exports = factory(getMapping(), getPhotoFiller());
   if (typeof module === "object" && module && module.exports) {
     module.exports = exports;
   }
@@ -22,7 +32,7 @@
   if (root) {
     root.FormFiller = exports;
   }
-})(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : this, function (FieldMapping) {
+})(typeof globalThis !== "undefined" ? globalThis : typeof self !== "undefined" ? self : this, function (FieldMapping, PhotoFiller) {
   "use strict";
 
   // Injection d'une valeur dans un champ texte / nombre / textarea avec contournement des prototypes React/Angular
@@ -243,13 +253,42 @@
     return true;
   }
 
-  // Fonction principale : balayage et pré-remplissage complet de la page
-  function autofillPage(interventionData, root = (typeof document !== "undefined" ? document : null)) {
-    if (!root || !interventionData) {
-      return { success: false, filledCount: 0, error: "Racine DOM ou données d'intervention manquantes" };
+  // Détection de l'étape courante dans le wizard CelPros (1 à 5)
+  function detectCurrentStep(root = (typeof document !== "undefined" ? document : null)) {
+    if (!root) return 1;
+
+    // 1. Recherche des puces numérotées du stepper (ex: cercles 1, 2, 3, 4, 5)
+    const stepIndicators = Array.from(root.querySelectorAll(".step, .stepper, [class*='step'], [class*='wizard'] li, [class*='wizard'] div"));
+    for (const el of stepIndicators) {
+      const cls = (el.className || "").toLowerCase();
+      const isSelected = cls.includes("active") || cls.includes("current") || cls.includes("selected");
+      if (isSelected) {
+        const txt = el.innerText?.trim();
+        const num = parseInt(txt);
+        if (num >= 1 && num <= 5) return num;
+      }
     }
 
-    // Recherche de tous les champs de saisie pertinents
+    // 2. Détection par le contenu textuel des rubriques de chaque étape
+    const docText = (root.body || root).innerText || "";
+    if (docText.includes("Signature du rapport") || docText.includes("Contrat client")) return 5;
+    if (docText.includes("Rattachement") || docText.includes("Branchement") || docText.includes("Valeur au FAT")) return 4;
+    if (docText.includes("Tests de débits") || docText.includes("Tests de services")) return 3;
+    if (docText.includes("Matériels livrés") || docText.includes("Accessoires") || docText.includes("GPS FAT")) return 2;
+    if (docText.includes("Interlocuteur") || docText.includes("Configurations")) return 1;
+
+    return 1;
+  }
+
+  // Fonction principale : balayage, pré-remplissage complet de la page et injection des photos
+  async function autofillPage(interventionData, root = (typeof document !== "undefined" ? document : null)) {
+    if (!root || !interventionData) {
+      return { success: false, filledCount: 0, photosInjected: 0, error: "Racine DOM ou données d'intervention manquantes" };
+    }
+
+    const currentStep = detectCurrentStep(root);
+
+    // 1. Remplissage des champs textuels, numériques, selects, radios, checkboxes
     const selector = [
       'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="file"])',
       "select",
@@ -299,11 +338,26 @@
       }
     }
 
+    // 2. Injection automatique des photos correspondantes
+    let photoReport = { totalSlotsFound: 0, injectedCount: 0, details: [] };
+    const pf = PhotoFiller || (typeof globalThis !== "undefined" && globalThis.PhotoFiller) || (typeof window !== "undefined" && window.PhotoFiller);
+    if (pf && typeof pf.fillPhotosOnPage === "function") {
+      try {
+        photoReport = await pf.fillPhotosOnPage(interventionData, root);
+      } catch (err) {
+        console.warn("[FormFiller] Erreur lors de l'injection des photos:", err);
+      }
+    }
+
     return {
       success: true,
+      currentStep,
       totalScanned: elements.length,
       filledCount: filledDetails.length,
       filledDetails,
+      photosInjected: photoReport.injectedCount || 0,
+      photoDetails: photoReport.details || [],
+      totalPhotoSlotsFound: photoReport.totalSlotsFound || 0,
       unmatchedElements,
     };
   }
@@ -369,6 +423,7 @@
     setNativeSelectValue,
     handleRadioGroup,
     fillElement,
+    detectCurrentStep,
     autofillPage,
     formatWhatsAppReport,
   };

@@ -46,6 +46,7 @@
       ],
       "js": [
         "content/field-mapping.js",
+        "content/photo-filler.js",
         "content/form-filler.js",
         "content/ui-widget.js",
         "content/content.js"

@@ -134,7 +134,7 @@ test('FormFiller - handleRadioGroup selects matching radio button', () => {
   assert.equal(radioNo.checked, false);
 });
 
-test('FormFiller - autofillPage matches and fills complete simulated CelPros form', () => {
+test('FormFiller - autofillPage matches and fills complete simulated CelPros form', async () => {
   const elNom = new MockElement('input', { id: 'field_nomClient', name: 'nomClient' });
   const elMobile = new MockElement('input', { id: 'field_mobile', name: 'mobile' });
   const elAdresse = new MockElement('input', { id: 'field_adresse', name: 'adresse' });
@@ -172,7 +172,7 @@ test('FormFiller - autofillPage matches and fills complete simulated CelPros for
     travaux_conformes: true,
   };
 
-  const report = FormFiller.autofillPage(mockIntervention, doc);
+  const report = await FormFiller.autofillPage(mockIntervention, doc);
 
   assert.ok(report.success);
   assert.equal(report.filledCount, 10);

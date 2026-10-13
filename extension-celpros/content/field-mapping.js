@@ -1182,7 +1182,377 @@
         return pt?.lat !== undefined && pt?.lng !== undefined ? `${pt.lat.toFixed(6)}, ${pt.lng.toFixed(6)}` : "";
       },
     },
+
+    // ----------------------------------------------------
+    // 7. CelPros Étape 1 : Interlocuteur & Configurations
+    // ----------------------------------------------------
+    interlocuteur: {
+      key: "interlocuteur",
+      label: "Interlocuteur",
+      category: "Client",
+      type: "radio",
+      attrPatterns: [/^interlocuteur/i, /^demandeur/i],
+      labelKeywords: ["le demandeur", "demandeur", "interlocuteur"],
+      valueExtractor: () => "Le demandeur",
+    },
+
+    configurations_type: {
+      key: "configurations_type",
+      label: "Configurations Type",
+      category: "Client",
+      type: "radio",
+      attrPatterns: [/^configuration/i, /^type_config/i],
+      labelKeywords: ["na", "configurations", "type"],
+      valueExtractor: () => "NA",
+    },
+
+    // ----------------------------------------------------
+    // 8. CelPros Étape 2 : Accessoires & Matériels
+    // ----------------------------------------------------
+    gps_fat: {
+      key: "gps_fat",
+      label: "GPS FAT",
+      category: "Accessoires",
+      type: "text",
+      attrPatterns: [/^gps_?fat$/i, /^gpsfat$/i, /^fat_?gps$/i],
+      labelKeywords: ["gps fat", "coordonnees fat", "position fat"],
+      valueExtractor: (data) => {
+        const fat = extractFatGpsPoint(data);
+        return fat
+          ? `${fat.lat.toFixed(5)}, ${fat.lng.toFixed(5)}`
+          : (data.points_gps?.[0] ? `${Number(data.points_gps[0].lat).toFixed(5)}, ${Number(data.points_gps[0].lng).toFixed(5)}` : "");
+      },
+    },
+
+    rue: {
+      key: "rue",
+      label: "Rue",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^rue$/i, /^materiel_rue$/i],
+      labelKeywords: ["rue"],
+      valueExtractor: (data) => String(data.materiel_pose?.["rue"] ?? 0),
+    },
+
+    pince: {
+      key: "pince",
+      label: "Pince",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^pince$/i, /^materiel_pince$/i],
+      labelKeywords: ["pince"],
+      valueExtractor: (data) => String(data.materiel_pose?.["pince"] ?? 0),
+    },
+
+    crochets: {
+      key: "crochets",
+      label: "Crochets",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^crochet/i, /^crochets$/i],
+      labelKeywords: ["crochets", "crochet"],
+      valueExtractor: (data) => String(data.materiel_pose?.["crochets"] ?? 0),
+    },
+
+    suspension: {
+      key: "suspension",
+      label: "Suspension",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^susp/i, /^suspension/i],
+      labelKeywords: ["suspension", "susp", "suspente"],
+      valueExtractor: (data) => String(data.materiel_pose?.["susp"] ?? 0),
+    },
+
+    piton: {
+      key: "piton",
+      label: "Piton",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^piton/i],
+      labelKeywords: ["piton"],
+      valueExtractor: (data) => String(data.materiel_pose?.["piton"] ?? 0),
+    },
+
+    connecteur: {
+      key: "connecteur",
+      label: "Connecteur",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^connecteur/i, /^closer/i],
+      labelKeywords: ["connecteur", "closer"],
+      valueExtractor: (data) => String(data.materiel_pose?.["closer"] ?? 0),
+    },
+
+    rp1: {
+      key: "rp1",
+      label: "RP1",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^rp1$/i],
+      labelKeywords: ["rp1"],
+      valueExtractor: (data) => String(data.materiel_pose?.["rp1"] ?? 0),
+    },
+
+    poteaux_sbee_utilises: {
+      key: "poteaux_sbee_utilises",
+      label: "Nombre de poteaux SBEE utilisés",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^poteaux_?sbee/i, /^sbee/i],
+      labelKeywords: ["nombre de poteaux sbee utilises", "poteaux sbee utilises", "poteaux sbee", "sbee utilises"],
+      valueExtractor: (data) => countSbeePoles(data),
+    },
+
+    poteaux_petit_jean_utilises: {
+      key: "poteaux_petit_jean_utilises",
+      label: "Nombre de poteaux Petit Jean utilisés",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^poteaux_?petit_?jean/i, /^petit_?jean/i],
+      labelKeywords: ["nombre de poteaux petit jean utilises", "poteaux petit jean", "petit jean utilises", "petit jean"],
+      valueExtractor: (data) => countPetitJeanPoles(data),
+    },
+
+    traverse_13t: {
+      key: "traverse_13t",
+      label: "Traverse 13T",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^traverse_?13t/i, /^13t/i],
+      labelKeywords: ["traverse 13t", "13t"],
+      valueExtractor: (data) => String(data.materiel_pose?.["traverse_13t"] ?? 0),
+    },
+
+    traverse_15t: {
+      key: "traverse_15t",
+      label: "Traverse 15T",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^traverse_?15t/i, /^15t/i],
+      labelKeywords: ["traverse 15t", "15t"],
+      valueExtractor: (data) => String(data.materiel_pose?.["traverse_15t"] ?? 0),
+    },
+
+    semelle: {
+      key: "semelle",
+      label: "Semelle",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^semelle/i],
+      labelKeywords: ["semelle", "semelle eq"],
+      valueExtractor: (data) => String(data.materiel_pose?.["semelle_eq"] ?? 0),
+    },
+
+    boulons: {
+      key: "boulons",
+      label: "Boulons",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^boulon/i],
+      labelKeywords: ["boulons", "boulon"],
+      valueExtractor: (data) => String(data.materiel_pose?.["boulons"] ?? 0),
+    },
+
+    agrafe: {
+      key: "agrafe",
+      label: "Agrafe",
+      category: "Accessoires",
+      type: "number",
+      attrPatterns: [/^agrafe/i],
+      labelKeywords: ["agrafe", "agrafes"],
+      valueExtractor: (data) => String(data.materiel_pose?.["agrafe"] ?? 0),
+    },
+
+    // ----------------------------------------------------
+    // 9. CelPros Étape 3 : Tests de Services & Débits
+    // ----------------------------------------------------
+    test_appel_sortant: {
+      key: "test_appel_sortant",
+      label: "Appel sortant - Envoi numéro",
+      category: "Tests",
+      type: "boolean",
+      attrPatterns: [/^appel_?sortant/i, /^sortant/i],
+      labelKeywords: ["appel sortant - envoi numero", "appel sortant", "envoi numero"],
+      valueExtractor: () => true,
+    },
+
+    test_appel_entrant: {
+      key: "test_appel_entrant",
+      label: "Appel entrant - Affichage numéro",
+      category: "Tests",
+      type: "boolean",
+      attrPatterns: [/^appel_?entrant/i, /^entrant/i],
+      labelKeywords: ["appel entrant - affichage numero", "appel entrant", "affichage numero"],
+      valueExtractor: () => true,
+    },
+
+    debit_montant: {
+      key: "debit_montant",
+      label: "Débit montant",
+      category: "Tests",
+      type: "number",
+      attrPatterns: [/^montant/i, /^debit_?montant/i],
+      labelKeywords: ["montant"],
+      valueExtractor: () => "50",
+    },
+
+    debit_descendant: {
+      key: "debit_descendant",
+      label: "Débit descendant",
+      category: "Tests",
+      type: "number",
+      attrPatterns: [/^descendant/i, /^debit_?descendant/i],
+      labelKeywords: ["descendant"],
+      valueExtractor: () => "100",
+    },
+
+    debit_ping: {
+      key: "debit_ping",
+      label: "Ping",
+      category: "Tests",
+      type: "number",
+      attrPatterns: [/^ping/i],
+      labelKeywords: ["ping"],
+      valueExtractor: () => "12",
+    },
+
+    // ----------------------------------------------------
+    // 10. CelPros Étape 4 : Branchement & Rattachement
+    // ----------------------------------------------------
+    etiquetage: {
+      key: "etiquetage",
+      label: "Étiquetage",
+      category: "Branchement",
+      type: "boolean",
+      attrPatterns: [/^etiquetage/i],
+      labelKeywords: ["etiquetage"],
+      valueExtractor: () => true,
+    },
+
+    nettoyage: {
+      key: "nettoyage",
+      label: "Nettoyage",
+      category: "Branchement",
+      type: "boolean",
+      attrPatterns: [/^nettoyage/i],
+      labelKeywords: ["nettoyage"],
+      valueExtractor: () => true,
+    },
+
+    depose: {
+      key: "depose",
+      label: "Dépose",
+      category: "Branchement",
+      type: "boolean",
+      attrPatterns: [/^depose/i],
+      labelKeywords: ["depose"],
+      valueExtractor: () => true,
+    },
+
+    colliers_serres: {
+      key: "colliers_serres",
+      label: "Colliers serrés",
+      category: "Branchement",
+      type: "boolean",
+      attrPatterns: [/^collier/i],
+      labelKeywords: ["colliers serres", "collier serre"],
+      valueExtractor: () => true,
+    },
+
+    fat_normalise: {
+      key: "fat_normalise",
+      label: "FAT normalisé",
+      category: "Branchement",
+      type: "boolean",
+      attrPatterns: [/^fat_?normalise/i],
+      labelKeywords: ["fat normalise"],
+      valueExtractor: () => true,
+    },
+
+    tutorat: {
+      key: "tutorat",
+      label: "Tutorat",
+      category: "Branchement",
+      type: "boolean",
+      attrPatterns: [/^tutorat/i],
+      labelKeywords: ["tutorat"],
+      valueExtractor: () => true,
+    },
+
+    plaque: {
+      key: "plaque",
+      label: "Plaque",
+      category: "Réseau",
+      type: "text",
+      attrPatterns: [/^plaque/i],
+      labelKeywords: ["plaque"],
+      valueExtractor: (data) => data.msan || "PL140",
+    },
+
+    service_internet: {
+      key: "service_internet",
+      label: "Internet",
+      category: "Services",
+      type: "boolean",
+      attrPatterns: [/^service_?internet/i, /^internet$/i],
+      labelKeywords: ["internet"],
+      valueExtractor: () => true,
+    },
+
+    service_voip: {
+      key: "service_voip",
+      label: "VOIP",
+      category: "Services",
+      type: "boolean",
+      attrPatterns: [/^service_?voip/i, /^voip$/i],
+      labelKeywords: ["voip"],
+      valueExtractor: (data) =>
+        Boolean((data.offre_souscrite || "").toLowerCase().includes("pro") || (data.offre_souscrite || "").toLowerCase().includes("office")),
+    },
+
+    // ----------------------------------------------------
+    // 11. CelPros Étape 5 : Signature du rapport
+    // ----------------------------------------------------
+    confirme_signature_rapport: {
+      key: "confirme_signature_rapport",
+      label: "Je confirme la signature du rapport",
+      category: "Signature",
+      type: "boolean",
+      attrPatterns: [/^confirme_?signature/i, /^signature_?rapport/i],
+      labelKeywords: ["je confirme la signature du rapport", "confirme signature", "signature du rapport"],
+      valueExtractor: () => true,
+    },
   };
+
+  // Helper pour extraire le point GPS FAT
+  function extractFatGpsPoint(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const fat = list.find((p) => p && normalizeText(p.type).includes("fat"));
+    if (!fat) return null;
+    const lat = typeof fat.lat === "string" ? parseFloat(fat.lat.replace(",", ".")) : Number(fat.lat);
+    const lng = typeof fat.lng === "string" ? parseFloat(fat.lng.replace(",", ".")) : Number(fat.lng);
+    if (isNaN(lat) || isNaN(lng)) return null;
+    return { ...fat, lat, lng };
+  }
+
+  // Helper pour compter les poteaux SBEE
+  function countSbeePoles(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const sbee = list.filter((p) => p && p.type === "Poteau" && normalizeText(p.proprietaire).includes("sbee")).length;
+    if (sbee > 0) return String(sbee);
+    const mp = data?.materiel_pose || {};
+    const count = Number(mp.poteau_sbee_non_arme || 0) + Number(mp.poteau_sbee_arme || 0);
+    if (count > 0) return String(count);
+    return String(data?.nb_poteaux_traverses || 0);
+  }
+
+  // Helper pour compter les poteaux Petit Jean
+  function countPetitJeanPoles(data) {
+    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const pj = list.filter((p) => p && p.type === "Poteau" && (normalizeText(p.proprietaire).includes("petit") || normalizeText(p.proprietaire).includes("jean"))).length;
+    return String(pj);
+  }
 
   // Extraction du point GPS de référence (Abonné en priorité, sinon le dernier point relevé)
   function extractTargetGpsPoint(data) {

@@ -21,6 +21,12 @@
       this.apiStatus = "unknown"; // "connected", "error", "loading"
       this.filterText = "";
       this.lastFillReport = null;
+      this.autoPilotEnabled = true;
+      this.currentStepInfo = null;
+      this.lastStepFilled = null;
+      this.isAutofilling = false;
+      this.observer = null;
+      this.autoFillTimeout = null;
     }
 
     init() {
@@ -32,6 +38,8 @@
       this.createDom();
       this.loadInitialState();
       this.attachEventListeners();
+      this.setupAutoPilotObserver();
+      this.updateStepDisplay();
     }
 
     createDom() {
@@ -126,10 +134,22 @@
               </div>
             </div>
 
+            <!-- Indicateur d'étape CelPros & Mode Super-Pilote -->
+            <div class="chaptech-step-box" id="chaptech-step-box">
+              <div class="step-box-header">
+                <span class="step-badge" id="chaptech-step-badge">Étape active : Détection…</span>
+                <label class="autopilot-toggle" title="Remplir automatiquement champs et photos à chaque étape">
+                  <input type="checkbox" id="chaptech-toggle-autopilot" checked />
+                  <span class="autopilot-label">⚡ Super-Pilote</span>
+                </label>
+              </div>
+              <div class="step-box-sub" id="chaptech-step-sub">Automatisation intégrale Champs &amp; Photos</div>
+            </div>
+
             <!-- Bouton Principal d'action -->
             <div class="chaptech-actions-box">
               <button class="chaptech-btn-primary" id="chaptech-btn-autofill" disabled>
-                🚀 Remplir le formulaire CelPros
+                🚀 Remplir cette étape (Champs &amp; Photos)
               </button>
             </div>
 
@@ -422,6 +442,7 @@
       if (!this.selectedIntervention) {
         card.style.display = "none";
         btnAutofill.disabled = true;
+        this.updateStepDisplay(null);
         return;
       }
 
@@ -437,46 +458,212 @@
       document.getElementById("card-port").textContent = d.port ? `Port ${d.port}` : "N/A";
       document.getElementById("card-power").textContent = `${d.puissance_fat_dbm ?? "-"} / ${d.puissance_pto_dbm ?? "-"} dBm`;
       document.getElementById("card-sn").textContent = d.sn || d.ont_sn || "N/A";
+
+      this.updateStepDisplay();
+
+      // En mode Super-Pilote, déclencher automatiquement le remplissage de l'étape courante
+      if (this.autoPilotEnabled && !this.isAutofilling) {
+        if (this.autoFillTimeout) clearTimeout(this.autoFillTimeout);
+        this.autoFillTimeout = setTimeout(() => {
+          this.handleAutofill(true);
+        }, 300);
+      }
     }
 
-    handleAutofill() {
+    getStepMeta(num) {
+      const steps = {
+        1: { num: 1, title: "Étape 1 : Interlocuteur", desc: "Demandeur, Nom & Tél client, Configurations" },
+        2: { num: 2, title: "Étape 2 : Matériels & Accessoires", desc: "ONT, MAC, SN, Photo ONT, Câbles, Poteaux" },
+        3: { num: 3, title: "Étape 3 : Tests de services", desc: "Appels, Tests débits Câble & Wifi + photos" },
+        4: { num: 4, title: "Étape 4 : Branchement & Mesures", desc: "FAT, Port, Plaque, Mesures optiques & photos" },
+        5: { num: 5, title: "Étape 5 : Signature & Clôture", desc: "Photo contrat client, Confirmation signature" },
+      };
+      return steps[num] || { num: num || 1, title: `Étape ${num || 1}`, desc: "Formulaire d'intervention" };
+    }
+
+    updateStepDisplay(stepNum = null) {
+      const num = stepNum || (FormFiller && FormFiller.detectCurrentStep ? FormFiller.detectCurrentStep(document) : 1);
+      const meta = this.getStepMeta(num);
+      this.currentStepInfo = meta;
+
+      const badge = document.getElementById("chaptech-step-badge");
+      const sub = document.getElementById("chaptech-step-sub");
+      if (badge) badge.textContent = meta.title;
+      if (sub) sub.textContent = meta.desc;
+    }
+
+    setupAutoPilotObserver() {
+      if (this.observer || typeof MutationObserver === "undefined") return;
+
+      // Surveillance des transitions dynamiques dans le DOM de CelPros (SPA)
+      this.observer = new MutationObserver((mutations) => {
+        if (!this.autoPilotEnabled || !this.selectedIntervention || this.isAutofilling) return;
+
+        let hasRelevantChange = false;
+        for (const m of mutations) {
+          if (m.type === "childList" && m.addedNodes.length > 0) {
+            for (const n of m.addedNodes) {
+              if (n.nodeType === 1) {
+                const tag = n.tagName.toLowerCase();
+                if (
+                  tag === "form" ||
+                  tag === "input" ||
+                  tag === "select" ||
+                  n.className?.includes?.("step") ||
+                  n.className?.includes?.("wizard") ||
+                  n.className?.includes?.("upload") ||
+                  n.querySelector?.("input, select, textarea, [class*='upload']")
+                ) {
+                  hasRelevantChange = true;
+                  break;
+                }
+              }
+            }
+          }
+          if (hasRelevantChange) break;
+        }
+
+        if (hasRelevantChange) {
+          if (this.autoFillTimeout) clearTimeout(this.autoFillTimeout);
+          this.autoFillTimeout = setTimeout(() => {
+            const stepNum = FormFiller && FormFiller.detectCurrentStep ? FormFiller.detectCurrentStep(document) : 1;
+            this.updateStepDisplay(stepNum);
+            if (this.lastStepFilled !== stepNum) {
+              this.handleAutofill(true);
+            }
+          }, 350);
+        }
+      });
+
+      this.observer.observe(document.body, { childList: true, subtree: true });
+
+      // Écouter les clics sur les boutons de navigation (Suivant / Précédent / Numéros d'étapes)
+      document.addEventListener(
+        "click",
+        (e) => {
+          const btn = e.target.closest("button, a, .step, [class*='step'], [class*='next'], [class*='wizard']");
+          if (btn && this.autoPilotEnabled && this.selectedIntervention) {
+            setTimeout(() => {
+              const stepNum = FormFiller && FormFiller.detectCurrentStep ? FormFiller.detectCurrentStep(document) : 1;
+              this.updateStepDisplay(stepNum);
+              if (this.lastStepFilled !== stepNum) {
+                this.handleAutofill(true);
+              }
+            }, 450);
+          }
+        },
+        true
+      );
+    }
+
+    async handleAutofill(isAuto = false) {
       if (!this.selectedIntervention) {
-        this.showToast("Veuillez d'abord sélectionner une intervention", "warning");
+        if (!isAuto) this.showToast("Veuillez d'abord sélectionner une intervention", "warning");
         return;
       }
 
-      const report = FormFiller.autofillPage(this.selectedIntervention, document);
-      this.lastFillReport = report;
+      if (this.isAutofilling) return;
+      this.isAutofilling = true;
 
-      const resultBanner = document.getElementById("chaptech-fill-result");
-      if (resultBanner) {
-        resultBanner.style.display = "block";
-        if (report.filledCount > 0) {
-          resultBanner.className = "chaptech-result-banner success";
-          resultBanner.innerHTML = `✅ <strong>${report.filledCount} champ(s)</strong> remplis avec succès sur cette page !`;
-          this.showToast(`⚡ <strong>${report.filledCount} champs</strong> remplis sur CelPros !`, "success", 4000);
-        } else {
-          resultBanner.className = "chaptech-result-banner warning";
-          resultBanner.innerHTML = `⚠️ Aucun champ correspondant n'a été trouvé sur la page courante (${report.totalScanned} éléments scannés).`;
-          this.showToast("⚠️ Aucun champ CelPros correspondant n'a été trouvé sur cette page", "warning");
-        }
+      const btnAutofill = document.getElementById("chaptech-btn-autofill");
+      if (btnAutofill) {
+        btnAutofill.disabled = true;
+        btnAutofill.innerHTML = "⏳ Injection en cours…";
       }
 
-      this.renderFieldsBreakdown(report);
+      try {
+        const report = await FormFiller.autofillPage(this.selectedIntervention, document);
+        this.lastFillReport = report;
+
+        const currentStepNum = report.currentStep || 1;
+        this.lastStepFilled = currentStepNum;
+        this.updateStepDisplay(currentStepNum);
+
+        const fieldsCount = report.filledCount || 0;
+        const photosCount = report.photosInjected || 0;
+        const totalActions = fieldsCount + photosCount;
+
+        const resultBanner = document.getElementById("chaptech-fill-result");
+        if (resultBanner) {
+          resultBanner.style.display = "block";
+          if (totalActions > 0) {
+            resultBanner.className = "chaptech-result-banner success";
+
+            let photosBadgesHtml = "";
+            if (report.photoDetails && report.photoDetails.length > 0) {
+              photosBadgesHtml = `
+                <div class="result-photos-grid">
+                  ${report.photoDetails.map((p) => `<span class="photo-chip" title="${p.fileName}">📸 ${p.label}</span>`).join("")}
+                </div>
+              `;
+            }
+
+            resultBanner.innerHTML = `
+              <div class="result-head">✅ <strong>Étape ${currentStepNum}</strong> complétée ${isAuto ? '<span class="auto-pill">⚡ Super-Pilote</span>' : ""}</div>
+              <div class="result-stats">
+                <span class="stat-tag fields">📝 <strong>${fieldsCount}</strong> champ(s)</span>
+                <span class="stat-tag photos">📸 <strong>${photosCount}</strong> photo(s)</span>
+              </div>
+              ${photosBadgesHtml}
+              <div class="result-hint">👉 Vérifiez puis cliquez sur <strong>Suivant</strong> dans CelPros.</div>
+            `;
+            this.showToast(
+              `⚡ <strong>${fieldsCount} champs</strong> et <strong>${photosCount} photos</strong> injectés pour l'Étape ${currentStepNum} !`,
+              "success",
+              4000
+            );
+          } else {
+            resultBanner.className = "chaptech-result-banner warning";
+            resultBanner.innerHTML = `⚠️ Aucun champ ou zone photo correspondante détectée sur cette page (${report.totalScanned} éléments analysés).`;
+            if (!isAuto) {
+              this.showToast("⚠️ Aucun champ CelPros correspondant sur cette page", "warning");
+            }
+          }
+        }
+
+        this.renderFieldsBreakdown(report);
+      } catch (err) {
+        console.error("[CelprosWidget] Erreur autofill:", err);
+        this.showToast(`❌ Erreur: ${err.message}`, "error");
+      } finally {
+        this.isAutofilling = false;
+        if (btnAutofill) {
+          btnAutofill.disabled = false;
+          btnAutofill.innerHTML = "🚀 Remplir cette étape (Champs &amp; Photos)";
+        }
+      }
     }
 
     renderFieldsBreakdown(report) {
       const container = document.getElementById("chaptech-fields-breakdown");
       if (!container) return;
 
-      if (!report || !report.filledDetails) {
+      if (!report || (!report.filledDetails && !report.photoDetails)) {
         container.innerHTML = "<em>Aucune donnée d'inspection disponible.</em>";
         return;
       }
 
-      let html = `<div class="breakdown-summary">Éléments analysés : ${report.totalScanned} | Remplis : ${report.filledCount}</div>`;
+      let html = `<div class="breakdown-summary">Éléments analysés : ${report.totalScanned || 0} | Champs : ${report.filledCount || 0} | Photos : ${report.photosInjected || 0}</div>`;
 
-      if (report.filledDetails.length > 0) {
+      // Liste des photos injectées
+      if (report.photoDetails && report.photoDetails.length > 0) {
+        html += `<div class="breakdown-subtitle">📸 Photos injectées (${report.photoDetails.length}) :</div>`;
+        html += `<ul class="breakdown-list">`;
+        for (const p of report.photoDetails) {
+          html += `
+            <li class="breakdown-item photo-injected">
+              <span class="badge-cat photo">Photo</span>
+              <strong>${p.label}</strong> :
+              <span class="breakdown-val">${p.fileName} (${p.sizeKb} Ko)</span>
+            </li>
+          `;
+        }
+        html += `</ul>`;
+      }
+
+      // Liste des champs texte/select/cases
+      if (report.filledDetails && report.filledDetails.length > 0) {
+        html += `<div class="breakdown-subtitle">📝 Champs remplis (${report.filledDetails.length}) :</div>`;
         html += `<ul class="breakdown-list">`;
         for (const item of report.filledDetails) {
           html += `
@@ -587,8 +774,26 @@
         this.onInterventionChange(e.target.value);
       });
 
+      // Toggle Super-Pilote
+      const autoPilotToggle = document.getElementById("chaptech-toggle-autopilot");
+      if (autoPilotToggle) {
+        autoPilotToggle.addEventListener("change", (e) => {
+          this.autoPilotEnabled = e.target.checked;
+          this.showToast(
+            this.autoPilotEnabled
+              ? "⚡ Mode Super-Pilote activé : pré-remplissage automatique activé !"
+              : "Mode Super-Pilote suspendu : remplissage manuel",
+            "info",
+            2500
+          );
+          if (this.autoPilotEnabled && this.selectedIntervention) {
+            this.handleAutofill(true);
+          }
+        });
+      }
+
       // Bouton Remplir
-      document.getElementById("chaptech-btn-autofill").addEventListener("click", () => this.handleAutofill());
+      document.getElementById("chaptech-btn-autofill").addEventListener("click", () => this.handleAutofill(false));
 
       // Bouton Copier WhatsApp
       document.getElementById("chaptech-btn-copy-wa").addEventListener("click", () => this.copyWhatsApp());
