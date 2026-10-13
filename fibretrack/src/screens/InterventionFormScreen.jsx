@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Tabs from "../components/Tabs";
 import { TextField, CheckField, SelectField } from "../components/FormField";
 import SignaturePad from "../components/SignaturePad";
-import { getInterventionLight, saveIntervention } from "../models/Intervention";
+import { getInterventionLight, saveIntervention, saveInterventionLocally } from "../models/Intervention";
 import {
   getCurrentPositionHighAccuracy,
   findNearbyPoint,
@@ -97,39 +97,51 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     update("port_disponible", next.length);
   }
 
-  // Auto-save: debounced server sync (saves automatically without clicking Terminer)
+  // Auto-save: sauvegarde locale instantanée (0ms) + synchronisation serveur légère et non-bloquante
   const syncTimerRef = useRef(null);
-  useEffect(() => {
-    if (finishingRef.current) return;
-    if (dirtyFieldsRef.current.size === 0) return;
+
+  const flushServerSync = useCallback(async () => {
+    if (finishingRef.current || dirtyFieldsRef.current.size === 0) return;
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
-    setSaveStatus("Enregistrement…");
-    syncTimerRef.current = setTimeout(async () => {
-      const dirtySnapshot = new Set(dirtyFieldsRef.current);
-      const revisions = new Map(dirtyRevisionsRef.current);
-      const payload = {
-        ...data,
-        whatsapp_photos: whatsappPhotos,
-        changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
-        deleted_points: [...deletedGpsPointIdsRef.current],
-        deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
-      };
-      try {
-        saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(payload));
-        const saved = await saveQueueRef.current;
-        for (const field of dirtySnapshot) {
-          if (dirtyRevisionsRef.current.get(field) === revisions.get(field)) dirtyFieldsRef.current.delete(field);
-        }
-        for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
-        for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
-        if (saved?.updated_at) setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
-        setSaveStatus("Enregistré " + new Date().toLocaleTimeString());
-      } catch {
-        setSaveStatus("Erreur d'enregistrement");
+    const dirtySnapshot = new Set(dirtyFieldsRef.current);
+    const revisions = new Map(dirtyRevisionsRef.current);
+
+    // Optimisation majeure : n'envoyer les photos lourdes que si elles ont été expressément modifiées
+    const isWaPhotosDirty = dirtySnapshot.has("whatsapp_photos");
+    const isGpsDirty = dirtySnapshot.has("points_gps");
+
+    const payload = {
+      ...data,
+      whatsapp_photos: isWaPhotosDirty ? whatsappPhotos : [],
+      points_gps: isGpsDirty ? data.points_gps : [],
+      changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
+      deleted_points: [...deletedGpsPointIdsRef.current],
+      deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
+    };
+
+    try {
+      saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(payload));
+      const saved = await saveQueueRef.current;
+      for (const field of dirtySnapshot) {
+        if (dirtyRevisionsRef.current.get(field) === revisions.get(field)) dirtyFieldsRef.current.delete(field);
       }
-    }, 1500);
-    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
+      for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
+      for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
+      if (saved?.updated_at) setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
+      setSaveStatus("✓ Enregistré");
+    } catch {
+      // En cas de réseau instable, les données restent garanties dans le cache local
+      setSaveStatus("✓ Sauvegardé (local)");
+    }
   }, [data, whatsappPhotos]);
+
+  useEffect(() => {
+    if (finishingRef.current || dirtyFieldsRef.current.size === 0) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    // Debounce ultra-court de 400ms pour synchroniser en tâche de fond sans ralentir la frappe
+    syncTimerRef.current = setTimeout(flushServerSync, 400);
+    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
+  }, [data, whatsappPhotos, flushServerSync]);
 
   useEffect(() => {
     let active = true;
@@ -199,8 +211,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           (p) => p.type === "Poteau" && p.sous_type === "Armé"
         ).length;
       }
+      // Sauvegarde locale instantanée à 0ms dans le navigateur/smartphone
+      saveInterventionLocally(next);
       return next;
     });
+    setSaveStatus("✓ Enregistré");
   }
 
   const resolvedType = pointType === "Autre" ? customType.trim() : pointType;
@@ -356,10 +371,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   function updateMateriel(designation, qte) {
     markDirty(`materiel_pose.${designation}`);
-    setData((prev) => ({
-      ...prev,
-      materiel_pose: { ...prev.materiel_pose, [designation]: Number(qte) },
-    }));
+    setData((prev) => {
+      const next = {
+        ...prev,
+        materiel_pose: { ...prev.materiel_pose, [designation]: Number(qte) },
+      };
+      saveInterventionLocally(next);
+      return next;
+    });
+    setSaveStatus("✓ Enregistré");
   }
 
   function handleAddMateriel(e) {
@@ -456,9 +476,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         lieu,
         added: new Date().toISOString(),
       };
-      setWhatsappPhotos((prev) => [...prev, newPhoto]);
+      setWhatsappPhotos((prev) => {
+        const next = [...prev, newPhoto];
+        saveInterventionLocally({ ...data, whatsapp_photos: next });
+        return next;
+      });
       markDirty("whatsapp_photos");
-      setWhatsappStatus("Photo geolocalisee ajoutee.");
+      setSaveStatus("✓ Photo enregistrée");
+      setWhatsappStatus("Photo géolocalisée ajoutée.");
     } catch (err) {
       setWhatsappStatus(`Erreur : ${err.message}`);
     } finally {
@@ -469,7 +494,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   function removeWhatsappPhoto(id) {
     markDirty("whatsapp_photos");
     deletedWhatsappPhotoIdsRef.current.add(id);
-    setWhatsappPhotos((prev) => prev.filter((p) => p.id !== id));
+    setWhatsappPhotos((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      saveInterventionLocally({ ...data, whatsapp_photos: next });
+      return next;
+    });
+    setSaveStatus("✓ Modifié");
     setSelectedPhotoIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
@@ -581,7 +611,29 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       <header className="form-header">
         <h2>Intervention - {data.nom_client || "Nouveau client"}</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {saveStatus && <span style={{ fontSize: 12, color: saveStatus.startsWith("Erreur") ? "var(--danger)" : "var(--text-muted)" }}>{saveStatus}</span>}
+          {saveStatus && (
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                padding: "4px 8px",
+                borderRadius: 6,
+                background: saveStatus.startsWith("Erreur")
+                  ? "#fee2e2"
+                  : saveStatus.includes("✓")
+                  ? "#dcfce7"
+                  : "#f1f5f9",
+                color: saveStatus.startsWith("Erreur")
+                  ? "#b91c1c"
+                  : saveStatus.includes("✓")
+                  ? "#15803d"
+                  : "var(--text-muted)",
+                transition: "all 0.2s ease"
+              }}
+            >
+              {saveStatus}
+            </span>
+          )}
           <button type="button" className="btn-secondary" onClick={onClose}>
             Retour
           </button>

@@ -366,6 +366,9 @@
         /^puissancepbo$/i,
       ],
       labelKeywords: [
+        "valeur au fat",
+        "valeur au fat dbm",
+        "valeur au fat (dbm)",
         "puissance fat",
         "puissance fat dbm",
         "niveau optique fat",
@@ -477,6 +480,8 @@
         /^distance$/i,
       ],
       labelKeywords: [
+        "lineaire fibre optique",
+        "lineaire fibre",
         "lineaire m",
         "lineaire",
         "longueur de cable",
@@ -585,6 +590,9 @@
         /^puissancearrivee$/i,
       ],
       labelKeywords: [
+        "valeur au pto",
+        "valeur au pto dbm",
+        "valeur au pto (dbm)",
         "puissance pto",
         "puissance pto dbm",
         "niveau optique pto",

@@ -54,32 +54,41 @@ export async function listInterventions() {
   }
 }
 
+export function saveInterventionLocally(intervention) {
+  try {
+    const list = getCached();
+    const index = list.findIndex((i) => i.id === intervention.id);
+    if (index >= 0) list[index] = { ...list[index], ...intervention };
+    else list.push(intervention);
+    setCached(list);
+  } catch (err) {
+    console.warn("saveInterventionLocally error:", err);
+  }
+}
+
 /**
  * Sauvegarde (création ou mise à jour) une intervention sur le backend.
  * @param {Intervention} intervention
  * @returns {Promise<Intervention>}
  */
 export async function saveIntervention(intervention) {
+  // 1. Sauvegarde locale instantanée à 0ms pour zéro perte et réactivité maximale
+  saveInterventionLocally(intervention);
+
+  // 2. Synchronisation en tâche de fond avec le serveur
   try {
     const response = await apiPost("intervention_save", {
       ...intervention,
       expected_updated_at: intervention.updated_at || "",
     });
-    if (response?.updated_at) intervention = { ...intervention, updated_at: response.updated_at };
+    if (response?.updated_at) {
+      intervention = { ...intervention, updated_at: response.updated_at };
+      saveInterventionLocally(intervention);
+    }
   } catch (err) {
-    console.error("saveIntervention error:", err);
-    const list = getCached();
-    const index = list.findIndex((i) => i.id === intervention.id);
-    if (index >= 0) list[index] = intervention;
-    else list.push(intervention);
-    setCached(list);
+    console.warn("saveIntervention network sync warning:", err);
     throw err;
   }
-  const list = getCached();
-  const index = list.findIndex((i) => i.id === intervention.id);
-  if (index >= 0) list[index] = intervention;
-  else list.push(intervention);
-  setCached(list);
   return intervention;
 }
 
