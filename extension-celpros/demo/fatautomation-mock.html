@@ -122,14 +122,16 @@
         </select>
       </div>
 
-      <button type="button" class="btn-submit" onclick="alert('Données FAT validées !');">
+      <button type="button" class="btn-submit" id="btnFatSubmit">
         Valider la déclaration FAT
       </button>
     </form>
   </div>
 
+  <script src="fatautomation-mock.js"></script>
   <!-- Intégration autonome pour test local et via popup -->
   <script src="../content/field-mapping.js"></script>
+  <script src="../content/photo-filler.js"></script>
   <script src="../content/form-filler.js"></script>
   <script src="../content/ui-widget.js"></script>
   <script src="../content/content.js"></script>

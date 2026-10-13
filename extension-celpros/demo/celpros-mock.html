@@ -408,7 +408,7 @@
       </div>
 
       <div style="overflow: hidden; margin-top: 16px;">
-        <button type="button" class="btn-submit" onclick="alert('Formulaire validé avec succès !');">
+        <button type="button" class="btn-submit" id="btnCelprosSubmit">
           💾 Enregistrer sur CelPros
         </button>
       </div>
@@ -421,27 +421,10 @@
     </div>
   </div>
 
-  <script>
-    // Écouteur pour tracer les événements reçus (prouve que les frameworks Angular/React réagissent)
-    const logBox = document.getElementById('eventLogs');
-    let eventCount = 0;
-    function logEvent(e) {
-      eventCount++;
-      const id = e.target.id || e.target.name || e.target.tagName;
-      const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-      const line = `[#${eventCount}] Événement '${e.type}' sur ${id} -> "${val}"`;
-      const p = document.createElement('div');
-      p.textContent = line;
-      logBox.prepend(p);
-    }
-
-    const form = document.getElementById('celprosForm');
-    form.addEventListener('input', logEvent, true);
-    form.addEventListener('change', logEvent, true);
-  </script>
-
+  <script src="celpros-mock.js"></script>
   <!-- Script d'inclusion autonome pour test hors-extension directe et via popup -->
   <script src="../content/field-mapping.js"></script>
+  <script src="../content/photo-filler.js"></script>
   <script src="../content/form-filler.js"></script>
   <script src="../content/ui-widget.js"></script>
   <script src="../content/content.js"></script>
