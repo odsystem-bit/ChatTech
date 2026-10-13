@@ -2,7 +2,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Tabs from "../components/Tabs";
 import { TextField, CheckField, SelectField, ScannableField } from "../components/FormField";
 import SignaturePad from "../components/SignaturePad";
-import { getInterventionLight, saveIntervention, saveInterventionLocally } from "../models/Intervention";
+import {
+  getInterventionLight,
+  saveIntervention,
+  saveInterventionLocally,
+  ensureInterventionDefaults,
+} from "../models/Intervention";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import {
@@ -49,7 +54,7 @@ const MATERIEL_STANDARD = [
 ];
 
 export default function InterventionFormScreen({ intervention, onClose, onFinish, currentUser }) {
-  const [data, setData] = useState(intervention);
+  const [data, setData] = useState(() => ensureInterventionDefaults(intervention));
   const dirtyFieldsRef = useRef(new Set());
   const dirtyRevisionsRef = useRef(new Map());
   const deletedGpsPointIdsRef = useRef(new Set());
@@ -68,7 +73,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [newMaterielName, setNewMaterielName] = useState("");
   const [newMaterielQte, setNewMaterielQte] = useState(1);
   const [materielFeedback, setMaterielFeedback] = useState("");
-  const [whatsappPhotos, setWhatsappPhotos] = useState(intervention.whatsapp_photos || []);
+  const [whatsappPhotos, setWhatsappPhotos] = useState(() =>
+    Array.isArray(intervention?.whatsapp_photos) ? intervention.whatsapp_photos : []
+  );
   const [selectedPhotoIds, setSelectedPhotoIds] = useState(new Set());
   const [whatsappStatus, setWhatsappStatus] = useState("");
   const cameraInputRef = useRef(null);
@@ -226,8 +233,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const resolvedType = pointType === "Autre" ? customType.trim() : pointType;
 
   function nextNumeroForType(type, forSousType) {
-    const count = data.points_gps.filter(
-      (p) => p.type === type && (type !== "Poteau" || p.sous_type === forSousType)
+    const pts = Array.isArray(data.points_gps) ? data.points_gps : [];
+    const count = pts.filter(
+      (p) => p && p.type === type && (type !== "Poteau" || p.sous_type === forSousType)
     ).length;
     return count + 1;
   }
@@ -948,9 +956,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               </div>
             )}
 
-            <h3>Points enregistrés ({data.points_gps.length})</h3>
+            <h3>Points enregistrés ({(data.points_gps || []).length})</h3>
             <ul className="gps-list">
-              {data.points_gps.map((point, idx) => (
+              {(data.points_gps || []).map((point, idx) => (
                 <li key={idx}>
                   {point.photo ? (
                     <button

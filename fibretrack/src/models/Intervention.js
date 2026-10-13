@@ -25,6 +25,34 @@ async function apiGet(action) {
 
 // Cache local pour fonctionnement hors-ligne
 const CACHE_KEY = "fibretrack_interventions_cache";
+const INTV_STORAGE_PREFIX = "fibretrack_intv_";
+
+export function ensureInterventionDefaults(data) {
+  if (!data || typeof data !== "object") return createEmptyIntervention();
+  const empty = createEmptyIntervention(data.nom_technicien || "");
+  return {
+    ...empty,
+    ...data,
+    points_gps: Array.isArray(data.points_gps) ? data.points_gps : [],
+    whatsapp_photos: Array.isArray(data.whatsapp_photos) ? data.whatsapp_photos : [],
+    materiel_pose: (data.materiel_pose && typeof data.materiel_pose === "object") ? data.materiel_pose : {},
+    depart_m: Number(data.depart_m ?? 0),
+    arrivee_m: Number(data.arrivee_m ?? 0),
+    lineaire_m: Number(data.lineaire_m ?? 0),
+    puissance_fat_dbm: Number(data.puissance_fat_dbm ?? 0),
+    puissance_pto_dbm: Number(data.puissance_pto_dbm ?? 0),
+    nb_poteaux_traverses: Number(data.nb_poteaux_traverses ?? 0),
+    nb_poteaux_implantes: Number(data.nb_poteaux_implantes ?? 0),
+    nb_poteaux_armes: Number(data.nb_poteaux_armes ?? 0),
+    pto_qte: Number(data.pto_qte ?? 0),
+    repeteur_wifi_qte: Number(data.repeteur_wifi_qte ?? 0),
+    port_disponible: Number(data.port_disponible ?? 0),
+    ports_disponibles: String(data.ports_disponibles ?? ""),
+    mac: String(data.mac ?? ""),
+    sn: String(data.sn ?? ""),
+    ont_sn: String(data.ont_sn ?? data.sn ?? ""),
+  };
+}
 
 export function getCached() {
   try {
@@ -40,6 +68,18 @@ function setCached(list) {
   } catch {}
 }
 
+export function getStoredIntervention(id) {
+  if (!id) return null;
+  try {
+    const raw = localStorage.getItem(INTV_STORAGE_PREFIX + id);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return ensureInterventionDefaults(parsed);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Liste toutes les interventions (depuis le backend, avec cache local).
  * @returns {Promise<Intervention[]>}
@@ -47,19 +87,30 @@ function setCached(list) {
 export async function listInterventions() {
   try {
     const rows = await apiGet("interventions_list_light");
-    setCached(rows);
-    return rows;
+    const currentCached = getCached();
+    const merged = rows.map((row) => {
+      const existing = currentCached.find((c) => c.id === row.id);
+      return existing ? { ...existing, ...row } : row;
+    });
+    setCached(merged);
+    return merged;
   } catch {
     return getCached();
   }
 }
 
 export function saveInterventionLocally(intervention) {
+  if (!intervention?.id) return;
+  const defaulted = ensureInterventionDefaults(intervention);
   try {
+    // 1. Sauvegarde dans le stockage dédié par intervention
+    localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
+
+    // 2. Mettre à jour la liste en cache pour la page d'accueil
     const list = getCached();
-    const index = list.findIndex((i) => i.id === intervention.id);
-    if (index >= 0) list[index] = { ...list[index], ...intervention };
-    else list.push(intervention);
+    const index = list.findIndex((i) => i.id === defaulted.id);
+    if (index >= 0) list[index] = { ...list[index], ...defaulted };
+    else list.unshift(defaulted);
     setCached(list);
   } catch (err) {
     console.warn("saveInterventionLocally error:", err);
@@ -89,7 +140,7 @@ export async function saveIntervention(intervention) {
     console.warn("saveIntervention network sync warning:", err);
     throw err;
   }
-  return intervention;
+  return ensureInterventionDefaults(intervention);
 }
 
 /**
@@ -99,10 +150,16 @@ export async function saveIntervention(intervention) {
  */
 export async function getIntervention(id) {
   try {
-    return await apiPost("intervention_get", { id });
-  } catch {
-    return getCached().find((i) => i.id === id) ?? null;
+    const remote = await apiPost("intervention_get", { id });
+    if (remote) {
+      const defaulted = ensureInterventionDefaults(remote);
+      saveInterventionLocally(defaulted);
+      return defaulted;
+    }
+  } catch (err) {
+    console.warn("getIntervention remote fetch error:", err);
   }
+  return getStoredIntervention(id) || null;
 }
 
 export async function getInterventionLight(id) {
@@ -120,6 +177,9 @@ export async function deleteIntervention(id) {
     console.error("deleteIntervention error:", err);
     throw err;
   }
+  try {
+    localStorage.removeItem(INTV_STORAGE_PREFIX + id);
+  } catch {}
   const list = getCached().filter((i) => i.id !== id);
   setCached(list);
 }

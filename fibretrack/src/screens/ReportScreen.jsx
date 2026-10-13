@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { generateWhatsAppReport } from "../lib/whatsapp";
+import { ensureInterventionDefaults } from "../models/Intervention";
 import {
   generateInterventionPdf,
   generateSummaryReportPdf,
@@ -9,6 +10,7 @@ import {
 } from "../lib/pdf";
 
 export default function ReportScreen({ intervention, onClose, onEdit }) {
+  const safeIntervention = ensureInterventionDefaults(intervention);
   const [copied, setCopied] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
   const [reportStatus, setReportStatus] = useState("");
@@ -21,7 +23,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     realises: realises !== "" ? Number(realises) : 0,
     recus: recus !== "" ? Number(recus) : 0,
   };
-  const report = generateWhatsAppReport(intervention, compteurJour);
+  const report = generateWhatsAppReport(safeIntervention, compteurJour);
 
   async function handleCopy() {
     await navigator.clipboard.writeText(report);

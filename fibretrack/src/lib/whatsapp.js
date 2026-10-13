@@ -13,21 +13,22 @@ function fmt2(n) {
  * @param {{realises: number, recus: number}} compteurJour
  * @returns {string}
  */
-export function generateWhatsAppReport(intervention, compteurJour) {
-  const d = intervention;
-  const dateStr = new Date(d.date).toLocaleDateString();
-  const mp = d.materiel_pose || {};
+export function generateWhatsAppReport(intervention, compteurJour = {}) {
+  const d = intervention || {};
+  const dateStr = d.date ? new Date(d.date).toLocaleDateString() : "";
+  const mp = (d.materiel_pose && typeof d.materiel_pose === "object") ? d.materiel_pose : {};
   const val = (key) => fmt2(mp[key]);
 
-  const poteauxTraverses = d.points_gps.filter((p) => p.type === "Poteau" && p.sous_type === "Traversé");
-  const poteauxImplantes = d.points_gps.filter((p) => p.type === "Poteau" && p.sous_type === "Implanté");
-  const poteauxArmes = d.points_gps.filter((p) => p.type === "Poteau" && p.sous_type === "Armé");
-  const abonne = d.points_gps.find((p) => p.type === "Abonné");
-  const fat = d.points_gps.find((p) => p.type === "FAT");
+  const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
+  const poteauxTraverses = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Traversé");
+  const poteauxImplantes = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Implanté");
+  const poteauxArmes = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Armé");
+  const abonne = pts.find((p) => p && p.type === "Abonné");
+  const fat = pts.find((p) => p && p.type === "FAT");
 
   const proprietairesOrder = [];
   for (const p of poteauxTraverses) {
-    const prop = p.proprietaire || "Autre";
+    const prop = p?.proprietaire || "Autre";
     if (!proprietairesOrder.includes(prop)) proprietairesOrder.push(prop);
   }
 
@@ -36,7 +37,7 @@ export function generateWhatsAppReport(intervention, compteurJour) {
   const lignes = [
     `*Chef d'Équipe : ${d.nom_technicien || ""}*`,
     ``,
-    `*${fmt2(compteurJour.realises)} Réalisés / ${fmt2(compteurJour.recus)} Reçus*`,
+    `*${fmt2(compteurJour?.realises)} Réalisés / ${fmt2(compteurJour?.recus)} Reçus*`,
     ``,
     `*RACCORDEMENT*`,
     ``,
@@ -44,7 +45,7 @@ export function generateWhatsAppReport(intervention, compteurJour) {
     ``,
     `*Client: ${d.nom_client || ""}*`,
     ``,
-    `*Etat:${d.etat}*`,
+    `*Etat:${d.etat || ""}*`,
     ``,
     `*Msan: ${d.msan || ""} ${d.fat_ref || ""}*`,
     ``,

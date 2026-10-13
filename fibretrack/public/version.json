@@ -1,7 +1,9 @@
 {
-  "version": "2.4.0",
-  "buildTime": "2026-10-13T14:45:00Z",
+  "version": "2.4.1",
+  "buildTime": "2026-10-13T15:45:00Z",
   "features": [
+    "Fix opening intervention error: defensive schema defaults for report and form",
+    "Per-intervention persistent local storage cache (0ms instant opening without partial data crash)",
     "Exact barcode format preservation (e.g. 18D6DDF6719E-AE(17) and 485754437572231B8)",
     "Instant 0ms intervention opening (local-first with background sync)",
     "Instant 0ms new intervention creation",

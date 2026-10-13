@@ -25,6 +25,14 @@ class ErrorBoundary extends Component {
           <p style={{ color: '#475569', fontSize: 14, lineHeight: 1.5 }}>
             Une anomalie temporaire s'est produite lors de l'affichage. Vous pouvez recharger l'application ou réinitialiser le cache local.
           </p>
+          {this.state.error && (
+            <details style={{ marginTop: 12, textAlign: 'left', fontSize: 12, color: '#dc2626', background: '#fef2f2', padding: 8, borderRadius: 6, overflowX: 'auto' }}>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Détails techniques</summary>
+              <pre style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap' }}>
+                {this.state.error.toString()}
+              </pre>
+            </details>
+          )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 20 }}>
             <button
               onClick={() => window.location.reload()}

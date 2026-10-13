@@ -12,6 +12,8 @@ import {
   getIntervention,
   saveIntervention,
   saveInterventionLocally,
+  getStoredIntervention,
+  ensureInterventionDefaults,
   getCached,
   deleteIntervention,
 } from "./models/Intervention";
@@ -96,43 +98,41 @@ export default function App() {
     setCreatingNew(false);
   }
 
-  function openIntervention(target) {
-    // 1. Recherche instantanée dans les interventions locales (0 ms de latence)
-    const localIntv =
-      (typeof target === "object" && target !== null ? target : null) ||
-      interventions.find((i) => i.id === target) ||
-      getCached().find((i) => i.id === target);
+  async function openIntervention(target) {
+    const id = typeof target === "object" && target !== null ? target.id : target;
+    if (!id || openingId) return;
 
-    const id = localIntv?.id || target;
+    // 1. Si nous avons l'intervention complète en cache local (0 ms)
+    const localFull = getStoredIntervention(id);
+    if (localFull) {
+      setActiveIntervention(localFull);
+      navigateTo(localFull.statut === "termine" ? "report" : "form");
 
-    if (localIntv) {
-      // OUVERTURE IMMÉDIATE (0ms) ! Zéro attente réseau !
-      setActiveIntervention(localIntv);
-      navigateTo(localIntv.statut === "termine" ? "report" : "form");
-
-      // Synchronisation transparente en tâche de fond pour rafraîchir si besoin
+      // Synchronisation transparente en arrière-plan
       getIntervention(id)
         .then((fresh) => {
-          if (fresh && fresh.updated_at !== localIntv.updated_at) {
+          if (fresh && fresh.updated_at !== localFull.updated_at) {
             setActiveIntervention(fresh);
-            saveInterventionLocally(fresh);
           }
         })
         .catch(() => {});
       return;
     }
 
-    // Fallback réseau si aucune donnée locale n'est présente
+    // 2. Première ouverture sur cet appareil : chargement depuis le serveur avec indicateur
     setOpeningId(id);
-    getIntervention(id)
-      .then((intervention) => {
-        if (intervention) {
-          setActiveIntervention(intervention);
-          navigateTo(intervention.statut === "termine" ? "report" : "form");
-        }
-      })
-      .catch((err) => console.error("openIntervention error:", err))
-      .finally(() => setOpeningId(null));
+    try {
+      const intervention = await getIntervention(id);
+      if (intervention) {
+        setActiveIntervention(intervention);
+        navigateTo(intervention.statut === "termine" ? "report" : "form");
+      }
+    } catch (err) {
+      console.error("openIntervention error:", err);
+      alert("Erreur lors de l'ouverture de l'intervention : " + (err.message || "Erreur réseau"));
+    } finally {
+      setOpeningId(null);
+    }
   }
 
   async function handleDeleteIntervention(id, e) {
@@ -283,11 +283,16 @@ export default function App() {
           <ul className="intervention-list">
             {interventions.map((intv) => (
               <li key={intv.id}>
-                <button type="button" onClick={() => openIntervention(intv)} className="intv-card-btn">
+                <button
+                  type="button"
+                  onClick={() => openIntervention(intv.id)}
+                  className="intv-card-btn"
+                  disabled={openingId === intv.id}
+                >
                   <div className="intv-row">
                     <strong>{intv.nom_client || "Nouveau client"}</strong>
                     <span className={`badge ${intv.statut === "termine" ? "badge-done" : "badge-progress"}`}>
-                      {intv.statut === "termine" ? "Terminé" : "En cours"}
+                      {openingId === intv.id ? "Ouverture…" : (intv.statut === "termine" ? "Terminé" : "En cours")}
                     </span>
                   </div>
                   <div className="badge-meta">
