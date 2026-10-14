@@ -1,5 +1,7 @@
 # CHAPTECH - Plan produit SaaS
 
+**Mise à jour du 13/10/2026 : conception en cours, aucun code tant que les rôles et le périmètre ne sont pas validés (§2, §3, §6 ter, §12).**
+
 Statut (12/10/2026) : **étapes 1 à 5 codées** (fondations, stock par équipe, attribution et déduction, console web, poteaux). Alerte de stock insuffisant faite. Poteaux corrigés : ils relèvent du rôle **Conformité**, pas du chef d'équipe. Photo EPI du matin codée côté serveur et console (§6 bis). **Reste** : APK pour l'EPI (envoi, verrou, file locale), dossiers du jour (§6 bis, à concevoir), page Supervision, exports d'inventaire, abonnements/Moneroo, Celtiis.
 Point de départ : l'application actuelle FibreTrack (`../fibretrack`), utilisée par une seule entreprise (TELECOM BTP Services).
 
@@ -12,12 +14,19 @@ Une plateforme où **chaque entreprise s'abonne** pour gérer ses techniciens, s
 Plateforme CHAPTECH (super-admin : nous)
  └── Entreprise (client abonné)
       ├── Admin entreprise
-      ├── Gestionnaire de stock (magasinier)
-      ├── Conformité (poteaux, photos, tout le contrôle terrain — voit toutes les équipes)
-      └── Équipe
-           ├── Chef d'équipe (gère le matériel de l'équipe)
-           └── Techniciens (membres)
+      ├── Gestionnaire de stock DE BASE (voit tout le stock de l'entreprise)
+      │    └── Gestionnaires de stock de ville (matériel déposé et confié dans leur ville)
+      ├── Conformité DE BASE (voit toute la conformité de l'entreprise)
+      │    └── Conformité de ville (une par ville)
+      ├── Coordonnateur DE BASE (met les dossiers, dans n'importe quelle ville) et Superviseur DE BASE (dispatche aux équipes de n'importe quelle ville)
+      │    └── Coordonnateur de ville (met les dossiers de sa ville) et Superviseur de ville (dispatche aux équipes de sa ville)
+      └── Villes (Cotonou, Porto-Novo, Parakou, ...)
+           └── Équipe
+                ├── Chef d'équipe (gère le matériel de l'équipe)
+                └── Techniciens (membres, peuvent compléter les interventions)
 ```
+
+Principe multi-villes (validé le 13/10/2026) : une entreprise a plusieurs **villes** (objet « ville ») ; chaque équipe, gestionnaire de stock de ville, conformité de ville, **superviseur et coordonnateur** est rattaché à une ville. Le responsable de base voit tout, quelle que soit la ville ; le responsable de ville ne voit que sa ville.
 
 ## 3. Rôles et droits
 
@@ -37,7 +46,29 @@ Plateforme CHAPTECH (super-admin : nous)
 | Envoyer la photo EPI qui ouvre l'APK de l'équipe | - | - | - | - | oui | non |
 | Rapports et exports | - | tous | stock | conformité (poteaux, EPI) | son équipe (hors poteaux) | non |
 
-Un technicien appartient à **une seule équipe**.
+**Rôles ajoutés le 13/10/2026** (le périmètre par ville est validé ; les points marqués « à valider » restent ouverts)
+
+| Action | Superviseur | Coordonnateur | Gestionnaire stock de base | Gestionnaire stock de ville | Conformité de base | Conformité de ville |
+|---|---|---|---|---|---|---|
+| Voir tous les dossiers et interventions | oui | oui | lecture | lecture (sa ville) | lecture | lecture (sa ville) |
+| Mettre (saisir) des dossiers dans une ville | non | oui, **sa ville** (de base : toutes villes) | non | non | non | non |
+| Dispatcher les dossiers aux équipes | oui, équipes de **sa ville** (de base : toutes villes) | non | non | non | non | non |
+| Voir le stock | non | non | tout, toutes villes | sa ville | non | non |
+| Gérer le stock, attribuer le matériel | non | non | oui, à toute équipe, **toutes villes** | oui, aux équipes de **sa ville** | non | non |
+| Poteaux, photos EPI (voir, valider, rejeter, révoquer) | non | non | non | non | toutes villes | sa ville |
+| Messagerie interne | oui | oui | oui | oui | oui | oui |
+
+**Superviseur et coordonnateur** : deux rôles distincts (décision du 14/10/2026) :
+- le **coordonnateur met les dossiers** dans le système, par ville : celui de Parakou ne voit et ne met que les dossiers de Parakou, celui de Cotonou ceux de Cotonou ;
+- le **superviseur dispatche** ces dossiers aux équipes de sa ville.
+
+Chacun existe en **version de base** (sans ville, agit sur n'importe quelle ville) et en **version de ville** (sa ville seulement). D'autres fonctions propres à chacun seront ajoutées plus tard.
+
+**Stock multi-villes** (décision du 13/10/2026) : le gestionnaire de base est **le seul** à alimenter les villes ; il donne le stock à chaque ville, et tout transfert entre villes passe **obligatoirement** par lui. Il y a un **stock par ville** (confié au gestionnaire de ville) en plus du stock central. Le gestionnaire de ville distribue aux équipes de sa ville ; le gestionnaire de base voit et attribue partout.
+
+Tous les rôles (admin, chef, technicien inclus) ont accès à la **messagerie de leur entreprise** (§6 ter).
+
+Un technicien appartient à **une seule équipe**. **Le technicien peut compléter les interventions** de son équipe (confirmé le 13/10/2026) ; il ne les crée pas.
 
 Règle d'affichage : le **nom du chef d'équipe** apparaît toujours sur l'intervention (fiche, PDF, rapport WhatsApp), enregistré à la création de la fiche.
 
@@ -107,13 +138,40 @@ Codé (backend + console, 12/10/2026). Activable **par entreprise** (`epi_obliga
 - Tant que l'équipe est bloquée, le serveur refuse (code 423) la création de fiche, la synchronisation des opérations et l'envoi de médias. L'APK garde ses opérations en file locale et les renvoie une fois débloquée.
 - **Chef absent** : l'admin ou la Conformité donne le droit d'envoi à un technicien de l'équipe ; le chef peut aussi prévenir à l'avance (avant minuit) en désignant un technicien. Si personne n'a prévenu, **la Conformité voit l'équipe « à signaler » à partir de 8h30** (sans photo ni délégation) et autorise un technicien.
 - **Hors réseau** : internet est nécessaire, mais l'APK met la photo en file locale (avec l'heure de prise de vue) et l'envoie dès que la connexion revient. Le délai de 30 min part de la réception par le serveur.
-- Reste à faire : côté APK (envoi de la photo, verrouillage, file locale, gestion du code 423) et notification poussante à 8h30 (pour l'instant : bandeau dans la console).
+- **Tout se passe dans l'APK** (décision du 13/10/2026) : envoi de la photo, verrouillage, alertes et notifications, sans SMS ni WhatsApp. Le **chef peut renvoyer sa photo sans limite**, y compris après une révocation.
+- Reste à faire : côté APK (envoi de la photo, verrouillage, file locale, gestion du code 423, notification à 8h30 pour la conformité ; pour l'instant : bandeau dans la console).
 
 ### Dossiers du jour (à concevoir)
-- Certains rôles **distribuent les dossiers** ; chaque équipe voit la liste de ses dossiers du jour.
+- **Un dossier est une intervention** (décision du 13/10/2026) : pas d'objet distinct, on garde le modèle `interventions` existant, avec un statut de distribution et une date.
+- Les **coordonnateurs mettent les dossiers** (par ville) et les **superviseurs les dispatchent** aux équipes **de leur ville** (décision du 14/10/2026). Ils voient tous les dossiers et interventions de leur ville ; chaque équipe voit la liste de ses dossiers du jour.
+- **Dispatching par ville** : chaque ville ne voit que ses dossiers (le coordonnateur et le superviseur de Parakou ne voient pas ceux de Cotonou).
+- **Chaque ville a ses dossiers** (décision du 13/10/2026) : un dossier de Parakou ne peut pas être confié à une équipe de Cotonou. Seuls le coordonnateur et le superviseur **de base** peuvent travailler sur n'importe quelle ville. Le serveur refuse toute attribution hors de la ville du dossier pour un rôle de ville.
 - **Fin de journée** : les dossiers non terminés ou non clôturés ne disparaissent pas, ils passent à la **date antérieure** (système de dates) ; le lendemain, une nouvelle liste apparaît.
 - L'**admin voit tout**. Les techniciens voient les dossiers **traités** et **non traités** ; les non traités sont en **lecture seule**, et le lendemain ils peuvent être **réattribués à une autre équipe**.
 - Principe : CHAPTECH doit faciliter la vie à tous.
+
+## 6 ter. Messagerie interne (nouveau, à concevoir)
+Idée du 13/10/2026 : un système de messagerie où **tous les membres d'une même entreprise peuvent échanger**. Isolation stricte : jamais de message entre entreprises.
+
+Règles validées le 13/10/2026 :
+- **Chaque équipe a son groupe**. Y sont : le chef, les techniciens, **les superviseurs, les conformités et l'admin** de l'entreprise.
+- **Le super-admin est dans tous les groupes mais caché** : personne ne voit qu'il est là (ni dans la liste des membres, ni dans les compteurs).
+- **Messages individuels** : tout membre de l'entreprise peut écrire à tout autre membre, y compris d'une équipe à une autre (technicien, chef, admin, conformité, superviseur, coordonnateur, gestionnaire de stock).
+- Tout reste **dans l'entreprise** ; jamais d'échange entre deux entreprises.
+
+Règles ajoutées le 14/10/2026 :
+- **Un groupe par ville** et **un groupe pour toute l'entreprise**, en plus des groupes d'équipe.
+- **Pièces jointes (photos) autorisées.**
+- **Suppression de message : l'auteur et l'admin** seulement.
+
+Proposition (à valider) :
+- **Phase 1** : discussions 1 à 1 et groupes (équipe, ville, entreprise).
+- La suppression garde une trace côté serveur (à confirmer).
+- Messages texte, avec photo en pièce jointe. Envoi possible hors réseau (file locale), comme pour les opérations terrain.
+- Lien possible d'un message vers un dossier ou une intervention.
+- Statuts : envoyé, lu. Notifications poussées plus tard (liées au point de l'alerte 8h30).
+- Données : `conversations`, `conversation_membres`, `messages`, toutes avec `entreprise_id`.
+- **Phase 2** : API temps réel (WebSocket) ; la phase 1 peut se contenter d'un rafraîchissement régulier.
 
 ## 7. Application et interfaces
 - **Console web** pour les **entreprises** (admin, gestionnaire de stock, conformité) et pour le **super-admin** : équipes, comptes, stock, attribution, import, inventaires, suivi des poteaux, rapports, abonnements.
@@ -170,9 +228,19 @@ Chaque étape est livrable séparément et testable avec l'équipe actuelle.
 - Entreprises et super-admin sur le web, chefs d'équipe et techniciens sur l'APK.
 - Les poteaux sont gérés par le rôle **Conformité** (toutes les équipes), jamais par le chef d'équipe.
 - Photo EPI du matin prise par le chef : elle débloque l'APK de toute son équipe pour la journée.
+- 13/10/2026 : rôles superviseur et coordonnateur (voir 14/10 pour le partage des tâches) ; objet ville ; gestionnaires de stock et conformités de ville rattachés à ceux de base ; le gestionnaire de base attribue partout.
+- 13/10/2026 : un dossier est une intervention ; chaque ville a ses dossiers, aucun passage d'une ville à une autre sauf par les rôles de base.
+- 13/10/2026 : superviseur et coordonnateur sont deux rôles distincts, en version de base et de ville.
+- 13/10/2026 : le gestionnaire de base alimente les villes, transferts entre villes uniquement par lui, stock par ville.
+- 14/10/2026 : le coordonnateur met les dossiers, le superviseur les dispatche aux équipes, chaque ville ne voit que ses dossiers.
+- 14/10/2026 : messagerie avec pièces jointes ; suppression par l'auteur et l'admin ; groupes d'équipe, de ville et d'entreprise.
+- 13/10/2026 : EPI et alertes dans l'APK, renvoi de la photo sans limite.
+- 13/10/2026 : la conformité de base peut valider l'EPI (toutes villes) ; la conformité de ville valide celui des équipes de sa ville.
+- 13/10/2026 : messagerie interne par entreprise, groupe par équipe, messages individuels libres dans l'entreprise, super-admin invisible.
 
 ## 12. Questions ouvertes
 - Questions d'architecture : voir `ARCHITECTURE.md`, section 14.
-- Dossiers du jour : qui les distribue (quel rôle) ? Un dossier est-il l'intervention existante ou un objet distinct (client, adresse...) importé ? Qui réattribue le lendemain (admin seul, ou aussi le chef) ? Un dossier non traité garde-t-il son historique en passant à une autre équipe ?
-- EPI : un chef peut-il re-déclencher l'envoi après une révocation sans limite ? Faut-il une notification poussée (SMS/WhatsApp) à la Conformité à 8h30 en plus du bandeau ?
+- **Version de base** : coordonnateur et superviseur de base existent-ils bien (compris ainsi) ?
+- **Dossiers** : qui réattribue le lendemain, dans la même ville (proposé : le superviseur de la ville, plus l'admin) ? Un dossier non traité garde-t-il son historique en passant à une autre équipe de la même ville (proposé : oui) ?
+- **Membres des groupes** : qui est dans le groupe de ville (proposé : toutes les équipes et responsables de la ville) et dans le groupe d'entreprise (proposé : tous les membres) ?
 - Reporter plus tard : essai gratuit, remise annuelle, période de grâce, Moneroo, Celtiis.
