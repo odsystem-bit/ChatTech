@@ -362,18 +362,77 @@ export function findNearbyPoint(position, points, seuilMetres = 20) {
 export const PRECISION_WARNING_THRESHOLD_M = 10;
 
 /**
- * Lit un fichier photo (Blob/File) en data URL.
- * @param {File} file
+ * Compresse et redimensionne une image data URL (Base64) côté client.
+ * Garantit qu'aucune image ne dépasse maxDimension (1280px) ou une taille excessive.
+ * @param {string} dataUrl
+ * @param {number} [maxDimension=1280]
+ * @param {number} [quality=0.78]
  * @returns {Promise<string>}
  */
-export function readFileAsDataUrl(file) {
+export function compressDataUrl(dataUrl, maxDimension = 1280, quality = 0.78) {
+  return new Promise((resolve) => {
+    if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image")) {
+      return resolve(dataUrl);
+    }
+    if (typeof Image === "undefined" || typeof document === "undefined") {
+      return resolve(dataUrl);
+    }
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width <= maxDimension && height <= maxDimension && dataUrl.length < 250000) {
+        return resolve(dataUrl);
+      }
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Lit un fichier photo (Blob/File) en data URL et le compresse automatiquement
+ * pour éviter les lenteurs et la surcharge mémoire sur mobile.
+ * @param {File} file
+ * @param {number} [maxDimension=1280]
+ * @param {number} [quality=0.78]
+ * @returns {Promise<string>}
+ */
+export function readFileAsDataUrl(file, maxDimension = 1280, quality = 0.78) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    reader.onload = async () => {
+      const raw = reader.result;
+      try {
+        const compressed = await compressDataUrl(raw, maxDimension, quality);
+        resolve(compressed);
+      } catch {
+        resolve(raw);
+      }
+    };
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
+
 
 /**
  * Géocodage inversé (lat/lng → adresse lisible), façon "GPS Map Camera".
@@ -474,15 +533,27 @@ export async function reverseGeocodeZone(lat, lng) {
  * @param {{type:string, lieu?:string, lat:number, lng:number, precision_m:number, horodatage:string}} info
  * @returns {Promise<string>} data URL de la photo incrustée (JPEG)
  */
-export function embedGpsOnPhoto(photoDataUrl, info) {
+export function embedGpsOnPhoto(photoDataUrl, info, maxDimension = 1280) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
+      let width = img.width;
+      let height = img.height;
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+      }
+
       const canvas = document.createElement("canvas");
-      canvas.width = img.width;
-      canvas.height = img.height;
+      canvas.width = width;
+      canvas.height = height;
       const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
+      ctx.drawImage(img, 0, 0, width, height);
 
       const dateStr = new Date(info.horodatage || Date.now()).toLocaleString();
       const hasGps = typeof info.lat === "number" && typeof info.lng === "number";
@@ -494,27 +565,28 @@ export function embedGpsOnPhoto(photoDataUrl, info) {
         !hasGps && info.warning ? `⚠️ ${info.warning}` : null,
       ].filter(Boolean);
 
-      const fontSize = Math.max(14, Math.round(img.width * 0.022));
-      const lineGap = fontSize * 1.3;
+      const fontSize = Math.max(14, Math.round(width * 0.024));
+      const lineGap = fontSize * 1.35;
       const pad = fontSize * 0.6;
       const bandHeight = pad * 2 + lineGap * lines.length;
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-      ctx.fillRect(0, img.height - bandHeight, img.width, bandHeight);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+      ctx.fillRect(0, height - bandHeight, width, bandHeight);
 
       ctx.fillStyle = "#ffffff";
       ctx.font = `bold ${fontSize}px sans-serif`;
       ctx.textBaseline = "top";
 
-      let y = img.height - bandHeight + pad;
+      let y = height - bandHeight + pad;
       for (const line of lines) {
         ctx.fillText(line, pad, y);
         y += lineGap;
       }
 
-      resolve(canvas.toDataURL("image/jpeg", 0.9));
+      resolve(canvas.toDataURL("image/jpeg", 0.78));
     };
     img.onerror = reject;
     img.src = photoDataUrl;
   });
 }
+

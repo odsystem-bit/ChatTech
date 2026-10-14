@@ -91,6 +91,45 @@ function buildTotalMaterielPose(array $d): array {
   return $total;
 }
 
+function compressBase64Image(string $dataUrl, int $maxDim = 1280, int $quality = 75): string {
+  if (strlen($dataUrl) < 180000) return $dataUrl; // déjà léger (< 180 KB)
+  if (!preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#si', $dataUrl, $m)) return $dataUrl;
+  $binary = base64_decode($m[2]);
+  if (!$binary) return $dataUrl;
+  $src = @imagecreatefromstring($binary);
+  if (!$src) return $dataUrl;
+  $w = imagesx($src);
+  $h = imagesy($src);
+  if ($w <= 0 || $h <= 0) { imagedestroy($src); return $dataUrl; }
+
+  $targetW = $w;
+  $targetH = $h;
+  if ($w > $maxDim || $h > $maxDim) {
+    if ($w > $h) {
+      $targetH = (int)round(($h * $maxDim) / $w);
+      $targetW = $maxDim;
+    } else {
+      $targetW = (int)round(($w * $maxDim) / $h);
+      $targetH = $maxDim;
+    }
+  }
+
+  $dst = imagecreatetruecolor($targetW, $targetH);
+  imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetW, $targetH, $w, $h);
+  imagedestroy($src);
+
+  ob_start();
+  imagejpeg($dst, null, $quality);
+  $outBin = ob_get_clean();
+  imagedestroy($dst);
+
+  if ($outBin && strlen($outBin) < strlen($binary)) {
+    return 'data:image/jpeg;base64,' . base64_encode($outBin);
+  }
+  return $dataUrl;
+}
+
+
 function lockStockQuantity(PDO $pdo, string $designation): int {
   $ensure = $pdo->prepare('INSERT INTO stock (designation, quantite) VALUES (?, 0) ON DUPLICATE KEY UPDATE designation = VALUES(designation)');
   $ensure->execute([$designation]);
@@ -635,7 +674,8 @@ try {
           if (($idKey !== '' && isset($deletedPhotos[$idKey])) || ($slotKey !== '' && isset($deletedPhotos[$slotKey]))) {
             continue;
           }
-          $itemKey = $idKey !== '' ? $idKey : ($slotKey !== '' ? $slotKey : uniqid());
+          $isAdditionnelle = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']);
+          $itemKey = (!$isAdditionnelle && $slotKey !== '') ? ('slot_' . $slotKey) : ($idKey !== '' ? $idKey : uniqid());
           $serverById[$itemKey] = $photo;
         }
         foreach ($incomingWa as $photo) {
@@ -644,13 +684,31 @@ try {
           if (($idKey !== '' && isset($deletedPhotos[$idKey])) || ($slotKey !== '' && isset($deletedPhotos[$slotKey]))) {
             continue;
           }
-          $itemKey = $idKey !== '' ? $idKey : ($slotKey !== '' ? $slotKey : uniqid());
+          $isAdditionnelle = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']);
+          $itemKey = (!$isAdditionnelle && $slotKey !== '') ? ('slot_' . $slotKey) : ($idKey !== '' ? $idKey : uniqid());
           $serverById[$itemKey] = array_merge($serverById[$itemKey] ?? [], $photo);
         }
         $incomingWa = array_values($serverById);
       }
+
+      // Compression automatique des photos base64 côté serveur pour garantir légèreté et rapidité
+      foreach ($incomingWa as &$ph) {
+        if (!empty($ph['url'])) {
+          $ph['url'] = compressBase64Image((string)$ph['url'], 1280, 75);
+        }
+      }
+      unset($ph);
+
+      foreach ($incomingGps as &$pt) {
+        if (!empty($pt['photo'])) {
+          $pt['photo'] = compressBase64Image((string)$pt['photo'], 1280, 75);
+        }
+      }
+      unset($pt);
+
       // --- Déduction stock : à faire seulement au premier passage à 'termine' ---
       $finalStatus = $d['statut'] ?? ($existing['statut'] ?? '');
+
       $shouldDeductStock = $finalStatus === 'termine'
         && (!$existing || (int)($existing['materiel_deduit'] ?? 0) === 0)
         && (!$patchMode || in_array('statut', $changedFields, true) || $materialPatch);

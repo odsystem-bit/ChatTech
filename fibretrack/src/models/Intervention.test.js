@@ -308,3 +308,27 @@ test("saveInterventionLocally replaces slot photos and prevents duplicate pole e
   assert.equal(wa2.lat, 6.371);
 });
 
+test("toLightIntervention strips heavy base64 photos and signatures for fast list caching", async () => {
+  const { toLightIntervention } = await import("./Intervention.js");
+  const heavy = {
+    id: "heavy-1",
+    nom_client: "Test Client",
+    statut: "en_cours",
+    whatsapp_photos: [{ id: "p1", url: "data:image/jpeg;base64,verylongstring..." }],
+    points_gps: [{ id: "g1", photo: "data:image/jpeg;base64,anotherheavyphoto..." }],
+    signature_client: "data:image/png;base64,sig1",
+    signature_technicien: "data:image/png;base64,sig2",
+    lineaire_m: 55,
+  };
+
+  const light = toLightIntervention(heavy);
+  assert.equal(light.id, "heavy-1");
+  assert.equal(light.nom_client, "Test Client");
+  assert.equal(light.lineaire_m, 55);
+  assert.equal(light.whatsapp_photos, undefined, "whatsapp_photos must be stripped from light object");
+  assert.equal(light.points_gps, undefined, "points_gps must be stripped from light object");
+  assert.equal(light.signature_client, undefined, "signature_client must be stripped");
+  assert.equal(light.signature_technicien, undefined, "signature_technicien must be stripped");
+});
+
+

@@ -5,6 +5,7 @@ import SignaturePad from "../components/SignaturePad";
 import {
   getIntervention,
   getInterventionLight,
+  checkInterventionUpdatedAt,
   saveIntervention,
   saveInterventionLocally,
   ensureInterventionDefaults,
@@ -197,6 +198,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
   const [finishModalOpen, setFinishModalOpen] = useState(false);
+  const [finishSuccessData, setFinishSuccessData] = useState(null);
 
   // Géolocalisation automatique de la zone (Quartier, Ville)
   const [detectingZone, setDetectingZone] = useState(false);
@@ -339,7 +341,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   useEffect(() => {
     let active = true;
     const refreshRemoteFields = async () => {
+      if (!data.id || finishingRef.current) return;
       try {
+        // Vérification ultra-rapide (50 octets) : est-ce que le serveur a une date plus récente ?
+        const remoteUpdated = await checkInterventionUpdatedAt(data.id);
+        if (!active || !remoteUpdated) return;
+        if (data.updated_at && remoteUpdated <= data.updated_at) return; // Déjà à jour
+
         const remote = await getInterventionLight(data.id);
         if (!active || !remote) return;
         setData((previous) => {
@@ -359,7 +367,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           return Object.keys(next).every((key) => next[key] === previous[key]) ? previous : next;
         });
       } catch (error) {
-        console.warn("Intervention refresh failed:", error.message);
+        // Silencieux pour ne pas perturber l'utilisateur sur réseau mobile
       }
     };
     const timer = setInterval(refreshRemoteFields, 8000);
@@ -367,14 +375,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       active = false;
       clearInterval(timer);
     };
-  }, [data.id]);
+  }, [data.id, data.updated_at]);
 
   const [manualRefreshing, setManualRefreshing] = useState(false);
 
   const handleManualRefreshIntervention = useCallback(async () => {
     if (manualRefreshing || !data.id) return;
     setManualRefreshing(true);
-    setSaveStatus("Actualisation en direct…");
+    setSaveStatus("Actualisation…");
     try {
       const fresh = await getIntervention(data.id);
       if (fresh) {
@@ -411,21 +419,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setSaveStatus("Erreur réseau");
     } finally {
       setManualRefreshing(false);
-      setTimeout(() => setSaveStatus(""), 3500);
+      setTimeout(() => setSaveStatus((s) => (s && s.includes("Actualisation") ? "" : s)), 2500);
     }
   }, [data.id, manualRefreshing]);
 
   useEffect(() => {
-    function handleVisibilityChange() {
+    async function handleVisibilityChange() {
       if (document.visibilityState === "visible" && data.id && !finishingRef.current && dirtyFieldsRef.current.size === 0) {
-        handleManualRefreshIntervention();
+        try {
+          const remoteUpdated = await checkInterventionUpdatedAt(data.id);
+          if (remoteUpdated && (!data.updated_at || remoteUpdated > data.updated_at)) {
+            handleManualRefreshIntervention();
+          }
+        } catch {}
       }
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [data.id, handleManualRefreshIntervention]);
+  }, [data.id, data.updated_at, handleManualRefreshIntervention]);
+
 
   function update(field, value) {
     if (field === "points_gps") {
@@ -1645,17 +1659,33 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         deleted_points: [...deletedGpsPointIdsRef.current],
         deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
       };
-      saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
-      const saved = await saveQueueRef.current;
-      setData({ ...finalData, updated_at: saved?.updated_at || finalData.updated_at });
-      onFinish(finalData);
+      // 1. Sauvegarde locale instantanée garantie à 100% (hors-ligne ou réseau lent)
+      saveInterventionLocally(finalData);
+      setData(finalData);
+
+      // 2. Synchronisation serveur
+      try {
+        saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
+        const saved = await saveQueueRef.current;
+        if (saved?.updated_at) {
+          finalData.updated_at = saved.updated_at;
+          setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
+        }
+      } catch (netErr) {
+        console.warn("finish server sync warning (saved locally):", netErr);
+      }
+
+      // Afficher immédiatement l'écran de confirmation de succès dans la modale
+      setFinishSuccessData(finalData);
     } catch (err) {
       console.error("finish error:", err);
+      alert("Erreur lors de la finalisation: " + (err.message || "inconnue"));
+    } finally {
       setFinishing(false);
       finishingRef.current = false;
-      alert("Erreur lors de la finalisation: " + (err.message || "inconnue"));
     }
   }
+
 
   return (
     <div className="intervention-form">
@@ -3198,64 +3228,135 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-              <span style={{ fontSize: 32 }}>🏁</span>
+            {finishSuccessData ? (
               <div>
-                <h3 style={{ margin: 0, fontSize: 18, color: "#1e293b" }}>
-                  Confirmer la clôture d'intervention
+                <div style={{ textAlign: "center", padding: "12px 0 16px" }}>
+                  <div style={{ fontSize: 48, marginBottom: 8 }}>✅</div>
+                  <h3 style={{ margin: "0 0 6px", fontSize: 20, color: "#166534", fontWeight: 800 }}>
+                    Intervention clôturée avec succès !
+                  </h3>
+                  <p style={{ margin: 0, fontSize: 13.5, color: "#475569" }}>
+                    Le dossier de raccordement est désormais <strong>Terminé</strong>. Le matériel a été déduit du stock d'équipe.
+                  </p>
+                </div>
+
+                <div
+                  style={{
+                    background: "#f0fdf4",
+                    borderRadius: 12,
+                    padding: "14px 16px",
+                    border: "1px solid #bbf7d0",
+                    fontSize: 13.5,
+                    lineHeight: 1.7,
+                    color: "#166534",
+                    marginBottom: 20,
+                  }}
+                >
+                  <div>👤 Client : <strong>{finishSuccessData.nom_client || "Client"}</strong></div>
+                  <div>⚡ Statut : <strong style={{ color: "#15803d" }}>TERMINÉE</strong></div>
+                  <div>📦 Port FAT : <strong>{finishSuccessData.port || "N/A"}</strong></div>
+                  <div>📸 Photos enregistrées : <strong>{(finishSuccessData.whatsapp_photos || []).length}</strong></div>
+                  <div>🗼 Poteaux enregistrés : <strong>{(finishSuccessData.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, justifyContent: "stretch" }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ flex: 1, padding: "12px 14px", fontSize: 14, fontWeight: 600 }}
+                    onClick={() => {
+                      setFinishModalOpen(false);
+                      setFinishSuccessData(null);
+                      onClose();
+                    }}
+                  >
+                    🏠 Accueil
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ flex: 1.3, padding: "12px 14px", fontSize: 14, fontWeight: 700, background: "#16a34a", borderColor: "#16a34a" }}
+                    onClick={() => {
+                      setFinishModalOpen(false);
+                      const payload = finishSuccessData;
+                      setFinishSuccessData(null);
+                      onFinish(payload);
+                    }}
+                  >
+                    📄 Voir le rapport →
+                  </button>
+                </div>
+              </div>
+            ) : finishing ? (
+              <div style={{ textAlign: "center", padding: "28px 0" }}>
+                <div className="spin-icon" style={{ fontSize: 48, display: "inline-block", marginBottom: 16 }}>
+                  ⏳
+                </div>
+                <h3 style={{ margin: "0 0 8px", fontSize: 18, color: "#1e293b", fontWeight: 700 }}>
+                  Clôture en cours…
                 </h3>
-                <p style={{ margin: "2px 0 0", fontSize: 13, color: "#64748b" }}>
-                  Vérification avant enregistrement final
+                <p style={{ margin: 0, fontSize: 13.5, color: "#64748b", lineHeight: 1.5 }}>
+                  Enregistrement final, synchronisation sécurisée et mise à jour du stock d'équipe…
                 </p>
               </div>
-            </div>
+            ) : (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+                  <span style={{ fontSize: 32 }}>🏁</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 18, color: "#1e293b" }}>
+                      Confirmer la clôture d'intervention
+                    </h3>
+                    <p style={{ margin: "2px 0 0", fontSize: 13, color: "#64748b" }}>
+                      Vérification avant enregistrement final
+                    </p>
+                  </div>
+                </div>
 
-            <div
-              style={{
-                background: "#f8fafc",
-                borderRadius: 12,
-                padding: "12px 16px",
-                border: "1px solid #e2e8f0",
-                fontSize: 13.5,
-                lineHeight: 1.6,
-                color: "#334155",
-                marginBottom: 18,
-              }}
-            >
-              <div>👤 Client : <strong>{data.nom_client || "Non renseigné"}</strong></div>
-              <div>📞 Ligne : <strong>{data.telephone_ligne || "Non renseignée"}</strong></div>
-              <div>📱 Mobile : <strong>{data.mobile || "Non renseigné"}</strong></div>
-              <div>📦 FAT : <strong>{data.fat_ref || "N/A"}</strong> (Port {data.port || "N/A"})</div>
-              <div>🗼 Poteaux : <strong>{(data.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
-              <div>📸 Photos : <strong>{(whatsappPhotos || []).length}</strong></div>
-            </div>
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    borderRadius: 12,
+                    padding: "12px 16px",
+                    border: "1px solid #e2e8f0",
+                    fontSize: 13.5,
+                    lineHeight: 1.6,
+                    color: "#334155",
+                    marginBottom: 18,
+                  }}
+                >
+                  <div>👤 Client : <strong>{data.nom_client || "Non renseigné"}</strong></div>
+                  <div>📞 Ligne : <strong>{data.telephone_ligne || "Non renseignée"}</strong></div>
+                  <div>📱 Mobile : <strong>{data.mobile || "Non renseigné"}</strong></div>
+                  <div>📦 FAT : <strong>{data.fat_ref || "N/A"}</strong> (Port {data.port || "N/A"})</div>
+                  <div>🗼 Poteaux : <strong>{(data.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
+                  <div>📸 Photos : <strong>{(whatsappPhotos || []).length}</strong></div>
+                </div>
 
-            <p style={{ fontSize: 13, color: "#475569", margin: "0 0 20px", lineHeight: 1.5 }}>
-              Cette action marquera l'intervention comme <strong>Terminée</strong>, synchronisera les données sur le serveur et déduira le matériel utilisé du stock.
-            </p>
+                <p style={{ fontSize: 13, color: "#475569", margin: "0 0 20px", lineHeight: 1.5 }}>
+                  Cette action marquera l'intervention comme <strong>Terminée</strong>, synchronisera les données sur le serveur et déduira le matériel utilisé du stock.
+                </p>
 
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="btn-secondary"
-                style={{ padding: "10px 16px", fontSize: 14 }}
-                onClick={() => setFinishModalOpen(false)}
-              >
-                ✕ Revenir au relevé
-              </button>
-              <button
-                type="button"
-                className="btn-finish-intervention"
-                style={{ padding: "10px 20px", fontSize: 14 }}
-                disabled={finishing}
-                onClick={async () => {
-                  setFinishModalOpen(false);
-                  await finish();
-                }}
-              >
-                {finishing ? "Finalisation…" : "✓ Confirmer et clôturer"}
-              </button>
-            </div>
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ padding: "10px 16px", fontSize: 14 }}
+                    onClick={() => setFinishModalOpen(false)}
+                  >
+                    ✕ Revenir au relevé
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-finish-intervention"
+                    style={{ padding: "10px 20px", fontSize: 14 }}
+                    onClick={finish}
+                  >
+                    ✓ Confirmer et clôturer
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

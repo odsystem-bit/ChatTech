@@ -5,28 +5,43 @@ import { getApiAuthHeaders } from "./Account.js";
 
 const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
-async function apiPost(action, body = {}) {
-  const res = await fetch(`${API_URL}?action=${action}&_t=${Date.now()}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Erreur API");
-  return data;
+async function apiPost(action, body = {}, timeoutMs = 25000) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(`${API_URL}?action=${action}&_t=${Date.now()}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
+      body: JSON.stringify(body),
+      cache: "no-store",
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Erreur API");
+    return data;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
-async function apiGet(action) {
+async function apiGet(action, timeoutMs = 20000) {
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const sep = action.includes("?") ? "&" : "?";
-  const res = await fetch(`${API_URL}?action=${action}${sep}_t=${Date.now()}`, {
-    headers: getApiAuthHeaders(),
-    cache: "no-store",
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || "Erreur API");
-  return data;
+  try {
+    const res = await fetch(`${API_URL}?action=${action}${sep}_t=${Date.now()}`, {
+      headers: getApiAuthHeaders(),
+      cache: "no-store",
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Erreur API");
+    return data;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
+
 
 // Cache local pour fonctionnement hors-ligne
 const CACHE_KEY = "fibretrack_interventions_cache";
@@ -124,6 +139,18 @@ export function ensureInterventionDefaults(data) {
   };
 }
 
+export function toLightIntervention(intv) {
+  if (!intv || typeof intv !== "object") return intv;
+  const {
+    whatsapp_photos,
+    points_gps,
+    signature_client,
+    signature_technicien,
+    ...light
+  } = intv;
+  return light;
+}
+
 export function getCached() {
   try {
     return JSON.parse(localStorage.getItem(CACHE_KEY) || "[]");
@@ -134,8 +161,11 @@ export function getCached() {
 
 function setCached(list) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(list));
-  } catch {}
+    const cleanList = Array.isArray(list) ? list.map(toLightIntervention) : [];
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cleanList));
+  } catch (e) {
+    console.warn("setCached localStorage error:", e);
+  }
 }
 
 export function getStoredIntervention(id) {
@@ -231,16 +261,18 @@ export function saveInterventionLocally(intervention) {
 
     localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
 
-    // 2. Mettre à jour la liste en cache pour la page d'accueil
+    // 2. Mettre à jour la liste en cache pour la page d'accueil (en version légère sans base64)
     const list = getCached();
+    const light = toLightIntervention(defaulted);
     const index = list.findIndex((i) => i.id === defaulted.id);
-    if (index >= 0) list[index] = { ...list[index], ...defaulted };
-    else list.unshift(defaulted);
+    if (index >= 0) list[index] = { ...list[index], ...light };
+    else list.unshift(light);
     setCached(list);
   } catch (err) {
     console.warn("saveInterventionLocally error:", err);
   }
 }
+
 
 /**
  * Sauvegarde (création ou mise à jour) une intervention sur le backend.
@@ -290,6 +322,17 @@ export async function getIntervention(id) {
 export async function getInterventionLight(id) {
   return apiPost("intervention_get_light", { id });
 }
+
+export async function checkInterventionUpdatedAt(id) {
+  if (!id) return "";
+  try {
+    const res = await apiPost("intervention_updated_at", { id }, 8000);
+    return res?.updated_at || "";
+  } catch {
+    return "";
+  }
+}
+
 
 /**
  * Supprime une intervention.

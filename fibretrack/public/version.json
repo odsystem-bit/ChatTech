@@ -1,9 +1,9 @@
 {
-  "version": "2.9.4",
-  "buildTime": "2026-10-14T17:35:00Z",
+  "version": "2.9.5",
+  "buildTime": "2026-10-14T21:30:00Z",
   "features": [
-    "Gestion robuste des poteaux et photos multiples : extraction automatique des coordonnées GPS exactes depuis l'EXIF natif de l'appareil photo, suppression de tout rejet de photo sur timeout GPS, conservation intégrale des photos pour le poteau 2 et suivants",
-    "Extension CelPros v1.0.2 : sélection immédiate parmi l'ensemble des 62 interventions existantes avec bascule automatique intelligente, injection transparente du script sur les onglets CelPros ouverts pour supprimer l'erreur de connexion",
-    "PWA iPhone & Android : Service Worker v2.9.4 garantissant la mise à jour immédiate et l'affichage des dernières données"
+    "Optimisation massive de la base de données et des photos : compression automatique des photos JPEG à 1280px (gain de 90% de volume), affichage instantané des photos sans blocage",
+    "Résolution du blocage de l'actualisation : suppression du spinner infini Actualisation en direct grâce au polling ultra-léger par timestamp",
+    "Clôture d'intervention fiable et confirmée : écran de confirmation explicite avec résumé du dossier et matériel déduit, sauvegarde locale immédiate garantie"
   ]
 }

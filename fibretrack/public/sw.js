@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fibretrack-pwa-v2.9.4';
+const CACHE_NAME = 'fibretrack-pwa-v2.9.5';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
