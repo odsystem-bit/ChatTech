@@ -1,9 +1,10 @@
 {
-  "version": "2.9.7",
-  "buildTime": "2026-10-14T22:50:00Z",
+  "version": "2.9.8",
+  "buildTime": "2026-10-15T00:35:00Z",
   "features": [
-    "Clôture garantie et redirection automatique vers l'onglet Terminées : le dossier clôturé est immédiatement visible en haut de liste sans ambiguïté",
-    "Détection de statut ultra-robuste : tolérance des variantes orthographiques, accents et majuscules pour garantir un affichage fidèle",
-    "Interface formulaire réouvert clarifiée : badge explicite Intervention clôturée et validée, suppression de toute confusion d'état"
+    "Rapport hebdomadaire Excel : correction complète des feuilles Poteaux Implantés et Poteaux Armés avec coordonnées GPS conformes",
+    "Calcul et synchronisation automatique des poteaux implantés et armés en base de données et dans les exports Excel",
+    "Sélecteur de semaine d'export hebdomadaire dans l'inventaire matériel",
+    "Remplacement des emojis par des icônes vectorielles SVG professionnelles d'entreprise télécom"
   ]
 }

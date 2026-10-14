@@ -236,11 +236,19 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         $row = 2; // Commencer à la ligne 2 (après l'en-tête)
         
         foreach ($interventions as $int) {
-            $nbGps = 0;
+            $matchingGps = [];
+            $allPolesWithCoords = [];
             foreach (json_decode($int['points_gps'] ?? '[]', true) ?: [] as $point) {
-                if (($point['type'] ?? '') === 'Poteau' && ($point['sous_type'] ?? '') === 'Implanté') $nbGps++;
+                if (($point['type'] ?? '') !== 'Poteau') continue;
+                $hasCoords = (!empty($point['lat']) || !empty($point['lng']));
+                if ($hasCoords) $allPolesWithCoords[] = $point;
+                $isImplante = !empty($point['implante']) 
+                    || in_array(strtolower(trim($point['sous_type'] ?? '')), ['implanté', 'implante'], true);
+                if ($isImplante) {
+                    $matchingGps[] = $point;
+                }
             }
-            $nbPoteaux = max((int)($int['nb_poteaux_implantes'] ?? 0), $nbGps);
+            $nbPoteaux = max((int)($int['nb_poteaux_implantes'] ?? 0), count($matchingGps));
             if ($nbPoteaux > 0) {
                 $sheetPoteauxImp->setCellValue('A' . $row, date('d/m/Y', strtotime($int['date'])));
                 $sheetPoteauxImp->setCellValue('B' . $row, trim($int['nom_client'] ?? ''));
@@ -248,11 +256,16 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
                 $sheetPoteauxImp->setCellValue('D' . $row, trim($int['adresse_zone'] ?? ''));
                 $sheetPoteauxImp->setCellValue('E' . $row, 'BTP');
                 $sheetPoteauxImp->setCellValue('F' . $row, $nbPoteaux);
-                $gpsIndex = 7;
-                foreach (json_decode($int['points_gps'] ?? '[]', true) ?: [] as $point) {
-                    if (($point['type'] ?? '') !== 'Poteau' || ($point['sous_type'] ?? '') !== 'Implanté') continue;
-                    $gpsColumn = PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
-                    $sheetPoteauxImp->setCellValue($gpsColumn . $row, ($point['lat'] ?? '') . ',' . ($point['lng'] ?? ''));
+                
+                $gpsPointsToUse = !empty($matchingGps) ? $matchingGps : $allPolesWithCoords;
+                $gpsIndex = 7; // Colonne G
+                foreach ($gpsPointsToUse as $point) {
+                    $lat = $point['lat'] ?? null;
+                    $lng = $point['lng'] ?? null;
+                    if ($lat !== null && $lng !== null && $lat !== '' && $lng !== '') {
+                        $gpsColumn = PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
+                        $sheetPoteauxImp->setCellValue($gpsColumn . $row, $lat . ',' . $lng);
+                    }
                 }
                 $row++;
             }
@@ -265,11 +278,19 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         $row = 2; // Commencer à la ligne 2
         
         foreach ($interventions as $int) {
-            $nbGps = 0;
+            $matchingGps = [];
+            $allPolesWithCoords = [];
             foreach (json_decode($int['points_gps'] ?? '[]', true) ?: [] as $point) {
-                if (($point['type'] ?? '') === 'Poteau' && ($point['sous_type'] ?? '') === 'Armé') $nbGps++;
+                if (($point['type'] ?? '') !== 'Poteau') continue;
+                $hasCoords = (!empty($point['lat']) || !empty($point['lng']));
+                if ($hasCoords) $allPolesWithCoords[] = $point;
+                $isArme = !empty($point['arme']) 
+                    || in_array(strtolower(trim($point['sous_type'] ?? '')), ['armé', 'arme'], true);
+                if ($isArme) {
+                    $matchingGps[] = $point;
+                }
             }
-            $nbPoteaux = max((int)($int['nb_poteaux_armes'] ?? 0), $nbGps);
+            $nbPoteaux = max((int)($int['nb_poteaux_armes'] ?? 0), count($matchingGps));
             if ($nbPoteaux > 0) {
                 $sheetPoteauxArm->setCellValue('A' . $row, date('d/m/Y', strtotime($int['date'])));
                 $sheetPoteauxArm->setCellValue('B' . $row, trim($int['nom_client'] ?? ''));
@@ -277,11 +298,16 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
                 $sheetPoteauxArm->setCellValue('D' . $row, trim($int['adresse_zone'] ?? ''));
                 $sheetPoteauxArm->setCellValue('E' . $row, 'BTP');
                 $sheetPoteauxArm->setCellValue('F' . $row, $nbPoteaux);
-                $gpsIndex = 7;
-                foreach (json_decode($int['points_gps'] ?? '[]', true) ?: [] as $point) {
-                    if (($point['type'] ?? '') !== 'Poteau' || ($point['sous_type'] ?? '') !== 'Armé') continue;
-                    $gpsColumn = PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
-                    $sheetPoteauxArm->setCellValue($gpsColumn . $row, ($point['lat'] ?? '') . ',' . ($point['lng'] ?? ''));
+                
+                $gpsPointsToUse = !empty($matchingGps) ? $matchingGps : $allPolesWithCoords;
+                $gpsIndex = 7; // Colonne G
+                foreach ($gpsPointsToUse as $point) {
+                    $lat = $point['lat'] ?? null;
+                    $lng = $point['lng'] ?? null;
+                    if ($lat !== null && $lng !== null && $lat !== '' && $lng !== '') {
+                        $gpsColumn = PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
+                        $sheetPoteauxArm->setCellValue($gpsColumn . $row, $lat . ',' . $lng);
+                    }
                 }
                 $row++;
             }

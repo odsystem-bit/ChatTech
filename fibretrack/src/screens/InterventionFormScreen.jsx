@@ -36,6 +36,15 @@ import {
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
 import { isInterventionTerminee } from "../lib/interventionFilters";
+import {
+  IconFlag,
+  IconHome,
+  IconFileText,
+  IconRefresh,
+  IconCheckCircle,
+  IconPole,
+  IconAlertTriangle,
+} from "../components/Icons";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
@@ -1699,8 +1708,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             onClick={handleManualRefreshIntervention}
             disabled={manualRefreshing}
             title="Actualiser les photos et informations depuis le serveur"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            <span className={manualRefreshing ? "spin-icon" : ""}>🔄</span>
+            <IconRefresh size={14} className={manualRefreshing ? "spin-icon" : ""} />
             <span className="btn-refresh-text">{manualRefreshing ? "…" : "Actualiser"}</span>
           </button>
           {saveStatus && (
@@ -1733,11 +1743,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       </header>
 
       {isInterventionTerminee(data) && (
-        <div className="status-banner" style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "10px 14px", borderRadius: 8, margin: "12px 0", fontWeight: 500 }}>
-          ✅ <strong>Intervention clôturée et validée</strong>
-          {data.modifie_par &&
-            ` — dernière modification par ${data.modifie_par} le ${new Date(data.modifie_le).toLocaleString()}`}
-          . Les modifications que vous apportez sont enregistrées en temps réel.
+        <div className="status-banner" style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "10px 14px", borderRadius: 8, margin: "12px 0", fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}>
+          <IconCheckCircle size={18} color="#15803d" />
+          <span>
+            <strong>Intervention clôturée et validée</strong>
+            {data.modifie_par &&
+              ` — dernière modification par ${data.modifie_par} le ${new Date(data.modifie_le).toLocaleString()}`}
+            . Les modifications que vous apportez sont enregistrées en temps réel.
+          </span>
         </div>
       )}
 
@@ -2375,11 +2388,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               })}
             </div>
 
-            {/* 🗼 Section Dynamique Photos de Poteaux Géolocalisés CelPros */}
+            {/* Section Dynamique Photos de Poteaux Géolocalisés CelPros */}
             <div className="celpros-poles-section">
               <div className="photos-progress-card pole-section-header-card">
                 <div className="photos-progress-header" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontSize: 28, lineHeight: 1 }}>🗼</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#e0f2fe", padding: 8, borderRadius: 10 }}>
+                    <IconPole size={26} color="#0284c7" />
+                  </span>
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16 }}>Photos de poteaux géolocalisés (CelPros)</h3>
                     <p className="photos-progress-sub" style={{ margin: "3px 0 0" }}>
@@ -2441,7 +2456,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           color: "#64748b",
                         }}
                       >
-                        <span style={{ fontSize: 32, display: "block", marginBottom: 6 }}>🗼</span>
+                        <div style={{ display: "flex", justifyContent: "center", marginBottom: 6 }}>
+                          <IconPole size={34} color="#94a3b8" />
+                        </div>
                         <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "#334155" }}>
                           Aucun poteau enregistré
                         </p>
@@ -2479,7 +2496,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     return (
                       <div key={poleNum} id={`pole-slot-card-${poleNum}`} className={`photo-slot-card pole-slot-card ${isTaken ? "taken" : "pending"}`}>
                         <div className="photo-slot-header">
-                          <span className="photo-slot-icon">🗼</span>
+                          <span className="photo-slot-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                            <IconPole size={20} color="#0284c7" />
+                          </span>
                           <div className="pole-slot-titles" style={{ flex: 1 }}>
                             <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>Photos de poteau {poleNum}</h4>
                             <div className="pole-options-box">
@@ -3179,7 +3198,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         {isInterventionTerminee(data) ? (
           <div className="form-finish-card is-done-card" style={{ background: "#f0fdf4", borderColor: "#86efac", padding: 18, borderRadius: 12, border: "1px solid #86efac" }}>
             <div className="form-finish-header" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
-              <span className="form-finish-icon" style={{ fontSize: 32 }}>✅</span>
+              <span className="form-finish-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#dcfce7", padding: 8, borderRadius: 10 }}>
+                <IconCheckCircle size={24} color="#15803d" />
+              </span>
               <div>
                 <h4 className="form-finish-title" style={{ margin: "0 0 4px", color: "#166534", fontSize: 16, fontWeight: 700 }}>
                   Intervention clôturée et validée (Terminée)
@@ -3193,25 +3214,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               <button
                 type="button"
                 className="btn-primary"
-                style={{ background: "#16a34a", borderColor: "#16a34a", padding: "10px 18px", fontWeight: 700 }}
+                style={{ background: "#16a34a", borderColor: "#16a34a", padding: "10px 18px", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}
                 onClick={() => onFinish(data)}
               >
-                📄 Voir le rapport & les fiches →
+                <IconFileText size={16} /> Voir le rapport & les fiches →
               </button>
               <button
                 type="button"
                 className="btn-secondary"
-                style={{ padding: "10px 16px", fontWeight: 600 }}
+                style={{ padding: "10px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}
                 onClick={() => onClose("terminees")}
               >
-                🏠 Revenir à l'accueil
+                <IconHome size={16} /> Revenir à l'accueil
               </button>
             </div>
           </div>
         ) : (
           <div className="form-finish-card">
             <div className="form-finish-header">
-              <span className="form-finish-icon">🏁</span>
+              <span className="form-finish-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#dcfce7", padding: 8, borderRadius: 10 }}>
+                <IconFlag size={22} color="#15803d" />
+              </span>
               <div>
                 <h4 className="form-finish-title">Clôture de l'intervention</h4>
                 <p className="form-finish-desc">
@@ -3224,8 +3247,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               className="btn-finish-intervention"
               onClick={() => setFinishModalOpen(true)}
               disabled={finishing}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             >
-              {finishing ? "Finalisation en cours…" : "🏁 Terminer l'intervention"}
+              <IconFlag size={16} color="#fff" />
+              {finishing ? "Finalisation en cours…" : "Terminer l'intervention"}
             </button>
           </div>
         )}
@@ -3266,7 +3291,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             {finishSuccessData ? (
               <div>
                 <div style={{ textAlign: "center", padding: "12px 0 16px" }}>
-                  <div style={{ fontSize: 48, marginBottom: 8 }}>✅</div>
+                  <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>
+                    <IconCheckCircle size={48} color="#16a34a" />
+                  </div>
                   <h3 style={{ margin: "0 0 6px", fontSize: 20, color: "#166534", fontWeight: 800 }}>
                     Intervention clôturée avec succès !
                   </h3>
@@ -3287,30 +3314,30 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     marginBottom: 20,
                   }}
                 >
-                  <div>👤 Client : <strong>{finishSuccessData.nom_client || "Client"}</strong></div>
-                  <div>⚡ Statut : <strong style={{ color: "#15803d" }}>TERMINÉE</strong></div>
-                  <div>📦 Port FAT : <strong>{finishSuccessData.port || "N/A"}</strong></div>
-                  <div>📸 Photos enregistrées : <strong>{(finishSuccessData.whatsapp_photos || []).length}</strong></div>
-                  <div>🗼 Poteaux enregistrés : <strong>{(finishSuccessData.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
+                  <div>Client : <strong>{finishSuccessData.nom_client || "Client"}</strong></div>
+                  <div>Statut : <strong style={{ color: "#15803d" }}>TERMINÉE</strong></div>
+                  <div>Port FAT : <strong>{finishSuccessData.port || "N/A"}</strong></div>
+                  <div>Photos enregistrées : <strong>{(finishSuccessData.whatsapp_photos || []).length}</strong></div>
+                  <div>Poteaux enregistrés : <strong>{(finishSuccessData.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
                 </div>
 
                 <div style={{ display: "flex", gap: 10, justifyContent: "stretch" }}>
                   <button
                     type="button"
                     className="btn-secondary"
-                    style={{ flex: 1, padding: "12px 14px", fontSize: 14, fontWeight: 600 }}
+                    style={{ flex: 1, padding: "12px 14px", fontSize: 14, fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                     onClick={() => {
                       setFinishModalOpen(false);
                       setFinishSuccessData(null);
                       onClose("terminees");
                     }}
                   >
-                    🏠 Accueil
+                    <IconHome size={16} /> Accueil
                   </button>
                   <button
                     type="button"
                     className="btn-primary"
-                    style={{ flex: 1.3, padding: "12px 14px", fontSize: 14, fontWeight: 700, background: "#16a34a", borderColor: "#16a34a" }}
+                    style={{ flex: 1.3, padding: "12px 14px", fontSize: 14, fontWeight: 700, background: "#16a34a", borderColor: "#16a34a", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
                     onClick={() => {
                       setFinishModalOpen(false);
                       const payload = finishSuccessData;
@@ -3318,14 +3345,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       onFinish(payload);
                     }}
                   >
-                    📄 Voir le rapport →
+                    <IconFileText size={16} /> Voir le rapport →
                   </button>
                 </div>
               </div>
             ) : finishing ? (
               <div style={{ textAlign: "center", padding: "28px 0" }}>
-                <div className="spin-icon" style={{ fontSize: 48, display: "inline-block", marginBottom: 16 }}>
-                  ⏳
+                <div className="spin-icon" style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
+                  <IconRefresh size={44} color="#2563eb" />
                 </div>
                 <h3 style={{ margin: "0 0 8px", fontSize: 18, color: "#1e293b", fontWeight: 700 }}>
                   Clôture en cours…
@@ -3337,7 +3364,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             ) : (
               <>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-                  <span style={{ fontSize: 32 }}>🏁</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#f0fdf4", padding: 8, borderRadius: 10 }}>
+                    <IconFlag size={24} color="#15803d" />
+                  </span>
                   <div>
                     <h3 style={{ margin: 0, fontSize: 18, color: "#1e293b" }}>
                       Confirmer la clôture d'intervention
@@ -3360,12 +3389,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     marginBottom: 18,
                   }}
                 >
-                  <div>👤 Client : <strong>{data.nom_client || "Non renseigné"}</strong></div>
-                  <div>📞 Ligne : <strong>{data.telephone_ligne || "Non renseignée"}</strong></div>
-                  <div>📱 Mobile : <strong>{data.mobile || "Non renseigné"}</strong></div>
-                  <div>📦 FAT : <strong>{data.fat_ref || "N/A"}</strong> (Port {data.port || "N/A"})</div>
-                  <div>🗼 Poteaux : <strong>{(data.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
-                  <div>📸 Photos : <strong>{(whatsappPhotos || []).length}</strong></div>
+                  <div>Client : <strong>{data.nom_client || "Non renseigné"}</strong></div>
+                  <div>Ligne : <strong>{data.telephone_ligne || "Non renseignée"}</strong></div>
+                  <div>Mobile : <strong>{data.mobile || "Non renseigné"}</strong></div>
+                  <div>FAT : <strong>{data.fat_ref || "N/A"}</strong> (Port {data.port || "N/A"})</div>
+                  <div>Poteaux : <strong>{(data.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
+                  <div>Photos : <strong>{(whatsappPhotos || []).length}</strong></div>
                 </div>
 
                 <p style={{ fontSize: 13, color: "#475569", margin: "0 0 20px", lineHeight: 1.5 }}>

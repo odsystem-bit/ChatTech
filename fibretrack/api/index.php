@@ -729,6 +729,26 @@ try {
       }
       unset($pt);
 
+      // Recompute pole counts from points_gps to ensure DB consistency
+      if (is_array($incomingGps) && !empty($incomingGps)) {
+        $calcImp = 0;
+        $calcArm = 0;
+        $calcTrav = 0;
+        foreach ($incomingGps as $p) {
+          if (($p['type'] ?? '') === 'Poteau') {
+            $isImp = !empty($p['implante']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['implanté', 'implante'], true);
+            $isArm = !empty($p['arme']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['armé', 'arme'], true);
+            $isTrav = !empty($p['traverse']) || (!$isImp && in_array(strtolower(trim($p['sous_type'] ?? '')), ['traversé', 'traverse', ''], true));
+            if ($isImp) $calcImp++;
+            if ($isArm) $calcArm++;
+            if ($isTrav) $calcTrav++;
+          }
+        }
+        $d['nb_poteaux_implantes'] = max((int)($d['nb_poteaux_implantes'] ?? 0), $calcImp);
+        $d['nb_poteaux_armes'] = max((int)($d['nb_poteaux_armes'] ?? 0), $calcArm);
+        $d['nb_poteaux_traverses'] = max((int)($d['nb_poteaux_traverses'] ?? 0), $calcTrav);
+      }
+
       // --- Déduction stock : à faire seulement au premier passage à 'termine' ---
       $finalStatus = $d['statut'] ?? ($existing['statut'] ?? '');
 
@@ -743,7 +763,12 @@ try {
           $patchColumns = array_values(array_filter($fields, fn($field) => $field !== 'id' && in_array($field, $changedFields, true) && array_key_exists($field, $d)));
           $patchAssignments = array_map(fn($field) => "$field = :$field", $patchColumns);
           if ($materialPatch) $patchAssignments[] = 'materiel_pose = :materiel_pose';
-          if (in_array('points_gps', $changedFields, true)) $patchAssignments[] = 'points_gps = :points_gps';
+          if (in_array('points_gps', $changedFields, true)) {
+            $patchAssignments[] = 'points_gps = :points_gps';
+            $patchAssignments[] = 'nb_poteaux_implantes = :nb_poteaux_implantes_calc';
+            $patchAssignments[] = 'nb_poteaux_armes = :nb_poteaux_armes_calc';
+            $patchAssignments[] = 'nb_poteaux_traverses = :nb_poteaux_traverses_calc';
+          }
           if (in_array('whatsapp_photos', $changedFields, true)) $patchAssignments[] = 'whatsapp_photos = :whatsapp_photos';
           if ($shouldDeductStock) $patchAssignments[] = 'materiel_deduit = 1';
           if ($patchAssignments) {
@@ -756,7 +781,12 @@ try {
               $stmt->bindValue(':' . $field, $value);
             }
             if ($materialPatch) $stmt->bindValue(':materiel_pose', json_encode(empty($incomingMat) ? (object)[] : $incomingMat));
-            if (in_array('points_gps', $changedFields, true)) $stmt->bindValue(':points_gps', json_encode($incomingGps));
+            if (in_array('points_gps', $changedFields, true)) {
+              $stmt->bindValue(':points_gps', json_encode($incomingGps));
+              $stmt->bindValue(':nb_poteaux_implantes_calc', (int)$d['nb_poteaux_implantes']);
+              $stmt->bindValue(':nb_poteaux_armes_calc', (int)$d['nb_poteaux_armes']);
+              $stmt->bindValue(':nb_poteaux_traverses_calc', (int)$d['nb_poteaux_traverses']);
+            }
             if (in_array('whatsapp_photos', $changedFields, true)) $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
             $stmt->bindValue(':modifie_par', $d['modifie_par'] ?? '');
             $stmt->bindValue(':modifie_le', $d['modifie_le'] ?? date('Y-m-d H:i:s'));

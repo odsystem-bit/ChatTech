@@ -132,17 +132,42 @@ try {
     $sheetPoteauxImp->setCellValue('D1', 'ZONE');
     $sheetPoteauxImp->setCellValue('E1', 'EQUIPE');
     $sheetPoteauxImp->setCellValue('F1', 'Nbr poteaux imp');
+    $sheetPoteauxImp->setCellValue('G1', 'GPS Poteau 1');
+    $sheetPoteauxImp->setCellValue('H1', 'GPS Poteau 2');
     
     $row = 2;
     foreach ($interventions as $int) {
-        $nbPoteaux = (int)($int['nb_poteaux_implantes'] ?? 0);
+        $matchingGps = [];
+        $allPolesWithCoords = [];
+        foreach (json_decode($int['points_gps'] ?? '[]', true) ?: [] as $point) {
+            if (($point['type'] ?? '') !== 'Poteau') continue;
+            $hasCoords = (!empty($point['lat']) || !empty($point['lng']));
+            if ($hasCoords) $allPolesWithCoords[] = $point;
+            $isImplante = !empty($point['implante']) 
+                || in_array(strtolower(trim($point['sous_type'] ?? '')), ['implanté', 'implante'], true);
+            if ($isImplante) {
+                $matchingGps[] = $point;
+            }
+        }
+        $nbPoteaux = max((int)($int['nb_poteaux_implantes'] ?? 0), count($matchingGps));
         if ($nbPoteaux > 0) {
             $sheetPoteauxImp->setCellValue('A' . $row, date('d/m/Y', strtotime($int['date'])));
-            $sheetPoteauxImp->setCellValue('B' . $row, $int['nom_client'] ?? '');
+            $sheetPoteauxImp->setCellValue('B' . $row, trim($int['nom_client'] ?? ''));
             $sheetPoteauxImp->setCellValue('C' . $row, $int['telephone_ligne'] ?? '');
-            $sheetPoteauxImp->setCellValue('D' . $row, $int['adresse_zone'] ?? '');
+            $sheetPoteauxImp->setCellValue('D' . $row, trim($int['adresse_zone'] ?? ''));
             $sheetPoteauxImp->setCellValue('E' . $row, 'BTP');
             $sheetPoteauxImp->setCellValue('F' . $row, $nbPoteaux);
+
+            $gpsPointsToUse = !empty($matchingGps) ? $matchingGps : $allPolesWithCoords;
+            $gpsIndex = 7;
+            foreach ($gpsPointsToUse as $point) {
+                $lat = $point['lat'] ?? null;
+                $lng = $point['lng'] ?? null;
+                if ($lat !== null && $lng !== null && $lat !== '' && $lng !== '') {
+                    $gpsColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
+                    $sheetPoteauxImp->setCellValue($gpsColumn . $row, $lat . ',' . $lng);
+                }
+            }
             $row++;
         }
     }
@@ -156,17 +181,42 @@ try {
     $sheetPoteauxArm->setCellValue('D1', 'ZONE');
     $sheetPoteauxArm->setCellValue('E1', 'EQUIPE');
     $sheetPoteauxArm->setCellValue('F1', 'Nbr poteaux armés');
+    $sheetPoteauxArm->setCellValue('G1', 'GPS Poteau 1');
+    $sheetPoteauxArm->setCellValue('H1', 'GPS Poteau 2');
     
     $row = 2;
     foreach ($interventions as $int) {
-        $nbPoteaux = (int)($int['nb_poteaux_armes'] ?? 0);
+        $matchingGps = [];
+        $allPolesWithCoords = [];
+        foreach (json_decode($int['points_gps'] ?? '[]', true) ?: [] as $point) {
+            if (($point['type'] ?? '') !== 'Poteau') continue;
+            $hasCoords = (!empty($point['lat']) || !empty($point['lng']));
+            if ($hasCoords) $allPolesWithCoords[] = $point;
+            $isArme = !empty($point['arme']) 
+                || in_array(strtolower(trim($point['sous_type'] ?? '')), ['armé', 'arme'], true);
+            if ($isArme) {
+                $matchingGps[] = $point;
+            }
+        }
+        $nbPoteaux = max((int)($int['nb_poteaux_armes'] ?? 0), count($matchingGps));
         if ($nbPoteaux > 0) {
             $sheetPoteauxArm->setCellValue('A' . $row, date('d/m/Y', strtotime($int['date'])));
-            $sheetPoteauxArm->setCellValue('B' . $row, $int['nom_client'] ?? '');
+            $sheetPoteauxArm->setCellValue('B' . $row, trim($int['nom_client'] ?? ''));
             $sheetPoteauxArm->setCellValue('C' . $row, $int['telephone_ligne'] ?? '');
-            $sheetPoteauxArm->setCellValue('D' . $row, $int['adresse_zone'] ?? '');
+            $sheetPoteauxArm->setCellValue('D' . $row, trim($int['adresse_zone'] ?? ''));
             $sheetPoteauxArm->setCellValue('E' . $row, 'BTP');
             $sheetPoteauxArm->setCellValue('F' . $row, $nbPoteaux);
+
+            $gpsPointsToUse = !empty($matchingGps) ? $matchingGps : $allPolesWithCoords;
+            $gpsIndex = 7;
+            foreach ($gpsPointsToUse as $point) {
+                $lat = $point['lat'] ?? null;
+                $lng = $point['lng'] ?? null;
+                if ($lat !== null && $lng !== null && $lat !== '' && $lng !== '') {
+                    $gpsColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
+                    $sheetPoteauxArm->setCellValue($gpsColumn . $row, $lat . ',' . $lng);
+                }
+            }
             $row++;
         }
     }

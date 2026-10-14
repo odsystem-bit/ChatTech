@@ -76,17 +76,14 @@ conn.on('ready', () => {
 
     walkAndUpload(distDir, remoteBase)
       .then(async () => {
-        const localApiFile = path.join(projectRoot, 'api', 'index.php');
-        if (fs.existsSync(localApiFile)) {
-          await ensureRemoteDir(`${remoteBase}/api`);
-          await uploadFile(localApiFile, `${remoteBase}/api/index.php`);
-          console.log('✓ api/index.php mis à jour sur Hostinger !');
-        }
-        const localPdfFile = path.join(projectRoot, 'api', 'pdf.php');
-        if (fs.existsSync(localPdfFile)) {
-          await ensureRemoteDir(`${remoteBase}/api`);
-          await uploadFile(localPdfFile, `${remoteBase}/api/pdf.php`);
-          console.log('✓ api/pdf.php mis à jour sur Hostinger !');
+        const apiFiles = ['index.php', 'pdf.php', 'excel_hebdo.php', 'excel_hebdo_simple.php', 'excel_export.php'];
+        await ensureRemoteDir(`${remoteBase}/api`);
+        for (const apiFile of apiFiles) {
+          const localPath = path.join(projectRoot, 'api', apiFile);
+          if (fs.existsSync(localPath)) {
+            await uploadFile(localPath, `${remoteBase}/api/${apiFile}`);
+            console.log(`✓ api/${apiFile} mis à jour sur Hostinger !`);
+          }
         }
         console.log('✓ Tous les fichiers mis à jour avec succès sur Hostinger !');
         // Vérification
