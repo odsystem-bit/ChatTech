@@ -20,6 +20,7 @@
       this.selectedIntervention = null;
       this.apiStatus = "unknown"; // "connected", "error", "loading"
       this.filterText = "";
+      this.statusTabFilter = "en_cours"; // "en_cours" (par défaut), "all", "termine"
       this.lastFillReport = null;
       this.autoPilotEnabled = true;
       this.currentStepInfo = null;
@@ -78,21 +79,39 @@
           <!-- Corps du widget -->
           <div class="chaptech-panel-body">
             <!-- Barre de recherche et de sélection -->
-            <div class="chaptech-section">
+            <div class="chaptech-section chaptech-selector-section">
               <div class="section-label-row">
                 <label for="chaptech-intervention-select">Sélectionner une intervention :</label>
                 <button class="btn-text-action" id="chaptech-btn-refresh" title="Recharger depuis ChapTech">🔄 Actualiser</button>
               </div>
 
+              <!-- Filtres d'état rapides : En cours (Défaut) / Tous / Terminées -->
+              <div class="chaptech-filter-pills-row" id="chaptech-filter-pills-row">
+                <button type="button" class="chaptech-filter-pill is-active" data-status="en_cours" id="filter-pill-en-cours">
+                  ⚡ En cours (<span id="count-en-cours">0</span>)
+                </button>
+                <button type="button" class="chaptech-filter-pill" data-status="all" id="filter-pill-all">
+                  Tous (<span id="count-all">0</span>)
+                </button>
+                <button type="button" class="chaptech-filter-pill" data-status="termine" id="filter-pill-terminees">
+                  ✅ Terminées (<span id="count-terminees">0</span>)
+                </button>
+              </div>
+
+              <!-- Barre de recherche avec autocomplétion instantanée et bouton effacer -->
               <div class="search-input-wrap">
                 <input 
                   type="text" 
                   id="chaptech-search-input" 
                   class="chaptech-input" 
-                  placeholder="Rechercher (Nom client, FAT, Tél...)" 
+                  placeholder="Tapez le nom du dossier, client, FAT, tél…" 
+                  autocomplete="off"
                 />
+                <button type="button" class="chaptech-input-clear-btn" id="chaptech-search-clear" style="display: none;" title="Effacer la recherche">✕</button>
+                <div class="chaptech-search-suggestions" id="chaptech-search-suggestions" style="display: none;"></div>
               </div>
 
+              <!-- Liste déroulante groupée (En cours / Terminées) -->
               <div class="select-wrap">
                 <select id="chaptech-intervention-select" class="chaptech-select">
                   <option value="">-- Choisir une intervention --</option>
@@ -353,29 +372,173 @@
 
     renderInterventionOptions() {
       const select = document.getElementById("chaptech-intervention-select");
-      if (!select) return;
+      const suggestionsBox = document.getElementById("chaptech-search-suggestions");
+      const clearBtn = document.getElementById("chaptech-search-clear");
+      const countEnCours = document.getElementById("count-en-cours");
+      const countAll = document.getElementById("count-all");
+      const countTerminees = document.getElementById("count-terminees");
+
+      // Calcul des compteurs globaux
+      const totalEnCours = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+      const totalTerminees = this.interventions.filter((i) => (i.statut || "").toLowerCase() === "termine").length;
+      const totalAll = this.interventions.length;
+
+      if (countEnCours) countEnCours.textContent = String(totalEnCours);
+      if (countAll) countAll.textContent = String(totalAll);
+      if (countTerminees) countTerminees.textContent = String(totalTerminees);
 
       const filter = (this.filterText || "").toLowerCase().trim();
+      if (clearBtn) {
+        clearBtn.style.display = filter ? "flex" : "none";
+      }
+
+      // 1. Filtrage pour la recherche
+      let matchingInterventions = this.interventions;
+      if (filter) {
+        matchingInterventions = this.interventions.filter((item) => {
+          const text = `${item.nom_client || ""} ${item.msan || ""} ${item.fat_ref || ""} ${item.telephone_ligne || ""} ${item.mobile || ""} ${item.id || ""} ${item.adresse_zone || ""}`.toLowerCase();
+          return text.includes(filter);
+        });
+      } else {
+        // Sans recherche textuelle, appliquer l'onglet actif ('en_cours', 'termine', 'all')
+        if (this.statusTabFilter === "en_cours") {
+          matchingInterventions = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine");
+        } else if (this.statusTabFilter === "termine") {
+          matchingInterventions = this.interventions.filter((i) => (i.statut || "").toLowerCase() === "termine");
+        }
+      }
+
+      // 2. Mettre à jour la boîte d'autocomplétion (suggestions) si l'utilisateur est en train de taper
+      if (suggestionsBox) {
+        if (filter.length > 0) {
+          this.renderSuggestions(matchingInterventions, filter);
+        } else {
+          suggestionsBox.style.display = "none";
+          suggestionsBox.innerHTML = "";
+        }
+      }
+
+      // 3. Mettre à jour le select natif
+      if (!select) return;
       select.innerHTML = '<option value="">-- Choisir une intervention --</option>';
 
-      const filtered = this.interventions.filter((item) => {
-        if (!filter) return true;
-        const text = `${item.nom_client || ""} ${item.msan || ""} ${item.fat_ref || ""} ${item.telephone_ligne || ""} ${item.mobile || ""}`.toLowerCase();
-        return text.includes(filter);
-      });
+      const enCoursGroup = matchingInterventions.filter((i) => (i.statut || "").toLowerCase() !== "termine");
+      const termineesGroup = matchingInterventions.filter((i) => (i.statut || "").toLowerCase() === "termine");
 
-      for (const item of filtered) {
-        const opt = document.createElement("option");
-        opt.value = item.id;
-        const date = item.date ? item.date.slice(0, 10) : "";
-        const client = item.nom_client || "Sans nom";
-        const fat = item.fat_ref ? `[${item.fat_ref}]` : "";
-        opt.textContent = `${client} ${fat} (${date})`;
-        if (this.selectedIntervention && this.selectedIntervention.id === item.id) {
-          opt.selected = true;
+      if (enCoursGroup.length > 0) {
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = `⚡ Dossiers En cours (${enCoursGroup.length})`;
+        for (const item of enCoursGroup) {
+          const opt = document.createElement("option");
+          opt.value = item.id;
+          const date = item.date ? item.date.slice(0, 10) : "";
+          const client = (item.nom_client || "Sans nom").trim();
+          const fat = item.fat_ref ? ` [${item.fat_ref.trim()}]` : "";
+          opt.textContent = `${client}${fat} (${date})`;
+          if (this.selectedIntervention && this.selectedIntervention.id === item.id) {
+            opt.selected = true;
+          }
+          optgroup.appendChild(opt);
         }
-        select.appendChild(opt);
+        select.appendChild(optgroup);
       }
+
+      if (termineesGroup.length > 0) {
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = `✅ Dossiers Terminés (${termineesGroup.length})`;
+        for (const item of termineesGroup) {
+          const opt = document.createElement("option");
+          opt.value = item.id;
+          const date = item.date ? item.date.slice(0, 10) : "";
+          const client = (item.nom_client || "Sans nom").trim();
+          const fat = item.fat_ref ? ` [${item.fat_ref.trim()}]` : "";
+          opt.textContent = `${client}${fat} (${date})`;
+          if (this.selectedIntervention && this.selectedIntervention.id === item.id) {
+            opt.selected = true;
+          }
+          optgroup.appendChild(opt);
+        }
+        select.appendChild(optgroup);
+      }
+    }
+
+    renderSuggestions(items, query) {
+      const box = document.getElementById("chaptech-search-suggestions");
+      if (!box) return;
+
+      if (!items || items.length === 0) {
+        box.innerHTML = `<div class="suggestion-empty">Aucun dossier trouvé pour « <strong>${this.escapeHtml(query)}</strong> »</div>`;
+        box.style.display = "block";
+        return;
+      }
+
+      let html = "";
+      const limit = Math.min(items.length, 10);
+      for (let i = 0; i < limit; i++) {
+        const item = items[i];
+        const isDone = (item.statut || "").toLowerCase() === "termine";
+        const client = (item.nom_client || "Sans nom").trim();
+        const fat = item.fat_ref ? item.fat_ref.trim() : "";
+        const phone = item.mobile || item.telephone_ligne || "";
+        const date = item.date ? item.date.slice(0, 10) : "";
+        const isSelected = this.selectedIntervention && this.selectedIntervention.id === item.id;
+
+        html += `
+          <div class="suggestion-item ${isSelected ? "is-selected" : ""}" data-id="${item.id}">
+            <div class="suggestion-head">
+              <span class="suggestion-client">${this.highlightMatch(client, query)}</span>
+              <span class="suggestion-badge ${isDone ? "badge-done" : "badge-progress"}">
+                ${isDone ? "✅ Terminée" : "⚡ En cours"}
+              </span>
+            </div>
+            <div class="suggestion-sub">
+              ${fat ? `<span class="suggestion-fat">FAT: ${this.highlightMatch(fat, query)}</span>` : ""}
+              ${phone ? `<span class="suggestion-phone">Tél: ${this.highlightMatch(phone, query)}</span>` : ""}
+              ${date ? `<span class="suggestion-date">${date}</span>` : ""}
+            </div>
+          </div>
+        `;
+      }
+
+      if (items.length > limit) {
+        html += `<div class="suggestion-footer">+ ${items.length - limit} autre(s) dossier(s)...</div>`;
+      }
+
+      box.innerHTML = html;
+      box.style.display = "block";
+
+      // Clic sur une suggestion
+      const itemEls = box.querySelectorAll(".suggestion-item");
+      itemEls.forEach((el) => {
+        el.addEventListener("click", () => {
+          const id = el.getAttribute("data-id");
+          const target = this.interventions.find((i) => i.id === id);
+          if (target) {
+            const input = document.getElementById("chaptech-search-input");
+            if (input) input.value = (target.nom_client || "").trim();
+            this.filterText = (target.nom_client || "").trim();
+          }
+          box.style.display = "none";
+          this.onInterventionChange(id);
+        });
+      });
+    }
+
+    highlightMatch(text, query) {
+      if (!query || !text) return this.escapeHtml(text || "");
+      const safe = this.escapeHtml(text);
+      const q = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(`(${q})`, "gi");
+      return safe.replace(regex, "<mark class='match-hl'>$1</mark>");
+    }
+
+    escapeHtml(str) {
+      return String(str || "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
     }
 
     async onInterventionChange(id) {
@@ -779,18 +942,84 @@
       document.getElementById("chaptech-pill").addEventListener("click", () => this.setCollapsed(false));
       document.getElementById("chaptech-btn-minimize").addEventListener("click", () => this.setCollapsed(true));
 
-      // Recherche filtrée
-      document.getElementById("chaptech-search-input").addEventListener("input", (e) => {
+      // Filtres rapides En cours / Tous / Terminées
+      const filterPills = document.querySelectorAll(".chaptech-filter-pill");
+      filterPills.forEach((pill) => {
+        pill.addEventListener("click", () => {
+          filterPills.forEach((p) => p.classList.remove("is-active"));
+          pill.classList.add("is-active");
+          this.statusTabFilter = pill.getAttribute("data-status") || "all";
+          this.renderInterventionOptions();
+        });
+      });
+
+      // Recherche filtrée avec suggestions interactives
+      const searchInput = document.getElementById("chaptech-search-input");
+      const suggestionsBox = document.getElementById("chaptech-search-suggestions");
+      const clearSearchBtn = document.getElementById("chaptech-search-clear");
+
+      searchInput.addEventListener("input", (e) => {
         this.filterText = e.target.value;
         this.renderInterventionOptions();
+      });
+
+      searchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const firstItem = suggestionsBox?.querySelector(".suggestion-item");
+          if (firstItem) {
+            const id = firstItem.getAttribute("data-id");
+            const target = this.interventions.find((i) => i.id === id);
+            if (target) {
+              searchInput.value = (target.nom_client || "").trim();
+              this.filterText = (target.nom_client || "").trim();
+            }
+            if (suggestionsBox) suggestionsBox.style.display = "none";
+            this.onInterventionChange(id);
+          }
+        } else if (e.key === "Escape") {
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+        }
+      });
+
+      searchInput.addEventListener("focus", () => {
+        if (this.filterText.trim().length > 0) {
+          this.renderInterventionOptions();
+        }
+      });
+
+      if (clearSearchBtn) {
+        clearSearchBtn.addEventListener("click", () => {
+          searchInput.value = "";
+          this.filterText = "";
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+          clearSearchBtn.style.display = "none";
+          this.renderInterventionOptions();
+        });
+      }
+
+      // Fermer les suggestions si clic en dehors
+      document.addEventListener("click", (e) => {
+        const wrap = document.querySelector(".search-input-wrap");
+        if (wrap && !wrap.contains(e.target)) {
+          if (suggestionsBox) suggestionsBox.style.display = "none";
+        }
       });
 
       // Rafraîchir
       document.getElementById("chaptech-btn-refresh").addEventListener("click", () => this.fetchInterventions());
 
-      // Changement d'intervention
+      // Changement d'intervention via select natif
       document.getElementById("chaptech-intervention-select").addEventListener("change", (e) => {
-        this.onInterventionChange(e.target.value);
+        const val = e.target.value;
+        if (val) {
+          const target = this.interventions.find((i) => i.id === val);
+          if (target && searchInput) {
+            searchInput.value = (target.nom_client || "").trim();
+            this.filterText = (target.nom_client || "").trim();
+          }
+        }
+        this.onInterventionChange(val);
       });
 
       // Toggle Super-Pilote

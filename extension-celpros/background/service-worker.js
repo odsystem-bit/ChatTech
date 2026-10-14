@@ -95,33 +95,55 @@ async function testConnection(customConfig = null) {
   }
 }
 
-// Récupération de la liste des interventions (light)
+// Récupération de la liste des interventions (light) avec tri et fallback cache
 async function fetchInterventionsList() {
   const config = await getConfig();
   const url = formatApiActionUrl(config.apiUrl, "interventions_list_light");
 
-  const res = await fetch(url, {
-    method: "GET",
-    headers: getAuthHeaders(config.apiCode),
-  });
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: getAuthHeaders(config.apiCode),
+    });
 
-  if (!res.ok) {
-    let msg = `Erreur HTTP ${res.status}`;
-    try {
-      const j = await res.json();
-      if (j.error) msg = j.error;
-    } catch {}
-    throw new Error(msg);
+    if (!res.ok) {
+      let msg = `Erreur HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j.error) msg = j.error;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const list = await res.json();
+    if (Array.isArray(list)) {
+      // Trier : 'en_cours' en priorité, puis par date décroissante
+      list.sort((a, b) => {
+        const aIsDone = (a.statut || "").toLowerCase() === "termine";
+        const bIsDone = (b.statut || "").toLowerCase() === "termine";
+        if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
+        const da = new Date(a.date || 0).getTime();
+        const db = new Date(b.date || 0).getTime();
+        return db - da;
+      });
+
+      const now = new Date().toISOString();
+      await chrome.storage.local.set({
+        cachedInterventions: list,
+        lastSyncTime: now,
+      });
+      return list;
+    }
+    throw new Error("Format de réponse invalide");
+  } catch (err) {
+    console.warn("[CelPros Background] Erreur fetch interventions, tentative lecture cache local:", err.message);
+    const stored = await chrome.storage.local.get(["cachedInterventions"]);
+    if (Array.isArray(stored.cachedInterventions) && stored.cachedInterventions.length > 0) {
+      console.log(`[CelPros Background] Utilisation de ${stored.cachedInterventions.length} fiches du cache local.`);
+      return stored.cachedInterventions;
+    }
+    throw err;
   }
-
-  const list = await res.json();
-  const now = new Date().toISOString();
-  await chrome.storage.local.set({
-    cachedInterventions: list,
-    lastSyncTime: now,
-  });
-
-  return list;
 }
 
 // Récupération complète des détails d'une intervention
@@ -130,24 +152,42 @@ async function fetchInterventionDetails(id) {
   const config = await getConfig();
   const url = formatApiActionUrl(config.apiUrl, "intervention_get");
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: getAuthHeaders(config.apiCode),
-    body: JSON.stringify({ id: String(id) }),
-  });
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: getAuthHeaders(config.apiCode),
+      body: JSON.stringify({ id: String(id) }),
+    });
 
-  if (!res.ok) {
-    let msg = `Erreur HTTP ${res.status}`;
+    if (!res.ok) {
+      let msg = `Erreur HTTP ${res.status}`;
+      try {
+        const j = await res.json();
+        if (j.error) msg = j.error;
+      } catch {}
+      throw new Error(msg);
+    }
+
+    const item = await res.json();
+    if (!item || !item.id) throw new Error("Fiche introuvable");
     try {
-      const j = await res.json();
-      if (j.error) msg = j.error;
-    } catch {}
-    throw new Error(msg);
+      await chrome.storage.local.set({ activeIntervention: item });
+    } catch (storErr) {
+      console.warn("[CelPros Background] Erreur sauvegarde activeIntervention dans storage:", storErr);
+    }
+    return item;
+  } catch (err) {
+    console.warn(`[CelPros Background] Erreur fetch détails pour ${id}, tentative fallback:`, err.message);
+    const stored = await chrome.storage.local.get(["activeIntervention", "cachedInterventions"]);
+    if (stored.activeIntervention && String(stored.activeIntervention.id) === String(id)) {
+      return stored.activeIntervention;
+    }
+    if (Array.isArray(stored.cachedInterventions)) {
+      const match = stored.cachedInterventions.find((i) => String(i.id) === String(id));
+      if (match) return match;
+    }
+    throw err;
   }
-
-  const item = await res.json();
-  await chrome.storage.local.set({ activeIntervention: item });
-  return item;
 }
 
 // Routeur de messages inter-processus (Content Script <-> Popup <-> Background)

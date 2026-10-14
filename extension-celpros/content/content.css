@@ -254,6 +254,171 @@
   background-color: #ffffff;
 }
 
+/* Filtres d'état rapides (En cours / Tous / Terminées) */
+.chaptech-filter-pills-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.chaptech-filter-pill {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.chaptech-filter-pill:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.chaptech-filter-pill.is-active {
+  background: #0284c7;
+  border-color: #0284c7;
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(2, 132, 199, 0.3);
+}
+
+/* Conteneur de recherche et bouton effacer */
+.search-input-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.chaptech-input-clear-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.chaptech-input-clear-btn:hover {
+  color: #ef4444;
+  background: #fee2e2;
+}
+
+/* Menu d'autocomplétion / Suggestions */
+.chaptech-search-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+  max-height: 220px;
+  overflow-y: auto;
+  z-index: 9999999;
+}
+
+.suggestion-item {
+  padding: 8px 10px;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
+}
+
+.suggestion-item:hover,
+.suggestion-item.is-selected {
+  background: #f0f9ff;
+}
+
+.suggestion-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.suggestion-client {
+  font-weight: 700;
+  font-size: 12px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.suggestion-badge.badge-progress {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.suggestion-badge.badge-done {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
+.suggestion-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.match-hl {
+  background: #fef08a;
+  color: #854d0e;
+  font-weight: 700;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.suggestion-empty {
+  padding: 12px 10px;
+  font-size: 11.5px;
+  color: #64748b;
+  text-align: center;
+  font-style: italic;
+}
+
+.suggestion-footer {
+  padding: 6px 10px;
+  font-size: 10.5px;
+  color: #94a3b8;
+  text-align: center;
+  background: #f8fafc;
+  border-top: 1px solid #f1f5f9;
+}
+
 /* 7. Carte Résumé Intervention */
 .chaptech-card {
   background: #f1f5f9;

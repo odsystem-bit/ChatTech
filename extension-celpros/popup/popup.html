@@ -38,7 +38,33 @@
           <span id="active-status-badge" class="badge-mini">-</span>
         </div>
         <div id="active-client-name" class="active-client">Aucune intervention sélectionnée</div>
-        <div id="active-details" class="active-sub">Sélectionnez une fiche depuis le widget sur la page CelPros.</div>
+        <div id="active-details" class="active-sub">Sélectionnez une fiche ci-dessous ou depuis le widget CelPros.</div>
+      </section>
+
+      <!-- Section Sélection d'Intervention directe depuis le Popup -->
+      <section class="card" id="popup-selector-card">
+        <div class="card-title-row">
+          <span class="card-title">Choisir une intervention</span>
+          <button id="popup-btn-refresh" class="btn-link" title="Recharger les fiches">🔄 Actualiser</button>
+        </div>
+
+        <div class="popup-filter-pills-row">
+          <button type="button" class="popup-pill is-active" data-status="en_cours" id="popup-pill-en-cours">⚡ En cours (<span id="popup-count-en-cours">0</span>)</button>
+          <button type="button" class="popup-pill" data-status="all" id="popup-pill-all">Tous (<span id="popup-count-all">0</span>)</button>
+          <button type="button" class="popup-pill" data-status="termine" id="popup-pill-terminees">✅ Terminées (<span id="popup-count-terminees">0</span>)</button>
+        </div>
+
+        <div class="search-input-wrap" style="margin-top: 6px;">
+          <input type="text" id="popup-search-input" class="input" placeholder="Tapez le nom du dossier, client, FAT..." autocomplete="off" />
+          <button type="button" class="input-clear-btn" id="popup-search-clear" style="display:none;">✕</button>
+          <div class="popup-search-suggestions" id="popup-search-suggestions" style="display:none;"></div>
+        </div>
+
+        <div class="select-wrap" style="margin-top: 6px;">
+          <select id="popup-intervention-select" class="input">
+            <option value="">-- Choisir une intervention --</option>
+          </select>
+        </div>
       </section>
 
       <!-- Section Configuration API -->

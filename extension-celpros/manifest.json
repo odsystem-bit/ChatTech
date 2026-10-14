@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ChapTech CelPros Autofill - Celtiis Fibre",
   "short_name": "CelPros Autofill",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Automatisation et remplissage intelligent des formulaires d'intervention fibre sur Celtiis CelPros et FAT Automation depuis ChapTech / FibreTrack.",
   "icons": {
     "16": "icons/icon16.png",
@@ -25,12 +25,16 @@
   },
   "permissions": [
     "storage",
+    "unlimitedStorage",
     "activeTab",
     "clipboardWrite"
   ],
   "host_permissions": [
+    "*://*.celtiis.bj/*",
     "https://celpros.celtiis.bj/*",
+    "http://celpros.celtiis.bj/*",
     "https://fatautomation.celtiis.bj/*",
+    "http://fatautomation.celtiis.bj/*",
     "https://fibretrack.mantota.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
@@ -38,12 +42,16 @@
   "content_scripts": [
     {
       "matches": [
+        "*://*.celtiis.bj/*",
         "https://celpros.celtiis.bj/*",
+        "http://celpros.celtiis.bj/*",
         "https://fatautomation.celtiis.bj/*",
+        "http://fatautomation.celtiis.bj/*",
         "http://localhost/*",
         "http://127.0.0.1/*",
         "file:///*"
       ],
+      "all_frames": true,
       "js": [
         "content/field-mapping.js",
         "content/photo-filler.js",

@@ -3456,7 +3456,585 @@
   }
 }
 
+/* ==========================================================================
+   HOMEPAGE : RECHERCHE, ONGLETS DE CATÉGORIE, FILTRES ET CARTES D'INTERVENTION
+   ========================================================================== */
 
+/* 1. Section Recherche Globale */
+.home-search-section {
+  margin: 16px 0 14px;
+}
 
+.home-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  padding: 2px 8px;
+}
 
+.home-search-box:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
 
+.home-search-box .search-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  padding: 8px 6px 8px 8px;
+  flex-shrink: 0;
+}
+
+.home-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  padding: 10px 8px;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  min-width: 0;
+}
+
+.home-search-input::placeholder {
+  color: var(--text-light);
+  font-size: 13.5px;
+}
+
+.home-search-clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.home-search-clear-btn:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+/* 2. Onglets de Catégories (2 seulement : En cours & Terminées) */
+.home-category-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: #e2e8f0;
+  padding: 4px;
+  border-radius: 14px;
+  gap: 4px;
+  margin-bottom: 14px;
+}
+
+.home-tab-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.home-tab-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--text);
+}
+
+.home-tab-btn.is-active {
+  background: #ffffff;
+  color: var(--text);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.home-tab-btn .tab-label {
+  font-weight: 700;
+}
+
+.home-tab-btn .tab-counter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tab-counter-progress {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.home-tab-btn.is-active .tab-counter-progress {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.tab-counter-done {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.home-tab-btn.is-active .tab-counter-done {
+  background: #10b981;
+  color: #ffffff;
+}
+
+/* 3. Bandeau Résultats de Recherche */
+.home-search-summary {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.search-summary-text {
+  font-size: 13.5px;
+  color: var(--text);
+}
+
+.search-summary-text .query-highlight {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.search-filter-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.search-pill {
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  color: #475569;
+  padding: 5px 11px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.search-pill:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+.search-pill.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.25);
+}
+
+.search-pill-clear {
+  border: none;
+  background: transparent;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 5px 8px;
+  text-decoration: underline;
+}
+
+/* 4. Barre d'Outils (Tri & Technicien) */
+.home-filter-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-bottom: 14px;
+  padding: 4px 2px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filter-select {
+  appearance: none;
+  background: #ffffff url("data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='12'%20height='12'%20viewBox='0 0 24 24'%20fill='none'%20stroke='%2364748b'%20stroke-width='2.5'%3E%3Cpolyline%20points='6%209%2012%2015%2018%209'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 8px center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 28px 6px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: all 0.15s ease;
+}
+
+.filter-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-bg);
+}
+
+.filter-reset-btn {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.filter-reset-btn:hover {
+  background: #f8fafc;
+  color: var(--text);
+  border-color: #cbd5e1;
+}
+
+.home-loading-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: #eff6ff;
+  padding: 4px 10px;
+  border-radius: 12px;
+  margin-left: auto;
+}
+
+.loading-spinner-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  animation: pulse 1s infinite;
+}
+
+/* 5. Grille d'Interventions */
+.intervention-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .intervention-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (min-width: 1100px) {
+  .intervention-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* 6. Carte d'Intervention (InterventionCard.jsx) */
+.intv-card-wrapper {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.18s ease;
+  overflow: hidden;
+}
+
+.intv-card-wrapper:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+.intv-card-wrapper.is-progress {
+  border-left: 4px solid #2563eb;
+}
+
+.intv-card-wrapper.is-done {
+  border-left: 4px solid #10b981;
+}
+
+.intv-card-main {
+  flex: 1;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+  min-width: 0;
+}
+
+.intv-card-main:focus-visible {
+  background: #f8fafc;
+}
+
+.intv-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.intv-card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.intv-card-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  background: #f1f5f9;
+  color: #475569;
+  padding: 3px 6px;
+  border-radius: 6px;
+  letter-spacing: 0.03em;
+  flex-shrink: 0;
+}
+
+.intv-card-client {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Badges de Statut */
+.badge-warning {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fef3c7;
+}
+
+.badge-pending {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.badge-primary,
+.badge-progress {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #dbeafe;
+}
+
+.badge-success,
+.badge-done {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #d1fae5;
+}
+
+/* Chips d'informations rapides */
+.intv-card-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.intv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  border: 1px solid #f1f5f9;
+  text-decoration: none;
+}
+
+.intv-chip-phone {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #dcfce7;
+  transition: all 0.15s ease;
+}
+
+.intv-chip-phone:hover {
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.intv-chip-tech {
+  background: #f1f5f9;
+  color: #334155;
+  border-color: #e2e8f0;
+}
+
+.intv-chip-offer {
+  background: #faf5ff;
+  color: #6b21a8;
+  border-color: #f3e8ff;
+}
+
+.intv-chip-muted {
+  background: #f8fafc;
+  color: #94a3b8;
+  border-color: #f1f5f9;
+  font-style: italic;
+}
+
+/* Pied de Carte */
+.intv-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid #f8fafc;
+  font-size: 11.5px;
+}
+
+.intv-card-loc {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #64748b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 55%;
+}
+
+.intv-card-loc-empty {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.intv-card-date {
+  color: #64748b;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Bouton Supprimer Carte */
+.intv-card-delete-btn {
+  background: transparent;
+  border: none;
+  border-left: 1px solid #f1f5f9;
+  color: #cbd5e1;
+  width: 44px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.intv-card-delete-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-left-color: #fecaca;
+}
+
+.intv-card-delete-btn:active {
+  transform: scale(0.92);
+}
+
+/* 7. Pagination Accueil */
+.home-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding: 12px 14px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  gap: 10px;
+}
+
+.pagination-btn {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.pagination-info strong {
+  color: var(--text);
+}
+
+.pagination-count {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-light);
+  margin-top: 2px;
+}
