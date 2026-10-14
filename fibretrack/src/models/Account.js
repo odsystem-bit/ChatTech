@@ -1,13 +1,26 @@
 const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
-const STORAGE_KEY = "fibretrack_account";
+export const STORAGE_KEY = "fibretrack_account";
+export const CODE_STORAGE_KEY = "fibretrack_api_code";
 
 export function getApiAuthHeaders(codeOverride) {
-  const code = codeOverride || sessionStorage.getItem("fibretrack_api_code");
+  const code = codeOverride || getApiCode();
   return code ? { "X-User-Code": String(code) } : {};
 }
 
 export function getApiCode() {
-  return sessionStorage.getItem("fibretrack_api_code") || "";
+  try {
+    if (typeof localStorage !== "undefined") {
+      const stored = localStorage.getItem(CODE_STORAGE_KEY);
+      if (stored) return stored;
+    }
+    if (typeof sessionStorage !== "undefined") {
+      const sessionStored = sessionStorage.getItem(CODE_STORAGE_KEY);
+      if (sessionStored) return sessionStored;
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return "";
 }
 
 async function apiPost(action, body = {}, authCode) {
@@ -49,23 +62,48 @@ export async function validateCode(code) {
 }
 
 export function setCurrentAccount(account) {
+  if (!account) return;
   const { code, ...accountDetails } = account;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(accountDetails));
-  if (code) sessionStorage.setItem("fibretrack_api_code", String(code));
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(accountDetails));
+      if (code) {
+        localStorage.setItem(CODE_STORAGE_KEY, String(code));
+      }
+    }
+    if (typeof sessionStorage !== "undefined" && code) {
+      sessionStorage.setItem(CODE_STORAGE_KEY, String(code));
+    }
+  } catch (err) {
+    console.error("Erreur sauvegarde du compte:", err);
+  }
 }
 
 export function getCurrentAccount() {
-  if (!sessionStorage.getItem("fibretrack_api_code")) return null;
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
   try {
-    return JSON.parse(raw);
+    const code = getApiCode();
+    if (!code) return null;
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const account = JSON.parse(raw);
+    if (!account) return null;
+    return { ...account, code };
   } catch {
     return null;
   }
 }
 
 export function clearCurrentAccount() {
-  localStorage.removeItem(STORAGE_KEY);
-  sessionStorage.removeItem("fibretrack_api_code");
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(CODE_STORAGE_KEY);
+    }
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.removeItem(CODE_STORAGE_KEY);
+    }
+  } catch (err) {
+    console.error("Erreur déconnexion:", err);
+  }
 }

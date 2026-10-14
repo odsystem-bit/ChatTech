@@ -70,7 +70,7 @@ createRoot(document.getElementById('root')).render(
 // Enregistrement du Service Worker pour la PWA
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js?v=2.2.1').then(
+    navigator.serviceWorker.register('/sw.js?v=2.9.2').then(
       (registration) => {
         registration.update();
         console.log('[PWA] ServiceWorker enregistré avec succès:', registration.scope);

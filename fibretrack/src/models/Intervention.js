@@ -6,10 +6,11 @@ import { getApiAuthHeaders } from "./Account.js";
 const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
 async function apiPost(action, body = {}) {
-  const res = await fetch(`${API_URL}?action=${action}`, {
+  const res = await fetch(`${API_URL}?action=${action}&_t=${Date.now()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
     body: JSON.stringify(body),
+    cache: "no-store",
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
@@ -17,7 +18,11 @@ async function apiPost(action, body = {}) {
 }
 
 async function apiGet(action) {
-  const res = await fetch(`${API_URL}?action=${action}`, { headers: getApiAuthHeaders() });
+  const sep = action.includes("?") ? "&" : "?";
+  const res = await fetch(`${API_URL}?action=${action}${sep}_t=${Date.now()}`, {
+    headers: getApiAuthHeaders(),
+    cache: "no-store",
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;
@@ -114,6 +119,8 @@ export function ensureInterventionDefaults(data) {
     mac: String(data.mac ?? ""),
     sn: String(data.sn ?? ""),
     ont_sn: String(data.ont_sn ?? data.sn ?? ""),
+    updated_at: String(data.updated_at || data.modifie_le || ""),
+    modifie_le: String(data.modifie_le || data.updated_at || ""),
   };
 }
 
@@ -171,9 +178,21 @@ export function saveInterventionLocally(intervention) {
     if (existing) {
       if ((!defaulted.whatsapp_photos || defaulted.whatsapp_photos.length === 0) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
         defaulted.whatsapp_photos = existing.whatsapp_photos;
+      } else if (Array.isArray(defaulted.whatsapp_photos) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
+        const incomingIds = new Set(defaulted.whatsapp_photos.map((p) => p?.id).filter(Boolean));
+        const localOnly = existing.whatsapp_photos.filter((p) => p?.id && !incomingIds.has(p.id));
+        if (localOnly.length > 0) {
+          defaulted.whatsapp_photos = [...defaulted.whatsapp_photos, ...localOnly];
+        }
       }
       if ((!defaulted.points_gps || defaulted.points_gps.length === 0) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
         defaulted.points_gps = existing.points_gps;
+      } else if (Array.isArray(defaulted.points_gps) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
+        const incomingIds = new Set(defaulted.points_gps.map((p) => p?.id).filter(Boolean));
+        const localOnly = existing.points_gps.filter((p) => p?.id && !incomingIds.has(p.id));
+        if (localOnly.length > 0) {
+          defaulted.points_gps = [...defaulted.points_gps, ...localOnly];
+        }
       }
       if (!defaulted.signature_client && existing.signature_client) {
         defaulted.signature_client = existing.signature_client;

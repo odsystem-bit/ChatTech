@@ -147,7 +147,7 @@ export async function recognizeOntFromVideo(video, cropRect) {
  * @param {string} imageSrc
  * @returns {Promise<HTMLCanvasElement|string>}
  */
-export async function preprocessImageSourceForOcr(imageSrc) {
+export async function preprocessImageSourceForOcr(imageSrc, options = {}) {
   if (typeof document === "undefined" || typeof Image === "undefined") {
     return imageSrc;
   }
@@ -160,21 +160,29 @@ export async function preprocessImageSourceForOcr(imageSrc) {
         const maxDim = 1600;
         let w = img.naturalWidth || img.width;
         let h = img.naturalHeight || img.height;
-        if (w > maxDim || h > maxDim) {
-          if (w > h) {
-            h = Math.round((h * maxDim) / w);
-            w = maxDim;
+
+        // Si la photo contient potentiellement le bandeau GPS incrusté en bas (type GPS Map Camera),
+        // on rogne les 22% du bas pour que l'OCR ne voie QUE le boîtier FAT physique !
+        const cropBottom = options?.cropBottomBanner === true;
+        const sourceH = cropBottom ? Math.max(10, Math.round(h * 0.78)) : h;
+
+        let targetW = w;
+        let targetH = sourceH;
+        if (targetW > maxDim || targetH > maxDim) {
+          if (targetW > targetH) {
+            targetH = Math.round((targetH * maxDim) / targetW);
+            targetW = maxDim;
           } else {
-            w = Math.round((w * maxDim) / h);
-            h = maxDim;
+            targetW = Math.round((targetW * maxDim) / targetH);
+            targetH = maxDim;
           }
         }
-        canvas.width = Math.max(1, w);
-        canvas.height = Math.max(1, h);
+        canvas.width = Math.max(1, targetW);
+        canvas.height = Math.max(1, targetH);
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, sourceH, 0, 0, targetW, targetH);
 
-        const imgData = ctx.getImageData(0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, targetW, targetH);
         const d = imgData.data;
         const len = d.length;
         let minLum = 255;
@@ -220,7 +228,7 @@ export async function recognizeFatAndMsanFromImage(imageSrc) {
   }
   try {
     const worker = await getOcrWorker();
-    const preprocessed = await preprocessImageSourceForOcr(imageSrc);
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: true });
     const result = await worker.recognize(preprocessed);
     const text = result?.data?.text || "";
     const extracted = extractFatAndMsanFromText(text);

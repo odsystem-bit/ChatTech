@@ -1,17 +1,12 @@
 {
-  "version": "2.8.1",
-  "buildTime": "2026-10-14T12:30:00Z",
+  "version": "2.9.2",
+  "buildTime": "2026-10-14T16:25:00Z",
   "features": [
-    "Audit et sécurisation complète de l'intégrité des photos et interventions : sauvegarde certifiée 219 Mo sur Hostinger",
-    "Résolution du bug d'hydratation React : chargement complet des photos lors de l'ouverture et synchronisation automatique de l'état",
-    "Protection anti-écrasement dans saveInterventionLocally : interdiction absolue d'écraser des photos existantes par des payloads légers",
-    "Garantie de non-rejet serveur : déduction de stock non-bloquante évitant tout échec de sauvegarde sur le terrain",
-    "Repositionnement ergonomique du bouton Terminer l'intervention en fin de formulaire avec modale de confirmation obligatoire (zéro clic accidentel)",
-    "Refonte complète du module de Stock : dashboard KPI, recherche instantanée, filtres d'état, badges de disponibilité et mouvements express",
-    "Correction intégrale de la déduction de stock : déduction automatique de l'ONT, PTO, jarretière, tolérance des stocks négatifs tracés sans échec de sauvegarde",
-    "Module Poteaux Terrain : Annulation réelle du poteau sélectionné sans décalage, options indépendantes Petit Jean/SBEE et Traversé/Implanté/Armé, bouton + Ajouter en bas",
-    "Zone de saisie rapide des informations client avec préservation absolue des zéros initiaux et détection des conflits",
-    "Audit et validation à 100% de l'extension CelPros : extraction fidèle de toutes les colonnes et des caractéristiques de poteaux",
-    "Automatisation dynamique des ports FAT disponibles (ports 1 à 8) calculés dès la saisie du port accordé"
+    "Actualisation instantanée PWA iPhone & Web : bouton Actualiser en en-tête sur l'accueil, dans le formulaire et dans le rapport pour synchroniser immédiatement toutes les photos et modifications ajoutées par les agents",
+    "Synchronisation automatique au retour d'application (focus & visibilitychange) garantissant l'accès immédiat aux dernières données sur iPhone",
+    "Extraction OCR boîtier FAT de haute précision : détection automatique du MSAN (format ORGA / OGA) et de la Référence FAT (format FAT... ou numéro sous le MSAN)",
+    "Suppression du parasitage de l'incrustation GPS dans l'OCR pour renseigner fidèlement les cases MSAN et Référence FAT dans le rapport",
+    "Connexion persistante : les techniciens restent connectés en permanence sans devoir ressaisir leur code PIN à chaque ouverture",
+    "Gestion des photos additionnelles et téléchargement direct haute résolution dans tous les modules"
   ]
 }

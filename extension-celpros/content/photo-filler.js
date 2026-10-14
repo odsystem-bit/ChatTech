@@ -104,6 +104,22 @@
     return null;
   }
 
+  // Vérifie si une photo doit être rigoureusement exclue de l'injection CelPros
+  // Les photos additionnelles servent à d'autres fins internes et ne doivent JAMAIS être poussées vers CelPros.
+  function isExcludedFromCelpros(p) {
+    if (!p) return true;
+    if (p.additionnelle === true || p.is_additionnelle === true || p.exclude_celpros === true) return true;
+    if (p.slot === "additionnelle" || p.type === "additionnelle" || p.category === "additionnelle") return true;
+    const desc = getPhotoDescription(p);
+    if (desc.includes("additionnelle")) return true;
+    return false;
+  }
+
+  function getEligibleWhatsappPhotos(data) {
+    const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    return wa.filter((p) => !isExcludedFromCelpros(p));
+  }
+
   // Règles de reconnaissance des zones d'upload CelPros
   // Chaque règle n'extrait la photo QUE si elle existe réellement dans l'intervention FibreTrack.
   const PHOTO_SLOT_RULES = [
@@ -121,7 +137,7 @@
         }
 
         // 2. Photo spécifiquement étiquetée ONT dans whatsapp_photos
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const ontPhoto = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "ont_sn" || p.type === "ont_sn") return true;
@@ -145,7 +161,7 @@
           if (src) return { src, name: "fat_raccordement.jpg" };
         }
 
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const fatPhoto = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "fat" || p.type === "fat") return true;
@@ -162,7 +178,7 @@
       label: "Image Scan FAT",
       keywords: ["image scan fat", "scan fat", "code barre fat", "etiquette fat"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const scanPhoto = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "scan_fat" || p.type === "scan_fat") return true;
@@ -178,7 +194,7 @@
       label: "Image entrée câble interne",
       keywords: ["entree cable interne", "cable interne", "image entree cable interne", "interne"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "cable_interne" || p.type === "cable_interne") return true;
@@ -194,7 +210,7 @@
       label: "Image entrée câble externe",
       keywords: ["entree cable externe", "cable externe", "image entree cable externe", "externe"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "cable_externe" || p.type === "cable_externe") return true;
@@ -210,7 +226,7 @@
       label: "Image fibre au FAT",
       keywords: ["image fibre au fat", "fibre au fat", "fibre fat"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "fibre_fat" || p.type === "fibre_fat") return true;
@@ -226,7 +242,7 @@
       label: "Image mesure au FAT",
       keywords: ["image mesure au fat", "mesure au fat", "mesure fat", "photometre fat"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "mesure_fat" || p.type === "mesure_fat") return true;
@@ -242,7 +258,7 @@
       label: "Image mesure PTO",
       keywords: ["image mesure pto", "mesure pto", "mesure au pto", "photometre pto"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "mesure_pto" || p.type === "mesure_pto") return true;
@@ -258,7 +274,7 @@
       label: "Image test débit câble",
       keywords: ["image test debit cable", "test debit cable", "debit cable"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "debit_cable" || p.type === "debit_cable") return true;
@@ -274,7 +290,7 @@
       label: "Image test débit Wifi",
       keywords: ["image test debit wifi", "test debit wifi", "debit wifi"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "debit_wifi" || p.type === "debit_wifi") return true;
@@ -290,7 +306,7 @@
       label: "Image combiné",
       keywords: ["image combine", "combine", "photo combine"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "combine" || p.type === "combine") return true;
@@ -306,7 +322,7 @@
       label: "Image fiche combiné",
       keywords: ["image fiche combine", "fiche combine", "fiche raccordement"],
       getPhoto: (data) => {
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "fiche_combine" || p.type === "fiche_combine") return true;
@@ -325,7 +341,7 @@
         if (data?.signature_client && typeof data.signature_client === "string" && data.signature_client.trim().length > 100) {
           return { src: data.signature_client, name: "signature_client.png" };
         }
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = getEligibleWhatsappPhotos(data);
         const match = wa.find((p) => {
           if (!getPhotoSource(p)) return false;
           if (p.slot === "contrat_client" || p.type === "contrat_client") return true;
@@ -539,7 +555,7 @@
         }
       }
     }
-    const wa = Array.isArray(interventionData?.whatsapp_photos) ? interventionData.whatsapp_photos : [];
+    const wa = getEligibleWhatsappPhotos(interventionData);
     for (const p of wa) {
       const src = getPhotoSource(p);
       if (!src) continue;
@@ -591,6 +607,8 @@
 
   return {
     PHOTO_SLOT_RULES,
+    isExcludedFromCelpros,
+    getEligibleWhatsappPhotos,
     dataUrlToFile,
     srcToFile,
     injectFileIntoInput,

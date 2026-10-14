@@ -260,13 +260,31 @@ export function extractFatAndMsanFromText(text) {
   let foundMsan = null;
 
   // 0. Correction préliminaire des confusions OCR fréquentes
-  // "0GA" -> "OGA" en début de mot
+  // "0RGA" -> "ORGA", "0GA" -> "OGA", "F4T" -> "FAT", espaces internes OCR
   const normalized = text
+    .replace(/\b0RGA(?=[-_0-9A-Za-z]|\b)/gi, "ORGA")
     .replace(/\b0GA(?=[-_0-9A-Za-z]|\b)/gi, "OGA")
+    .replace(/\bO\s*R\s*G\s*A\b/gi, "ORGA")
+    .replace(/\bF\s*A\s*T\b/gi, "FAT")
     .replace(/\bF4T\b/gi, "FAT");
 
-  // 1. Recherche explicite par préfixes textuels (MSAN: ..., REF FAT: ...)
-  const msanPrefixMatch = normalized.match(
+  // 1. Filtrer les lignes parasites (bannières GPS incrustées, métadonnées, etc.)
+  const cleanLines = normalized
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .filter((l) => {
+      if (!l) return false;
+      // Exclure les bruits du bandeau GPS (type GPS Map Camera) sans jeter les numéros purs
+      if (/^(?:Lat|Lng|Latitude|Longitude|Lieu|Pr[eé]cision|Horodatage|Bo[iî]tier\s*FAT\s*[-–—]|Date\s*:)[\s.:]/i.test(l)) return false;
+      if (/^±\s*\d+/i.test(l)) return false;
+      if (/^Bo[iî]tier\s*FAT\s*[-–—]/i.test(l)) return false;
+      return true;
+    });
+
+  const cleanText = cleanLines.join("\n");
+
+  // 2. Recherche explicite par préfixes textuels (MSAN: ..., REF FAT: ...)
+  const msanPrefixMatch = cleanText.match(
     /(?:MSAN|M\.S\.A\.N)[\s.:=-]+([A-Za-z0-9_\-\.\/]+(?:[ \t]+[A-Za-z0-9_\-\.\/]+)?)/i
   );
   if (msanPrefixMatch && msanPrefixMatch[1]) {
@@ -276,8 +294,8 @@ export function extractFatAndMsanFromText(text) {
     }
   }
 
-  const fatPrefixMatch = normalized.match(
-    /(?:R[EÉ]F(?:[EÉ]RENCE)?\s*(?:FAT)?|R[EÉ]F\s*FAT|BOITIER\s*FAT)[\s.:=-]+([A-Za-z0-9_\-\.\/]+(?:[ \t]+[A-Za-z0-9_\-\.\/]+)?)/i
+  const fatPrefixMatch = cleanText.match(
+    /(?:R[EÉ]F(?:[EÉ]RENCE)?\s*FAT|R[EÉ]F\s*FAT)[\s.:=-]+([A-Za-z0-9_\-\.\/]+(?:[ \t]+[A-Za-z0-9_\-\.\/]+)?)/i
   );
   if (fatPrefixMatch && fatPrefixMatch[1]) {
     const raw = fatPrefixMatch[1].trim();
@@ -286,46 +304,45 @@ export function extractFatAndMsanFromText(text) {
     }
   }
 
-  // 2. Recherche par signature de code OGA (ex: OGA-01, OGA 02, OGA04, OGA-CADJEHOUN-02, OGA_12, OGA/01)
+  // 3. Recherche par signature de code MSAN (ORGA ou OGA : ex: ORGA-PL51, ORGA 12, ORGA04, OGA-01, OGA-CADJEHOUN-02)
   if (!foundMsan) {
-    const ogaMatch = normalized.match(/\b(OGA[\s\-_.:]?[A-Za-z0-9]+(?:[\-_.\/][A-Za-z0-9]+)*)\b/i);
-    if (ogaMatch && ogaMatch[1]) {
-      foundMsan = ogaMatch[1].trim();
+    const msanMatch = cleanText.match(/\b((?:ORGA|OGA)[\s\-_.:]?[A-Za-z0-9]+(?:[\-_.\/][A-Za-z0-9]+)*)\b/i);
+    if (msanMatch && msanMatch[1]) {
+      foundMsan = msanMatch[1].trim();
     }
   }
 
-  // 3. Recherche par signature de code FAT (ex: FAT-04, FAT 04, FAT04, FAT_12, FAT-01/02)
+  // 4. Recherche par signature de code FAT (ex: FAT-04, FAT 04, FAT 164, FAT164, FAT_12, FAT-01/02)
   if (!foundFat) {
-    const fatMatch = normalized.match(/\b(FAT[\s\-_.:]?[0-9A-Za-z]+(?:[\-_.\/][0-9A-Za-z]+)*)\b/i);
+    const fatMatch = cleanText.match(/\b(FAT[\s\-_.:]?[0-9A-Za-z]+(?:[\-_.\/][0-9A-Za-z]+)*)\b/i);
     if (fatMatch && fatMatch[1]) {
       foundFat = fatMatch[1].trim();
     }
   }
 
-  // 4. Analyse multi-lignes positionnelle (MSAN au-dessus, FAT en dessous)
-  const lines = normalized
-    .split(/[\r\n]+/)
-    .map((l) => l.trim())
-    .filter(Boolean);
+  // 5. Analyse multi-lignes positionnelle (MSAN au-dessus, FAT en dessous sur le boîtier)
+  for (let i = 0; i < cleanLines.length; i++) {
+    const line = cleanLines[i];
+    const isMsanLine = /^(?:ORGA|OGA)/i.test(line) || (foundMsan && line.includes(foundMsan));
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    if (!foundMsan && /^OGA/i.test(line)) {
-      foundMsan = line;
-    }
-
-    if (!foundFat && /^FAT/i.test(line)) {
-      foundFat = line;
-    }
-
-    // Si on a un MSAN sur cette ligne et pas encore de FAT, vérifier la ligne suivante
-    if (foundMsan && !foundFat && i + 1 < lines.length) {
-      const nextLine = lines[i + 1];
+    // Règle métier terrain : MSAN au-dessus (généralement ORGA ou OGA) et référence FAT en-dessous
+    if (isMsanLine && !foundFat && i + 1 < cleanLines.length) {
+      const nextLine = cleanLines[i + 1];
       if (/^FAT/i.test(nextLine)) {
         foundFat = nextLine;
       } else if (/^\d{1,4}[A-Za-z]?$/.test(nextLine)) {
         foundFat = `FAT-${nextLine}`;
+      } else if (/^[A-Za-z0-9\-_.\/]{1,8}$/.test(nextLine) && !/^(?:ORGA|OGA)/i.test(nextLine)) {
+        foundFat = `FAT-${nextLine}`;
+      }
+    }
+
+    // Cas inverse : si FAT est identifié en premier sur une ligne et que la ligne précédente ressemble à un MSAN
+    const isFatLine = /^FAT/i.test(line) || (foundFat && line.includes(foundFat));
+    if (isFatLine && !foundMsan && i > 0) {
+      const prevLine = cleanLines[i - 1];
+      if (/^(?:ORGA|OGA)/i.test(prevLine) || /^[A-Z]{2,6}[-_][A-Z0-9]+$/i.test(prevLine)) {
+        foundMsan = prevLine;
       }
     }
   }

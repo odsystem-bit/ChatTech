@@ -328,3 +328,46 @@ test('FormFiller - autofillPage leaves unrecorded fields empty and does not inve
   assert.equal(elOffre.value, ''); // Pas d'offre souscrite -> reste vide
 });
 
+test('PhotoFiller - Additional photos (photos additionnelles) are strictly excluded from CelPros upload', () => {
+  const intvWithAdditionnelle = {
+    points_gps: [],
+    whatsapp_photos: [
+      {
+        id: 'photo-add-1',
+        label: 'Photo additionnelle',
+        type: 'additionnelle',
+        slot: 'additionnelle',
+        additionnelle: true,
+        is_additionnelle: true,
+        exclude_celpros: true,
+        url: 'data:image/jpeg;base64,additionnellePhoto123',
+        description: 'Photo additionnelle prise sur le terrain',
+      },
+      {
+        id: 'photo-add-2',
+        label: 'Photo additionnelle (façade poteau)',
+        type: 'additionnelle',
+        slot: 'additionnelle',
+        additionnelle: true,
+        is_additionnelle: true,
+        exclude_celpros: true,
+        url: 'data:image/jpeg;base64,additionnellePhoto456',
+        description: 'Photo additionnelle avec mot fat ou poteau',
+      },
+    ],
+  };
+
+  // Aucune règle CelPros ne doit extraire une photo additionnelle
+  for (const rule of PhotoFiller.PHOTO_SLOT_RULES) {
+    const photo = rule.getPhoto(intvWithAdditionnelle);
+    assert.equal(photo, null, `Slot ${rule.key} ne doit JAMAIS recevoir de photo additionnelle`);
+  }
+
+  // isExcludedFromCelpros doit renvoyer true pour ces photos
+  assert.equal(PhotoFiller.isExcludedFromCelpros(intvWithAdditionnelle.whatsapp_photos[0]), true);
+  assert.equal(PhotoFiller.isExcludedFromCelpros(intvWithAdditionnelle.whatsapp_photos[1]), true);
+
+  // Et false pour une vraie photo CelPros
+  assert.equal(PhotoFiller.isExcludedFromCelpros({ slot: 'fat', url: 'data:image/jpeg;base64,fat1' }), false);
+});
+

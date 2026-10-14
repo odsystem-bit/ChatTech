@@ -18,6 +18,8 @@ import {
 } from "./models/Intervention";
 import { formatDateFR } from "./lib/date";
 import InstallPwaButton from "./components/InstallPwaButton";
+import InterventionCard from "./components/InterventionCard";
+import { filterAndOrganizeInterventions } from "./lib/interventionFilters";
 
 export default function App() {
   const [user, setUser] = useState(getCurrentAccount());
@@ -27,6 +29,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [openingId, setOpeningId] = useState(null);
   const [creatingNew, setCreatingNew] = useState(false);
+
+  // Filtres, recherche, pagination accueil
+  const [activeTab, setActiveTab] = useState("en_cours"); // 'en_cours' | 'terminees'
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchTabFilter, setSearchTabFilter] = useState("all"); // 'all' | 'en_cours' | 'terminees'
+  const [technicienFilter, setTechnicienFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("date_desc");
+  const [page, setPage] = useState(1);
 
   async function refreshInterventions() {
     setLoading(true);
@@ -44,6 +54,20 @@ export default function App() {
       refreshInterventions();
     }
   }, [user]);
+
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.visibilityState === "visible" && user && screen === "home") {
+        refreshInterventions();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+    };
+  }, [user, screen]);
 
   // ===== Back button handler for Android WebView =====
   useEffect(() => {
@@ -116,8 +140,21 @@ export default function App() {
       // Synchronisation transparente en arrière-plan
       getIntervention(id)
         .then((fresh) => {
-          if (fresh && fresh.updated_at !== localFull.updated_at) {
-            const merged = { ...fresh, _fully_loaded: true };
+          if (!fresh) return;
+          const freshTime = fresh.updated_at || fresh.modifie_le || "";
+          const localTime = localFull.updated_at || localFull.modifie_le || "";
+          const freshPhotos = Array.isArray(fresh.whatsapp_photos) ? fresh.whatsapp_photos : [];
+          const localPhotos = Array.isArray(localFull.whatsapp_photos) ? localFull.whatsapp_photos : [];
+          const freshGps = Array.isArray(fresh.points_gps) ? fresh.points_gps : [];
+          const localGps = Array.isArray(localFull.points_gps) ? localFull.points_gps : [];
+
+          const hasPhotoDiff = freshPhotos.length !== localPhotos.length ||
+            freshPhotos.some((fp) => !localPhotos.some((lp) => (lp.id && lp.id === fp.id) || (lp.slot && lp.slot === fp.slot && lp.url === fp.url)));
+          const hasGpsDiff = freshGps.length !== localGps.length;
+          const hasTimeDiff = freshTime && localTime && freshTime !== localTime;
+
+          if (hasTimeDiff || hasPhotoDiff || hasGpsDiff) {
+            const merged = { ...localFull, ...fresh, _fully_loaded: true };
             saveInterventionLocally(merged);
             setActiveIntervention(merged);
           }
@@ -155,7 +192,7 @@ export default function App() {
   }
 
   async function handleDeleteIntervention(id, e) {
-    e.stopPropagation();
+    if (e && e.stopPropagation) e.stopPropagation();
     if (openingId) return;
     if (confirm("Supprimer cette intervention ?")) {
       setOpeningId(id);
@@ -169,6 +206,44 @@ export default function App() {
     }
   }
 
+  function handleSearchChange(e) {
+    setSearchQuery(e.target.value);
+    setSearchTabFilter("all");
+    setPage(1);
+  }
+
+  function handleClearSearch() {
+    setSearchQuery("");
+    setSearchTabFilter("all");
+    setPage(1);
+  }
+
+  function handleTabChange(tab) {
+    setActiveTab(tab);
+    setPage(1);
+  }
+
+  function handleSearchTabChange(tabFilter) {
+    setSearchTabFilter(tabFilter);
+    setPage(1);
+  }
+
+  function handleTechnicienChange(e) {
+    setTechnicienFilter(e.target.value);
+    setPage(1);
+  }
+
+  function handleSortChange(e) {
+    setSortBy(e.target.value);
+    setPage(1);
+  }
+
+  function handleResetFilters() {
+    setTechnicienFilter("all");
+    setSortBy("date_desc");
+    setPage(1);
+  }
+
   function handleCloseForm() {
     goToHome();
   }
@@ -178,6 +253,17 @@ export default function App() {
     setActiveIntervention(intervention);
     navigateTo("report");
   }
+
+  // Filtrage, recherche, tri et pagination des interventions pour l'accueil
+  const filteredData = filterAndOrganizeInterventions(interventions, {
+    activeTab,
+    searchQuery,
+    searchTabFilter,
+    technicienFilter,
+    sortBy,
+    page,
+    pageSize: 12,
+  });
 
   if (!user) {
     return <LoginScreen onLogin={handleLogin} />;
@@ -229,13 +315,26 @@ export default function App() {
             </svg>
             CHAPTECH
           </h1>
-          <button type="button" className="btn-icon" onClick={handleLogout} aria-label="Déconnexion">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn-header-refresh"
+              onClick={refreshInterventions}
+              disabled={loading}
+              aria-label="Actualiser les interventions"
+              title="Actualiser les interventions en direct"
+            >
+              <span className={loading ? "spin-icon" : ""}>🔄</span>
+              <span className="btn-refresh-label">{loading ? "…" : "Actualiser"}</span>
+            </button>
+            <button type="button" className="btn-icon" onClick={handleLogout} aria-label="Déconnexion">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <p>Bonjour, <strong>{user.nom}</strong></p>
       </header>
@@ -292,48 +391,236 @@ export default function App() {
           )}
         </div>
 
-        <h3 className="section-title">
-          Interventions ({interventions.length}){loading && " …"}
-        </h3>
-        {interventions.length === 0 ? (
+        {/* ===== RECHERCHE GLOBALE ===== */}
+        <section className="home-search-section" aria-label="Recherche d'interventions">
+          <div className="home-search-box">
+            <span className="search-icon" aria-hidden="true">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+            </span>
+            <input
+              type="search"
+              className="home-search-input"
+              placeholder="Rechercher par numéro, client, téléphone, technicien…"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              aria-label="Recherche par numéro, client, téléphone, technicien"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                className="home-search-clear-btn"
+                onClick={handleClearSearch}
+                title="Effacer la recherche"
+                aria-label="Effacer la recherche"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        </section>
+
+        {/* ===== CATÉGORIES PRINCIPALES (2 SEULEMENT) OU RÉSULTATS DE RECHERCHE ===== */}
+        {!filteredData.hasSearch ? (
+          <nav className="home-category-tabs" aria-label="Catégories d'interventions">
+            <button
+              type="button"
+              className={`home-tab-btn ${activeTab === "en_cours" ? "is-active" : ""}`}
+              onClick={() => handleTabChange("en_cours")}
+              aria-selected={activeTab === "en_cours"}
+            >
+              <span className="tab-label">En cours</span>
+              <span className="tab-counter tab-counter-progress">{filteredData.enCoursCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`home-tab-btn ${activeTab === "terminees" ? "is-active" : ""}`}
+              onClick={() => handleTabChange("terminees")}
+              aria-selected={activeTab === "terminees"}
+            >
+              <span className="tab-label">Terminées</span>
+              <span className="tab-counter tab-counter-done">{filteredData.termineesCount}</span>
+            </button>
+          </nav>
+        ) : (
+          <div className="home-search-summary">
+            <div className="search-summary-text">
+              <strong>{filteredData.totalItems}</strong> résultat{filteredData.totalItems > 1 ? "s" : ""} trouvé{filteredData.totalItems > 1 ? "s" : ""} pour « <span className="query-highlight">{searchQuery}</span> »
+            </div>
+            <div className="search-filter-pills">
+              <button
+                type="button"
+                className={`search-pill ${searchTabFilter === "all" ? "is-active" : ""}`}
+                onClick={() => handleSearchTabChange("all")}
+              >
+                Tous ({filteredData.searchEnCoursCount + filteredData.searchTermineesCount})
+              </button>
+              <button
+                type="button"
+                className={`search-pill ${searchTabFilter === "en_cours" ? "is-active" : ""}`}
+                onClick={() => handleSearchTabChange("en_cours")}
+              >
+                En cours ({filteredData.searchEnCoursCount})
+              </button>
+              <button
+                type="button"
+                className={`search-pill ${searchTabFilter === "terminees" ? "is-active" : ""}`}
+                onClick={() => handleSearchTabChange("terminees")}
+              >
+                Terminées ({filteredData.searchTermineesCount})
+              </button>
+              <button
+                type="button"
+                className="search-pill-clear"
+                onClick={handleClearSearch}
+              >
+                Effacer
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ===== BARRE D'OUTILS : TRI & FILTRE TECHNICIEN ===== */}
+        <div className="home-filter-toolbar">
+          <div className="filter-group">
+            <label htmlFor="filter-sort" className="filter-label">Tri</label>
+            <select
+              id="filter-sort"
+              className="filter-select"
+              value={sortBy}
+              onChange={handleSortChange}
+            >
+              <option value="date_desc">Date récente</option>
+              <option value="date_asc">Date ancienne</option>
+              <option value="client_asc">Client (A-Z)</option>
+              <option value="client_desc">Client (Z-A)</option>
+            </select>
+          </div>
+
+          <div className="filter-group">
+            <label htmlFor="filter-tech" className="filter-label">Technicien</label>
+            <select
+              id="filter-tech"
+              className="filter-select"
+              value={technicienFilter}
+              onChange={handleTechnicienChange}
+            >
+              <option value="all">Tous ({filteredData.techniciens.length})</option>
+              {filteredData.techniciens.map((tech) => (
+                <option key={tech} value={tech}>
+                  {tech}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {(technicienFilter !== "all" || sortBy !== "date_desc") && (
+            <button
+              type="button"
+              className="filter-reset-btn"
+              onClick={handleResetFilters}
+              title="Réinitialiser le tri et les filtres"
+            >
+              Réinitialiser
+            </button>
+          )}
+
+          {loading && (
+            <span className="home-loading-chip" title="Actualisation en cours…">
+              <span className="loading-spinner-dot" />
+              Actualisation…
+            </span>
+          )}
+        </div>
+
+        {/* ===== LISTE DES INTERVENTIONS OU ÉTAT VIDE ===== */}
+        {filteredData.items.length === 0 ? (
           <div className="empty-state">
-            <p style={{ fontSize: 28, marginBottom: 8 }}>📋</p>
-            Aucune intervention. Créez-en une pour commencer.
+            {filteredData.hasSearch ? (
+              <>
+                <p style={{ fontSize: 32, marginBottom: 8 }}>🔍</p>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
+                  Aucun résultat trouvé
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
+                  Aucune intervention ne correspond à votre recherche « {searchQuery} ».
+                </div>
+                <button type="button" className="btn-secondary" onClick={handleClearSearch}>
+                  Effacer la recherche
+                </button>
+              </>
+            ) : activeTab === "en_cours" ? (
+              <>
+                <p style={{ fontSize: 32, marginBottom: 8 }}>⚡</p>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
+                  Aucune intervention en cours
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
+                  Toutes vos interventions sont terminées ou vous n'en avez pas encore créé.
+                </div>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={startNewIntervention}
+                  disabled={creatingNew}
+                >
+                  + Créer une intervention
+                </button>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: 32, marginBottom: 8 }}>📁</p>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
+                  Aucune intervention terminée
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  Les interventions clôturées apparaîtront automatiquement ici.
+                </div>
+              </>
+            )}
           </div>
         ) : (
-          <ul className="intervention-list">
-            {interventions.map((intv) => (
-              <li key={intv.id}>
-                <button
-                  type="button"
-                  onClick={() => openIntervention(intv)}
-                  className="intv-card-btn"
-                  disabled={openingId === intv.id}
-                >
-                  <div className="intv-row">
-                    <strong>{intv.nom_client || "Nouveau client"}</strong>
-                    <span className={`badge ${intv.statut === "termine" ? "badge-done" : "badge-progress"}`}>
-                      {openingId === intv.id ? "Ouverture…" : (intv.statut === "termine" ? "Terminé" : "En cours")}
-                    </span>
-                  </div>
-                  <div className="badge-meta">
-                    {formatDateFR(intv.date)} · {intv.nom_technicien || "N/A"}
-                  </div>
-                </button>
-                <button
-                  type="button"
-                  className="delete-intv-btn"
-                  onClick={(e) => handleDeleteIntervention(intv.id, e)}
-                  aria-label="Supprimer"
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-                  </svg>
-                </button>
-              </li>
+          <div className="intervention-grid">
+            {filteredData.items.map((intv) => (
+              <InterventionCard
+                key={intv.id}
+                intervention={intv}
+                onOpen={openIntervention}
+                onDelete={handleDeleteIntervention}
+                isOpening={openingId === intv.id}
+              />
             ))}
-          </ul>
+          </div>
+        )}
+
+        {/* ===== PAGINATION ===== */}
+        {filteredData.totalPages > 1 && (
+          <div className="home-pagination" aria-label="Pagination des interventions">
+            <button
+              type="button"
+              className="pagination-btn"
+              disabled={filteredData.currentPage <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              aria-label="Page précédente"
+            >
+              ← Précédent
+            </button>
+            <div className="pagination-info">
+              Page <strong>{filteredData.currentPage}</strong> sur <strong>{filteredData.totalPages}</strong>
+              <span className="pagination-count">({filteredData.totalItems} interventions)</span>
+            </div>
+            <button
+              type="button"
+              className="pagination-btn"
+              disabled={filteredData.currentPage >= filteredData.totalPages}
+              onClick={() => setPage((p) => Math.min(filteredData.totalPages, p + 1))}
+              aria-label="Page suivante"
+            >
+              Suivant →
+            </button>
+          </div>
         )}
       </main>
     </div>

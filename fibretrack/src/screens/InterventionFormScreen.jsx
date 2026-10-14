@@ -3,6 +3,7 @@ import Tabs from "../components/Tabs";
 import { TextField, CheckField, SelectField, ScannableField, GeocodableField } from "../components/FormField";
 import SignaturePad from "../components/SignaturePad";
 import {
+  getIntervention,
   getInterventionLight,
   saveIntervention,
   saveInterventionLocally,
@@ -206,15 +207,16 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     dataRef.current = data;
   }, [data]);
 
-  // Synchronisation sécurisée si les photos ou points arrivent depuis un rechargement
+  // Synchronisation sécurisée si les photos ou points arrivent depuis un rechargement ou autre agent
   useEffect(() => {
     if (!intervention) return;
     if (Array.isArray(intervention.whatsapp_photos) && intervention.whatsapp_photos.length > 0) {
       setWhatsappPhotos((prev) => {
         if (!prev || prev.length === 0) return intervention.whatsapp_photos;
-        const prevIds = new Set(prev.map((p) => p?.id || p?.slot).filter(Boolean));
-        const missing = intervention.whatsapp_photos.filter((p) => !prevIds.has(p?.id || p?.slot));
-        return missing.length > 0 ? [...prev, ...missing] : prev;
+        const incoming = intervention.whatsapp_photos;
+        const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
+        const localUnsynced = prev.filter((p) => p?.id && !incomingIds.has(p.id));
+        return [...incoming, ...localUnsynced];
       });
     }
     if (Array.isArray(intervention.points_gps) && intervention.points_gps.length > 0) {
@@ -222,7 +224,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         if (!prev.points_gps || prev.points_gps.length === 0) {
           return { ...prev, points_gps: intervention.points_gps };
         }
-        return prev;
+        const incoming = intervention.points_gps;
+        const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
+        const localUnsynced = (prev.points_gps || []).filter((p) => p?.id && !incomingIds.has(p.id));
+        return { ...prev, points_gps: [...incoming, ...localUnsynced] };
       });
     }
   }, [intervention]);
@@ -362,6 +367,64 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       clearInterval(timer);
     };
   }, [data.id]);
+
+  const [manualRefreshing, setManualRefreshing] = useState(false);
+
+  const handleManualRefreshIntervention = useCallback(async () => {
+    if (manualRefreshing || !data.id) return;
+    setManualRefreshing(true);
+    setSaveStatus("Actualisation en direct…");
+    try {
+      const fresh = await getIntervention(data.id);
+      if (fresh) {
+        const fullIntervention = { ...fresh, _fully_loaded: true };
+        saveInterventionLocally(fullIntervention);
+        setData((prev) => {
+          const merged = { ...fullIntervention };
+          for (const dirtyField of dirtyFieldsRef.current) {
+            if (dirtyField.startsWith("materiel_pose.")) {
+              const desig = dirtyField.replace("materiel_pose.", "");
+              merged.materiel_pose = {
+                ...(merged.materiel_pose || {}),
+                [desig]: prev.materiel_pose?.[desig],
+              };
+            } else if (dirtyField in prev) {
+              merged[dirtyField] = prev[dirtyField];
+            }
+          }
+          return merged;
+        });
+
+        if (Array.isArray(fullIntervention.whatsapp_photos)) {
+          setWhatsappPhotos((prev) => {
+            const incoming = fullIntervention.whatsapp_photos;
+            const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
+            const localUnsynced = prev.filter((p) => p?.id && !incomingIds.has(p.id));
+            return [...incoming, ...localUnsynced];
+          });
+        }
+        setSaveStatus("✓ Données actualisées");
+      }
+    } catch (err) {
+      console.warn("Manual refresh failed:", err);
+      setSaveStatus("Erreur réseau");
+    } finally {
+      setManualRefreshing(false);
+      setTimeout(() => setSaveStatus(""), 3500);
+    }
+  }, [data.id, manualRefreshing]);
+
+  useEffect(() => {
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && data.id && !finishingRef.current && dirtyFieldsRef.current.size === 0) {
+        handleManualRefreshIntervention();
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [data.id, handleManualRefreshIntervention]);
 
   function update(field, value) {
     if (field === "points_gps") {
@@ -757,8 +820,17 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   // ===== Gestion des Boîtes de Photos CelPros =====
 
   function getPhotoForSlot(slotKey) {
-    // 1. Recherche par slot ou type direct dans whatsapp_photos
-    const direct = whatsappPhotos.find((p) => p && (p.slot === slotKey || p.type === slotKey));
+    // 1. Recherche par slot ou type direct dans whatsapp_photos (en excluant les photos additionnelles / hors CelPros)
+    const direct = whatsappPhotos.find(
+      (p) =>
+        p &&
+        !p.additionnelle &&
+        !p.is_additionnelle &&
+        !p.exclude_celpros &&
+        p.slot !== "additionnelle" &&
+        p.type !== "additionnelle" &&
+        (p.slot === slotKey || p.type === slotKey)
+    );
     if (direct) return direct;
 
     // 2. Recherche dans les points GPS pour FAT ou Abonné (ONT)
@@ -793,10 +865,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
     }
 
-    // 3. Repli par mots-clés dans les métadonnées de la photo
+    // 3. Repli par mots-clés dans les métadonnées de la photo (en excluant les photos additionnelles / hors CelPros)
     const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
     if (slotDef) {
       const match = whatsappPhotos.find((p) => {
+        if (p.additionnelle || p.is_additionnelle || p.exclude_celpros || p.slot === "additionnelle" || p.type === "additionnelle") return false;
         const desc = `${p.name || ""} ${p.label || ""} ${p.description || ""} ${p.type || ""}`.toLowerCase();
         return slotDef.keywords.some((kw) => desc.includes(kw));
       });
@@ -884,7 +957,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
       // Si c'est la photo du boîtier FAT, extraction automatique OCR de Référence FAT et MSAN !
       if (slotKey === "fat") {
-        runFatOcrOnPhoto(embeddedPhoto);
+        runFatOcrOnPhoto(photoDataUrl);
       }
     } catch (err) {
       setSlotActionFeedback(`Erreur : ${err.message}`);
@@ -1373,31 +1446,46 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (!file) return;
 
     setWaCapturing(true);
-    setWhatsappStatus("Capture photo geolocalisee…");
+    setWhatsappStatus("Capture de la photo additionnelle…");
     try {
-      const [photoDataUrl, pos] = await Promise.all([
-        readFileAsDataUrl(file),
-        getCurrentPositionHighAccuracy(),
-      ]);
-
+      const photoDataUrl = await readFileAsDataUrl(file);
       if (e.target) e.target.value = "";
 
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const precision_m = pos.coords.accuracy;
+      let pos = null;
+      try {
+        pos = await getCurrentPositionHighAccuracy();
+      } catch (geoErr) {
+        console.warn("GPS non disponible ou timeout:", geoErr);
+      }
+
+      const lat = pos?.coords?.latitude ?? null;
+      const lng = pos?.coords?.longitude ?? null;
+      const precision_m = pos?.coords?.accuracy ?? null;
       const horodatage = new Date().toISOString();
 
-      setWhatsappStatus("Geolocalisation…");
-      const lieu = await reverseGeocode(lat, lng);
+      let lieu = "";
+      if (lat != null && lng != null) {
+        setWhatsappStatus("Géolocalisation…");
+        try {
+          lieu = await reverseGeocode(lat, lng);
+        } catch {}
+      }
 
-      const embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
-        type: `Photo terrain - ${data.nom_client || "intervention"}`,
-        lieu,
-        lat,
-        lng,
-        precision_m,
-        horodatage,
-      });
+      let embeddedPhoto = photoDataUrl;
+      if (lat != null && lng != null) {
+        try {
+          embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
+            type: `Photo additionnelle - ${data.nom_client || "Intervention"}`,
+            lieu,
+            lat,
+            lng,
+            precision_m,
+            horodatage,
+          });
+        } catch (embedErr) {
+          console.warn("Erreur incrustation GPS:", embedErr);
+        }
+      }
 
       const newPhoto = {
         id: crypto.randomUUID(),
@@ -1408,6 +1496,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         horodatage,
         lieu,
         added: new Date().toISOString(),
+        label: "Photo additionnelle",
+        type: "additionnelle",
+        slot: "additionnelle",
+        additionnelle: true,
+        is_additionnelle: true,
+        exclude_celpros: true,
       };
       setWhatsappPhotos((prev) => {
         const next = [...prev, newPhoto];
@@ -1416,8 +1510,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       });
       markDirty("whatsapp_photos");
       setSaveStatus("✓ Photo enregistrée");
-      setWhatsappStatus("Photo géolocalisée ajoutée.");
+      setWhatsappStatus("Photo additionnelle enregistrée.");
     } catch (err) {
+      console.error("handleWaPhotoSelected error:", err);
       setWhatsappStatus(`Erreur : ${err.message}`);
     } finally {
       setWaCapturing(false);
@@ -1544,6 +1639,16 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       <header className="form-header">
         <h2>Intervention - {data.nom_client || "Nouveau client"}</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            className="btn-header-refresh"
+            onClick={handleManualRefreshIntervention}
+            disabled={manualRefreshing}
+            title="Actualiser les photos et informations depuis le serveur"
+          >
+            <span className={manualRefreshing ? "spin-icon" : ""}>🔄</span>
+            <span className="btn-refresh-text">{manualRefreshing ? "…" : "Actualiser"}</span>
+          </button>
           {saveStatus && (
             <span
               style={{
@@ -1583,6 +1688,53 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       )}
 
       <Tabs tabs={TABS.filter((t) => !t.hidden)} activeTab={activeTab} onChange={setActiveTab} />
+
+      {/* Hidden file inputs permanently mounted in DOM across all tabs */}
+      <input
+        ref={slotCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={handleSlotPhotoSelected}
+      />
+      <input
+        ref={slotGalleryInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleSlotPhotoSelected}
+      />
+      <input
+        ref={poleCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={handlePolePhotoSelected}
+      />
+      <input
+        ref={poleGalleryInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handlePolePhotoSelected}
+      />
+      <input
+        ref={waCameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={handleWaPhotoSelected}
+      />
+      <input
+        ref={waGalleryInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleWaPhotoSelected}
+      />
 
       <div className="tab-content">
         {activeTab === "rapport" && (
@@ -2027,36 +2179,6 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
         {activeTab === "photos" && (
           <section className="photos-tab-section">
-            <input
-              ref={slotCameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{ display: "none" }}
-              onChange={handleSlotPhotoSelected}
-            />
-            <input
-              ref={slotGalleryInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleSlotPhotoSelected}
-            />
-            <input
-              ref={poleCameraInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              style={{ display: "none" }}
-              onChange={handlePolePhotoSelected}
-            />
-            <input
-              ref={poleGalleryInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handlePolePhotoSelected}
-            />
 
             {ocrNotification && (
               <div className={`ocr-banner ${ocrNotification.success ? "success" : "info"}`}>
@@ -2822,22 +2944,6 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
                 Photos geolocalisees, non incluses dans le rapport. Selectionnez-en pour les envoyer via WhatsApp.
               </p>
-
-              <input
-                ref={waCameraInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                style={{ display: "none" }}
-                onChange={handleWaPhotoSelected}
-              />
-              <input
-                ref={waGalleryInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: "none" }}
-                onChange={handleWaPhotoSelected}
-              />
 
               <div className="gps-buttons" style={{ marginBottom: 12 }}>
                 <button

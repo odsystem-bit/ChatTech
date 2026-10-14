@@ -224,6 +224,50 @@ describe("extractFatAndMsanFromText (FAT OCR extraction)", () => {
     assert.equal(res.fat_ref, "FAT-01");
   });
 
+  it("extracts ORGA MSAN on top and FAT below (cahier des charges Benin)", () => {
+    const text = `
+      ORGA-PL51
+      FAT 164
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "ORGA-PL51");
+    assert.equal(res.fat_ref, "FAT 164");
+  });
+
+  it("extracts ORGA with space and raw number on line below", () => {
+    const text = `
+      ORGA 12
+      164
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "ORGA 12");
+    assert.equal(res.fat_ref, "FAT-164");
+  });
+
+  it("corrects OCR confusion 0RGA to ORGA", () => {
+    const text = `
+      0RGA-PL51
+      FAT 164
+    `;
+    const res = extractFatAndMsanFromText(text);
+    assert.equal(res.msan, "ORGA-PL51");
+    assert.equal(res.fat_ref, "FAT 164");
+  });
+
+  it("filters out GPS banner metadata and extracts true ORGA and FAT", () => {
+    const textWithGpsBanner = `
+      Boîtier FAT - DOSSOU ABELLANGE
+      Lieu: Cadjehoun, Cotonou
+      Lat: 6.365412 Lng: 2.412587
+      Précision: ±2.5 m - 14/10/2026 15:30:00
+      ORGA-PL51
+      FAT 164
+    `;
+    const res = extractFatAndMsanFromText(textWithGpsBanner);
+    assert.equal(res.msan, "ORGA-PL51");
+    assert.equal(res.fat_ref, "FAT 164");
+  });
+
   it("handles null, empty, or undefined input safely", () => {
     assert.deepEqual(extractFatAndMsanFromText(null), { fat_ref: null, msan: null });
     assert.deepEqual(extractFatAndMsanFromText(""), { fat_ref: null, msan: null });

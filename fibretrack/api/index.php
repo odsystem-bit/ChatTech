@@ -313,7 +313,7 @@ try {
   }
   switch ($action) {
     case 'interventions_list_light':
-      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe, nom_client, adresse_zone, telephone_ligne, etat, msan, fat_ref, port, offre_souscrite FROM interventions ORDER BY date DESC');
+      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe, nom_client, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
       echo json_encode($stmt->fetchAll());
       break;
 
@@ -331,7 +331,7 @@ try {
         appreciation_satisfaction_libre, travaux_conformes, emplacement_valide,
         travail_propre, service_teste, service_fonctionne, explications_donnees,
         recommanderait, accepte_recontact, qualite, delais, professionnalisme,
-        nom_client_declaration, remarque_libre, whatsapp_photos, modifie_par, modifie_le
+        nom_client_declaration, remarque_libre, whatsapp_photos, modifie_par, modifie_le, modifie_le AS updated_at
         FROM interventions ORDER BY date DESC');
       $rows = $stmt->fetchAll();
       foreach ($rows as &$r) {
@@ -414,6 +414,7 @@ try {
       $r['materiel_pose'] = empty($mp) ? new stdClass() : $mp;
       $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true) ?? [];
       $r['whatsapp_photos'] = json_decode($r['whatsapp_photos'] ?? '[]', true) ?? [];
+      $r['updated_at'] = (string)($r['modifie_le'] ?? '');
       normalizeInterventionTypes($r);
       echo json_encode($r);
       break;

@@ -228,3 +228,37 @@ test("saveInterventionLocally protects against photo erasure when saving a light
   assert.equal(protectedRecord.signature_client, "data:image/png;base64,sig1", "La signature client doit être préservée");
   assert.equal(protectedRecord.signature_technicien, "data:image/png;base64,sig2", "La signature tech doit être préservée");
 });
+
+test("ensureInterventionDefaults preserves additional photos and their CelPros exclusion tags", () => {
+  const input = {
+    id: "test-additionnelle-1",
+    nom_client: "KOUDJO Paul",
+    whatsapp_photos: [
+      {
+        id: "add-1",
+        label: "Photo additionnelle",
+        type: "additionnelle",
+        slot: "additionnelle",
+        additionnelle: true,
+        is_additionnelle: true,
+        exclude_celpros: true,
+        url: "data:image/jpeg;base64,img1",
+      },
+      {
+        id: "celpro-fat",
+        slot: "fat",
+        type: "fat",
+        url: "data:image/jpeg;base64,fat1",
+      },
+    ],
+  };
+
+  const defaulted = ensureInterventionDefaults(input);
+  assert.equal(defaulted.whatsapp_photos.length, 2);
+  const addPhoto = defaulted.whatsapp_photos.find((p) => p.id === "add-1");
+  assert.ok(addPhoto);
+  assert.equal(addPhoto.additionnelle, true);
+  assert.equal(addPhoto.exclude_celpros, true);
+  assert.equal(addPhoto.slot, "additionnelle");
+});
+

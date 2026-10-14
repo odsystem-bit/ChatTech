@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { generateWhatsAppReport } from "../lib/whatsapp";
-import { ensureInterventionDefaults } from "../models/Intervention";
+import { ensureInterventionDefaults, getIntervention, saveInterventionLocally } from "../models/Intervention";
 import {
   generateInterventionPdf,
   generateSummaryReportPdf,
@@ -10,7 +10,32 @@ import {
 } from "../lib/pdf";
 
 export default function ReportScreen({ intervention, onClose, onEdit }) {
-  const safeIntervention = ensureInterventionDefaults(intervention);
+  const [data, setData] = useState(ensureInterventionDefaults(intervention));
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    if (intervention) {
+      setData(ensureInterventionDefaults(intervention));
+    }
+  }, [intervention]);
+
+  const handleRefreshReport = useCallback(async () => {
+    if (refreshing || !data?.id) return;
+    setRefreshing(true);
+    try {
+      const fresh = await getIntervention(data.id);
+      if (fresh) {
+        const full = { ...fresh, _fully_loaded: true };
+        saveInterventionLocally(full);
+        setData(full);
+      }
+    } catch (err) {
+      console.warn("Report refresh error:", err);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [data?.id, refreshing]);
+
   const [copied, setCopied] = useState(false);
   const [pdfStatus, setPdfStatus] = useState("");
   const [reportStatus, setReportStatus] = useState("");
@@ -23,7 +48,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     realises: realises !== "" ? Number(realises) : 0,
     recus: recus !== "" ? Number(recus) : 0,
   };
-  const report = generateWhatsAppReport(safeIntervention, compteurJour);
+  const report = generateWhatsAppReport(data, compteurJour);
 
   async function handleCopy() {
     await navigator.clipboard.writeText(report);
@@ -36,7 +61,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction("downloadPdf");
     setPdfStatus("Génération du PDF…");
     try {
-      await generateInterventionPdf(intervention);
+      await generateInterventionPdf(data);
       setPdfStatus("PDF téléchargé.");
     } catch (err) {
       setPdfStatus(`Erreur : ${err.message}`);
@@ -49,7 +74,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction("previewPdf");
     setPdfStatus("Ouverture du PDF…");
     try {
-      await previewInterventionPdf(intervention);
+      await previewInterventionPdf(data);
       setPdfStatus("");
     } catch (err) {
       setPdfStatus(`Erreur : ${err.message}`);
@@ -62,7 +87,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction("downloadReport");
     setReportStatus("Génération du rapport (photos + schéma)…");
     try {
-      await generateSummaryReportPdf(intervention);
+      await generateSummaryReportPdf(data);
       setReportStatus("Rapport téléchargé.");
     } catch (err) {
       setReportStatus(`Erreur : ${err.message}`);
@@ -75,7 +100,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction("previewReport");
     setReportStatus("Ouverture du rapport…");
     try {
-      await previewSummaryReportPdf(intervention);
+      await previewSummaryReportPdf(data);
       setReportStatus("");
     } catch (err) {
       setReportStatus(`Erreur : ${err.message}`);
@@ -88,7 +113,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction("share");
     setShareStatus("Préparation du partage…");
     try {
-      const result = await shareInterventionPdf(intervention);
+      const result = await shareInterventionPdf(data);
       setShareStatus(
         result === "shared"
           ? "Partagé !"
@@ -105,16 +130,28 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     <div className="report-screen">
       <header className="form-header">
         <h2>Intervention terminée</h2>
-        <button type="button" className="btn-secondary" onClick={onClose}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}>
-            <path d="M3 12l6 6 12-12" />
-          </svg>
-          Accueil
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            type="button"
+            className="btn-header-refresh"
+            onClick={handleRefreshReport}
+            disabled={refreshing}
+            title="Actualiser les informations de l'intervention"
+          >
+            <span className={refreshing ? "spin-icon" : ""}>🔄</span>
+            <span className="btn-refresh-label">{refreshing ? "…" : "Actualiser"}</span>
+          </button>
+          <button type="button" className="btn-secondary" onClick={onClose}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}>
+              <path d="M3 12l6 6 12-12" />
+            </svg>
+            Accueil
+          </button>
+        </div>
       </header>
 
       <div className="status-banner" style={{ marginBottom: 16 }}>
-        ✅ <strong>{intervention.nom_client || "Nouveau client"}</strong> — Intervention terminée
+        ✅ <strong>{data.nom_client || "Nouveau client"}</strong> — Intervention terminée
       </div>
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
