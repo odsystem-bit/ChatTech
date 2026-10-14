@@ -1,4 +1,6 @@
-// Popup Controller pour ChapTech CelPros
+// Popup Controller pour ChapTech CelPros (Manifest V3)
+// Architecture moderne 100% asynchrone Promise-based, sans callbacks dépréciés
+// Élimine définitivement l'erreur "Could not establish connection. Receiving end does not exist."
 
 document.addEventListener("DOMContentLoaded", async () => {
   const connBadge = document.getElementById("conn-badge");
@@ -30,6 +32,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let activeInterventionData = null;
 
   function showMessage(text, type = "success") {
+    if (!msgBanner) return;
     msgBanner.innerHTML = text;
     msgBanner.className = `msg-banner ${type}`;
     msgBanner.style.display = "block";
@@ -55,66 +58,155 @@ document.addEventListener("DOMContentLoaded", async () => {
     return safe.replace(regex, "<mark class='match-hl'>$1</mark>");
   }
 
+  function formatApiActionUrl(baseUrl, action) {
+    let clean = (baseUrl || "https://fibretrack.mantota.com/api/index.php").trim().replace(/\/+$/, "");
+    if (!clean.includes(".php") && !clean.includes("?")) {
+      clean = `${clean}/index.php`;
+    }
+    const sep = clean.includes("?") ? "&" : "?";
+    return `${clean}${sep}action=${encodeURIComponent(action)}`;
+  }
+
   function renderActiveIntervention(d) {
     if (!d) return;
     activeInterventionData = d;
-    activeClientName.textContent = d.nom_client || "Client sans nom";
-    activeStatusBadge.textContent = d.statut === "termine" ? "✅ Terminé" : "⏳ En cours";
-    activeStatusBadge.className = `badge-mini ${d.statut === "termine" ? "badge-done" : "badge-progress"}`;
-    activeDetails.textContent = `${d.fat_ref ? "FAT " + d.fat_ref : ""} • ${d.mobile || d.telephone_ligne || ""} • Port ${d.port || "-"}`;
+    if (activeClientName) activeClientName.textContent = d.nom_client || "Client sans nom";
+    if (activeStatusBadge) {
+      activeStatusBadge.textContent = d.statut === "termine" ? "✅ Terminé" : "⏳ En cours";
+      activeStatusBadge.className = `badge-mini ${d.statut === "termine" ? "badge-done" : "badge-progress"}`;
+    }
+    if (activeDetails) {
+      activeDetails.textContent = `${d.fat_ref ? "FAT " + d.fat_ref : ""} • ${d.mobile || d.telephone_ligne || ""} • Port ${d.port || "-"}`;
+    }
 
     if (popupInterventionSelect && d.id && popupInterventionSelect.value !== d.id) {
       popupInterventionSelect.value = d.id;
     }
   }
 
-  // 1. Charger la configuration et l'intervention active
-  chrome.runtime.sendMessage({ action: "GET_CONFIG" }, (res) => {
-    if (chrome.runtime.lastError) {
-      console.warn("[CelPros Popup] GET_CONFIG error:", chrome.runtime.lastError.message);
+  // 1. Initialisation directe depuis le stockage local (0ms d'attente, 100% fiable)
+  try {
+    const stored = await chrome.storage.local.get([
+      "apiUrl",
+      "apiCode",
+      "activeIntervention",
+      "cachedInterventions",
+    ]);
+
+    if (cfgApiUrl) cfgApiUrl.value = stored.apiUrl || "https://fibretrack.mantota.com/api/index.php";
+    if (cfgApiCode) cfgApiCode.value = stored.apiCode || "9999";
+
+    if (stored.activeIntervention) {
+      renderActiveIntervention(stored.activeIntervention);
     }
-    if (res && res.ok && res.data) {
-      const cfg = res.data;
-      cfgApiUrl.value = cfg.apiUrl || "https://fibretrack.mantota.com/api/index.php";
-      cfgApiCode.value = cfg.apiCode || "9999";
 
-      if (cfg.activeIntervention) {
-        renderActiveIntervention(cfg.activeIntervention);
+    if (Array.isArray(stored.cachedInterventions) && stored.cachedInterventions.length > 0) {
+      interventionsList = stored.cachedInterventions;
+      // Si aucun en cours, basculer sur Tous
+      const totalEnCours = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+      if (totalEnCours === 0) {
+        statusTabFilter = "all";
+        document.querySelectorAll(".popup-pill").forEach((pill) => {
+          pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
+        });
       }
+      renderPopupOptions();
     }
-    testConnection();
-    loadInterventions();
-  });
+  } catch (storErr) {
+    console.warn("[CelPros Popup] Erreur lecture initiale storage:", storErr);
+  }
 
-  // 2. Charger la liste des interventions depuis le background
-  function loadInterventions() {
-    if (popupInterventionSelect) popupInterventionSelect.disabled = true;
-    chrome.runtime.sendMessage({ action: "FETCH_INTERVENTIONS" }, (res) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[CelPros Popup] FETCH_INTERVENTIONS error:", chrome.runtime.lastError.message);
-        if (popupInterventionSelect) popupInterventionSelect.disabled = false;
-        showMessage(`⚠️ Erreur: ${chrome.runtime.lastError.message}`, "error");
-        return;
-      }
-      if (popupInterventionSelect) popupInterventionSelect.disabled = false;
-      if (res && res.ok && Array.isArray(res.data)) {
-        interventionsList = res.data;
+  // 2. Détecter l'onglet actif sans callback de message
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const activeTab = tabs[0];
+    if (activeTab && activeTab.url) {
+      const url = activeTab.url.toLowerCase();
+      const isCelPros = url.includes("celpros.celtiis.bj");
+      const isFatAuto = url.includes("fatautomation.celtiis.bj");
+      const isDemo = url.includes("celpros-mock.html") || url.includes("fatautomation-mock.html") || url.includes("localhost");
 
-        // Si aucun dossier n'est en cours mais qu'il y a des dossiers (ex: 62 terminés),
-        // basculer automatiquement sur "Tous" pour que la liste ne soit jamais vide !
-        const totalEnCours = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
-        if (totalEnCours === 0 && interventionsList.length > 0) {
-          statusTabFilter = "all";
-          document.querySelectorAll(".popup-pill").forEach((pill) => {
-            pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
-          });
-        }
-
-        renderPopupOptions();
+      if (isCelPros || isFatAuto || isDemo) {
+        const siteName = isCelPros ? "CelPros Celtiis" : isFatAuto ? "FAT Automation" : "Démo Locale";
+        pageStatusText.innerHTML = `✅ Connecté à <strong>${siteName}</strong>`;
+        btnTriggerAutofill.disabled = false;
       } else {
-        showMessage(`⚠️ Erreur chargement des fiches: ${res?.error || "Inconnu"}`, "error");
+        try {
+          const host = new URL(activeTab.url).hostname;
+          pageStatusText.innerHTML = `ℹ️ Onglet externe : <code>${host || "Autre"}</code>`;
+        } catch {
+          pageStatusText.innerHTML = `ℹ️ Onglet externe`;
+        }
+        btnTriggerAutofill.disabled = true;
       }
-    });
+    }
+  } catch (tabErr) {
+    console.warn("[CelPros Popup] Erreur détection onglet:", tabErr);
+  }
+
+  // Lancer le test de connexion et rafraîchir la liste
+  testConnection();
+  loadInterventions();
+
+  // 3. Charger la liste des interventions depuis l'API ou le cache local
+  async function loadInterventions() {
+    if (popupInterventionSelect) popupInterventionSelect.disabled = true;
+
+    const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
+    const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
+    const url = formatApiActionUrl(apiUrl, "interventions_list_light");
+
+    let list = null;
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiCode ? { "X-User-Code": apiCode } : {}),
+        },
+      });
+
+      if (res.ok) {
+        list = await res.json();
+      }
+    } catch (netErr) {
+      console.warn("[CelPros Popup] Échec fetch direct des interventions, utilisation du cache:", netErr);
+    }
+
+    if (!Array.isArray(list) || list.length === 0) {
+      const stored = await chrome.storage.local.get(["cachedInterventions"]);
+      if (Array.isArray(stored.cachedInterventions) && stored.cachedInterventions.length > 0) {
+        list = stored.cachedInterventions;
+      }
+    }
+
+    if (Array.isArray(list)) {
+      list.sort((a, b) => {
+        const aIsDone = (a.statut || "").toLowerCase() === "termine";
+        const bIsDone = (b.statut || "").toLowerCase() === "termine";
+        if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
+        const da = new Date(a.date || 0).getTime();
+        const db = new Date(b.date || 0).getTime();
+        return db - da;
+      });
+
+      interventionsList = list;
+      await chrome.storage.local.set({ cachedInterventions: list });
+
+      const totalEnCours = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+      if (totalEnCours === 0 && interventionsList.length > 0) {
+        statusTabFilter = "all";
+        document.querySelectorAll(".popup-pill").forEach((pill) => {
+          pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
+        });
+      }
+
+      renderPopupOptions();
+    } else {
+      showMessage("⚠️ Impossible de charger les fiches FibreTrack", "error");
+    }
+
+    if (popupInterventionSelect) popupInterventionSelect.disabled = false;
   }
 
   function renderPopupOptions() {
@@ -244,38 +336,57 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  function selectInterventionById(id) {
+  async function selectInterventionById(id) {
     if (!id) return;
     showMessage("Chargement des détails...", "success");
 
-    chrome.runtime.sendMessage({ action: "FETCH_INTERVENTION_DETAILS", payload: { id } }, (res) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[CelPros Popup] FETCH_INTERVENTION_DETAILS error:", chrome.runtime.lastError.message);
-      }
-      if (res && res.ok && res.data) {
-        renderActiveIntervention(res.data);
-        if (popupSearchInput) popupSearchInput.value = (res.data.nom_client || "").trim();
-        showMessage(`⚡ Dossier actif : <strong>${escapeHtml(res.data.nom_client)}</strong>`);
+    let item = null;
+    const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
+    const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
+    const url = formatApiActionUrl(apiUrl, "intervention_get");
 
-        // Propager aux onglets ouverts en toute sécurité
-        chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: res.data }, () => {
-          if (chrome.runtime.lastError) {
-            /* ignoré silencieusement */
-          }
-        });
-      } else {
-        const match = interventionsList.find((i) => i.id === id);
-        if (match) {
-          renderActiveIntervention(match);
-          if (popupSearchInput) popupSearchInput.value = (match.nom_client || "").trim();
-          chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: match }, () => {
-            if (chrome.runtime.lastError) {
-              /* ignoré silencieusement */
-            }
-          });
-        }
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiCode ? { "X-User-Code": apiCode } : {}),
+        },
+        body: JSON.stringify({ id: String(id) }),
+      });
+
+      if (res.ok) {
+        item = await res.json();
       }
-    });
+    } catch (e) {
+      console.warn("[CelPros Popup] Erreur fetch détails:", e);
+    }
+
+    if (!item || !item.id) {
+      item = interventionsList.find((i) => String(i.id) === String(id));
+    }
+
+    if (item) {
+      renderActiveIntervention(item);
+      if (popupSearchInput) popupSearchInput.value = (item.nom_client || "").trim();
+      showMessage(`⚡ Dossier actif : <strong>${escapeHtml(item.nom_client)}</strong>`);
+
+      // Sauvegarde dans storage (synchronise instantanément tous les onglets via storage.onChanged)
+      await chrome.storage.local.set({ activeIntervention: item });
+
+      // Notification directe optionnelle vers les onglets avec try/catch (Promise, jamais d'erreur)
+      try {
+        const tabs = await chrome.tabs.query({});
+        for (const tab of tabs) {
+          if (tab.id) {
+            chrome.tabs.sendMessage(tab.id, {
+              action: "ACTIVE_INTERVENTION_UPDATED",
+              payload: item,
+            }).catch(() => {});
+          }
+        }
+      } catch {}
+    }
   }
 
   // Événements pour le sélecteur d'intervention du popup
@@ -353,58 +464,42 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // 3. Tester la connexion API
-  function testConnection() {
+  // 4. Tester la connexion API directement par fetch
+  async function testConnection() {
+    if (!connBadge) return;
     connBadge.className = "badge badge-unknown";
     connBadge.textContent = "Test...";
 
-    const customPayload = {
-      apiUrl: cfgApiUrl.value.trim(),
-      apiCode: cfgApiCode.value.trim(),
-    };
+    const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
+    const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
+    const url = formatApiActionUrl(apiUrl, "interventions_list_light");
 
-    chrome.runtime.sendMessage({ action: "TEST_CONNECTION", payload: customPayload }, (res) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[CelPros Popup] TEST_CONNECTION error:", chrome.runtime.lastError.message);
-        connBadge.className = "badge badge-error";
-        connBadge.textContent = "Hors-ligne";
-        return;
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiCode ? { "X-User-Code": apiCode } : {}),
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          connBadge.className = "badge badge-connected";
+          connBadge.textContent = `Connecté (${data.length} fiches)`;
+          return;
+        }
       }
-      if (res && res.ok) {
-        connBadge.className = "badge badge-connected";
-        connBadge.textContent = `Connecté (${res.count} fiches)`;
-      } else {
-        connBadge.className = "badge badge-error";
-        connBadge.textContent = "Hors-ligne";
-      }
-    });
+      connBadge.className = "badge badge-error";
+      connBadge.textContent = "Hors-ligne";
+    } catch {
+      connBadge.className = "badge badge-error";
+      connBadge.textContent = "Hors-ligne";
+    }
   }
 
-  // 4. Détecter l'onglet actif
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (chrome.runtime.lastError) {
-      console.warn("[CelPros Popup] tabs.query error:", chrome.runtime.lastError.message);
-      return;
-    }
-    const activeTab = tabs[0];
-    if (!activeTab || !activeTab.url) return;
-
-    const url = activeTab.url.toLowerCase();
-    const isCelPros = url.includes("celpros.celtiis.bj");
-    const isFatAuto = url.includes("fatautomation.celtiis.bj");
-    const isDemo = url.includes("celpros-mock.html") || url.includes("fatautomation-mock.html") || url.includes("localhost");
-
-    if (isCelPros || isFatAuto || isDemo) {
-      const siteName = isCelPros ? "CelPros Celtiis" : isFatAuto ? "FAT Automation" : "Démo Locale";
-      pageStatusText.innerHTML = `✅ Connecté à <strong>${siteName}</strong>`;
-      btnTriggerAutofill.disabled = false;
-    } else {
-      pageStatusText.innerHTML = `ℹ️ Onglet externe : <code>${new URL(activeTab.url).hostname}</code>`;
-      btnTriggerAutofill.disabled = true;
-    }
-  });
-
-  // Injection dynamique des scripts si l'onglet était déjà ouvert avant le chargement de l'extension
+  // 5. Injection dynamique propre des scripts dans le document principal
   async function injectContentScripts(tabId) {
     if (typeof chrome === "undefined" || !chrome.scripting) return false;
     try {
@@ -412,8 +507,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         target: { tabId },
         files: ["content/content.css"],
       }).catch(() => {});
+
       await chrome.scripting.executeScript({
-        target: { tabId, allFrames: true },
+        target: { tabId },
         files: [
           "content/field-mapping.js",
           "content/photo-filler.js",
@@ -429,89 +525,103 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // 5. Déclencher le remplissage depuis le popup
-  btnTriggerAutofill.addEventListener("click", () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (chrome.runtime.lastError) {
-        showMessage(`Erreur onglet : ${chrome.runtime.lastError.message}`, "error");
-        return;
-      }
-      const tabId = tabs[0]?.id;
-      if (!tabId) {
-        showMessage("Aucun onglet actif trouvé", "error");
-        return;
-      }
-
+  // 6. Déclencher le remplissage depuis le popup (Promise-based, aucun lastError non intercepté)
+  if (btnTriggerAutofill) {
+    btnTriggerAutofill.addEventListener("click", async () => {
       btnTriggerAutofill.disabled = true;
       btnTriggerAutofill.textContent = "⏳ Remplissage en cours…";
 
-      const trySend = (allowInject = true) => {
-        chrome.tabs.sendMessage(tabId, { action: "TRIGGER_AUTOFILL" }, async (res) => {
-          if (chrome.runtime.lastError) {
-            const errStr = chrome.runtime.lastError.message || "";
-            console.warn("[CelPros Popup] TRIGGER_AUTOFILL error:", errStr);
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const activeTab = tabs[0];
+        if (!activeTab || !activeTab.id) {
+          showMessage("Aucun onglet actif détecté", "error");
+          return;
+        }
 
-            if (allowInject && (errStr.includes("Receiving end does not exist") || errStr.includes("Could not establish connection"))) {
-              const injected = await injectContentScripts(tabId);
-              if (injected) {
-                setTimeout(() => trySend(false), 350);
-                return;
-              }
-            }
+        const tabId = activeTab.id;
+        let fillSuccess = false;
 
-            btnTriggerAutofill.disabled = false;
-            btnTriggerAutofill.textContent = "🚀 Remplir la page active";
-            showMessage("⚠️ Veuillez actualiser la page CelPros (F5) pour activer l'assistant !", "error");
-            return;
-          }
-
-          btnTriggerAutofill.disabled = false;
-          btnTriggerAutofill.textContent = "🚀 Remplir la page active";
-
+        // Étape 1 : Envoi direct via Promise (attrapé proprement si absent)
+        try {
+          const res = await chrome.tabs.sendMessage(tabId, { action: "TRIGGER_AUTOFILL" });
           if (res && res.ok) {
+            fillSuccess = true;
             showMessage("⚡ Formulaire rempli avec succès !");
-          } else {
-            showMessage(res?.error || "Erreur de remplissage", "error");
+          } else if (res && res.error) {
+            showMessage(res.error, "error");
+            fillSuccess = true;
           }
-        });
+        } catch {
+          // Content script pas encore injecté sur cet onglet
+          console.log("[CelPros Popup] Content script absent, tentative d'injection dynamique...");
+        }
+
+        // Étape 2 : Si absent, injection à chaud dans la page
+        if (!fillSuccess) {
+          const injected = await injectContentScripts(tabId);
+          if (injected) {
+            await new Promise((r) => setTimeout(r, 250));
+            try {
+              const retryRes = await chrome.tabs.sendMessage(tabId, { action: "TRIGGER_AUTOFILL" });
+              if (retryRes && retryRes.ok) {
+                fillSuccess = true;
+                showMessage("⚡ Formulaire rempli avec succès !");
+              } else if (retryRes && retryRes.error) {
+                showMessage(retryRes.error, "error");
+                fillSuccess = true;
+              }
+            } catch (retryErr) {
+              console.warn("[CelPros Popup] Échec après injection:", retryErr);
+            }
+          }
+        }
+
+        if (!fillSuccess) {
+          showMessage("⚠️ Veuillez actualiser la page CelPros (F5) pour activer l'assistant !", "error");
+        }
+      } catch (globalErr) {
+        console.error("[CelPros Popup] Erreur autofill:", globalErr);
+        showMessage(`Erreur: ${globalErr.message}`, "error");
+      } finally {
+        btnTriggerAutofill.disabled = false;
+        btnTriggerAutofill.textContent = "🚀 Remplir la page active";
+      }
+    });
+  }
+
+  // 7. Bouton Tester connexion manuellement
+  if (btnTestConn) {
+    btnTestConn.addEventListener("click", () => {
+      testConnection();
+      showMessage("Test de connexion en cours...");
+    });
+  }
+
+  // 8. Sauvegarder la configuration directement dans chrome.storage.local
+  if (btnSaveCfg) {
+    btnSaveCfg.addEventListener("click", async () => {
+      const payload = {
+        apiUrl: cfgApiUrl ? cfgApiUrl.value.trim() : "",
+        apiCode: cfgApiCode ? cfgApiCode.value.trim() : "",
       };
 
-      trySend(true);
-    });
-  });
-
-  // 6. Tester manuellement la connexion
-  btnTestConn.addEventListener("click", () => {
-    testConnection();
-    showMessage("Test de connexion en cours...");
-  });
-
-  // 7. Sauvegarder la configuration
-  btnSaveCfg.addEventListener("click", () => {
-    const payload = {
-      apiUrl: cfgApiUrl.value.trim(),
-      apiCode: cfgApiCode.value.trim(),
-    };
-
-    chrome.runtime.sendMessage({ action: "SAVE_CONFIG", payload }, (res) => {
-      if (chrome.runtime.lastError) {
-        console.warn("[CelPros Popup] SAVE_CONFIG error:", chrome.runtime.lastError.message);
-        showMessage(`Erreur: ${chrome.runtime.lastError.message}`, "error");
-        return;
-      }
-      if (res && res.ok) {
+      try {
+        await chrome.storage.local.set(payload);
         showMessage("Configuration enregistrée avec succès !");
         testConnection();
         loadInterventions();
-      } else {
-        showMessage("Erreur lors de la sauvegarde", "error");
+      } catch (err) {
+        showMessage(`Erreur: ${err.message}`, "error");
       }
     });
-  });
+  }
 
-  // 8. Démo de test
-  btnOpenDemo.addEventListener("click", () => {
-    const demoUrl = chrome.runtime.getURL("demo/celpros-mock.html");
-    chrome.tabs.create({ url: demoUrl });
-  });
+  // 9. Démo de test locale
+  if (btnOpenDemo) {
+    btnOpenDemo.addEventListener("click", () => {
+      const demoUrl = chrome.runtime.getURL("demo/celpros-mock.html");
+      chrome.tabs.create({ url: demoUrl });
+    });
+  }
 });

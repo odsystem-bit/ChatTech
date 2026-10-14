@@ -21,24 +21,49 @@
     }
   }
 
+  // Écoute des synchronisations de stockage local (immédiat sans message)
+  if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes.activeIntervention) {
+        const newIntv = changes.activeIntervention.newValue;
+        if (newIntv) {
+          if (!widgetInstance && window.CelprosWidget) {
+            initExtension();
+          }
+          if (widgetInstance) {
+            widgetInstance.setSelectedIntervention(newIntv, false);
+          }
+        }
+      }
+    });
+  }
+
   // Écoute des messages venant du Popup ou du Service Worker
   if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       const { action, payload } = request || {};
 
       if (action === "TRIGGER_AUTOFILL") {
+        if (!widgetInstance && window.CelprosWidget) {
+          initExtension();
+        }
         if (widgetInstance) {
           widgetInstance.handleAutofill();
           sendResponse({ ok: true });
         } else {
-          sendResponse({ ok: false, error: "Widget non initialisé" });
+          sendResponse({ ok: false, error: "Widget CelPros non prêt" });
         }
         return true;
       }
 
       if (action === "SET_ACTIVE_INTERVENTION" || action === "ACTIVE_INTERVENTION_UPDATED") {
+        if (!widgetInstance && window.CelprosWidget) {
+          initExtension();
+        }
         if (widgetInstance && payload) {
           widgetInstance.setSelectedIntervention(payload, false);
+          sendResponse({ ok: true });
+        } else {
           sendResponse({ ok: true });
         }
         return true;
@@ -48,6 +73,9 @@
         sendResponse({ ok: true, url: window.location.href });
         return true;
       }
+
+      sendResponse({ ok: false, error: "Action non gérée" });
+      return true;
     });
   }
 

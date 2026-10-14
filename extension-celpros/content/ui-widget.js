@@ -252,8 +252,23 @@
       this.setCollapsed(savedCollapsed);
 
       // Charger la configuration et l'intervention active
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.get(["activeIntervention", "cachedInterventions"]).then((stored) => {
+          if (stored && stored.activeIntervention) {
+            this.setSelectedIntervention(stored.activeIntervention, false);
+            if (stored.activeIntervention.id) {
+              this.onInterventionChange(stored.activeIntervention.id);
+            }
+          }
+        }).catch(() => {});
+      }
+
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({ action: "GET_CONFIG" }, (res) => {
+          if (chrome.runtime.lastError) {
+            // Silencieux si le background n'est pas encore réveillé
+            return;
+          }
           if (res && res.ok && res.data) {
             if (res.data.activeIntervention) {
               this.setSelectedIntervention(res.data.activeIntervention, false);
