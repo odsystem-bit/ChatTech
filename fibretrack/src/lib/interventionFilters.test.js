@@ -81,6 +81,13 @@ test("Catégorisation : intervention terminée est bien classée dans Terminées
   const doneIntv = { id: "done-1", nom_client: "Ancien", statut: "termine" };
   assert.equal(isInterventionTerminee(doneIntv), true);
   assert.equal(isInterventionEnCours(doneIntv), false);
+
+  // Variantes accentuées et orthographiques tolérées
+  assert.equal(isInterventionTerminee({ statut: "Terminé" }), true);
+  assert.equal(isInterventionTerminee({ statut: "terminée " }), true);
+  assert.equal(isInterventionTerminee({ statut: "clôturé" }), true);
+  assert.equal(isInterventionTerminee({ statut: "cloture" }), true);
+  assert.equal(isInterventionTerminee({ date_cloture: "2026-10-14" }), true);
 });
 
 test("Badges : distinction entre À prendre en charge et En cours", () => {

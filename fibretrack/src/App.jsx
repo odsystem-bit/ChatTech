@@ -16,10 +16,9 @@ import {
   ensureInterventionDefaults,
   deleteIntervention,
 } from "./models/Intervention";
-import { formatDateFR } from "./lib/date";
 import InstallPwaButton from "./components/InstallPwaButton";
 import InterventionCard from "./components/InterventionCard";
-import { filterAndOrganizeInterventions } from "./lib/interventionFilters";
+import { filterAndOrganizeInterventions, isInterventionTerminee } from "./lib/interventionFilters";
 
 export default function App() {
   const [user, setUser] = useState(getCurrentAccount());
@@ -84,8 +83,11 @@ export default function App() {
     return () => { delete window.chaptechBack; };
   }, [screen]);
 
-  const goToHome = useCallback(() => {
+  const goToHome = useCallback((targetTab = null) => {
     refreshInterventions();
+    if (targetTab === "terminees" || targetTab === "en_cours") {
+      setActiveTab(targetTab);
+    }
     setScreen("home");
   }, []);
 
@@ -135,7 +137,7 @@ export default function App() {
 
     if (hasFullLocalData) {
       setActiveIntervention(localFull);
-      navigateTo(localFull.statut === "termine" ? "report" : "form");
+      navigateTo(isInterventionTerminee(localFull) ? "report" : "form");
 
       // Synchronisation transparente en arrière-plan
       getIntervention(id)
@@ -152,8 +154,9 @@ export default function App() {
             freshPhotos.some((fp) => !localPhotos.some((lp) => (lp.id && lp.id === fp.id) || (lp.slot && lp.slot === fp.slot && lp.url === fp.url)));
           const hasGpsDiff = freshGps.length !== localGps.length;
           const hasTimeDiff = freshTime && localTime && freshTime !== localTime;
+          const hasStatusDiff = (fresh.statut || "") !== (localFull.statut || "");
 
-          if (hasTimeDiff || hasPhotoDiff || hasGpsDiff) {
+          if (hasTimeDiff || hasPhotoDiff || hasGpsDiff || hasStatusDiff) {
             const merged = { ...localFull, ...fresh, _fully_loaded: true };
             saveInterventionLocally(merged);
             setActiveIntervention(merged);
@@ -171,7 +174,7 @@ export default function App() {
         const fullIntervention = { ...intervention, _fully_loaded: true };
         saveInterventionLocally(fullIntervention);
         setActiveIntervention(fullIntervention);
-        navigateTo(fullIntervention.statut === "termine" ? "report" : "form");
+        navigateTo(isInterventionTerminee(fullIntervention) ? "report" : "form");
       } else {
         throw new Error("Intervention introuvable");
       }
@@ -182,7 +185,7 @@ export default function App() {
       if (listItem) {
         const initial = ensureInterventionDefaults(listItem);
         setActiveIntervention(initial);
-        navigateTo(initial.statut === "termine" ? "report" : "form");
+        navigateTo(isInterventionTerminee(initial) ? "report" : "form");
       } else {
         alert("Erreur lors de l'ouverture de l'intervention : " + (err.message || "Erreur réseau"));
       }
@@ -244,8 +247,12 @@ export default function App() {
     setPage(1);
   }
 
-  function handleCloseForm() {
-    goToHome();
+  function handleCloseForm(targetTab = null) {
+    if (targetTab === "terminees" || targetTab === "termine") {
+      goToHome("terminees");
+    } else {
+      goToHome();
+    }
   }
 
   async function handleFinish(intervention) {
@@ -290,7 +297,7 @@ export default function App() {
       <ReportScreen
         key={activeIntervention.id}
         intervention={activeIntervention}
-        onClose={goToHome}
+        onClose={() => goToHome("terminees")}
         onEdit={(intv) => {
           setActiveIntervention(intv);
           navigateTo("form");

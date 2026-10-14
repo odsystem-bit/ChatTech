@@ -38,6 +38,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     return isNaN(ts) ? 0 : ts;
   }
 
+  function isItemTermine(item) {
+    if (!item) return false;
+    const s = String(item.statut || "").trim().toLowerCase();
+    const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    return norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done" || Boolean(item.date_cloture);
+  }
+
   function showMessage(text, type = "success") {
     if (!msgBanner) return;
     msgBanner.innerHTML = text;
@@ -79,8 +86,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     activeInterventionData = d;
     if (activeClientName) activeClientName.textContent = d.nom_client || "Client sans nom";
     if (activeStatusBadge) {
-      activeStatusBadge.textContent = d.statut === "termine" ? "✅ Terminé" : "⏳ En cours";
-      activeStatusBadge.className = `badge-mini ${d.statut === "termine" ? "badge-done" : "badge-progress"}`;
+      const isDone = isItemTermine(d);
+      activeStatusBadge.textContent = isDone ? "✅ Terminé" : "⏳ En cours";
+      activeStatusBadge.className = `badge-mini ${isDone ? "badge-done" : "badge-progress"}`;
     }
     if (activeDetails) {
       activeDetails.textContent = `${d.fat_ref ? "FAT " + d.fat_ref : ""} • ${d.mobile || d.telephone_ligne || ""} • Port ${d.port || "-"}`;
@@ -189,8 +197,8 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     if (Array.isArray(list)) {
       list.sort((a, b) => {
-        const aIsDone = (a.statut || "").toLowerCase() === "termine";
-        const bIsDone = (b.statut || "").toLowerCase() === "termine";
+        const aIsDone = isItemTermine(a);
+        const bIsDone = isItemTermine(b);
         if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
         const da = parseTimestampSafely(a.modifie_le || a.updated_at || a.date);
         const db = parseTimestampSafely(b.modifie_le || b.updated_at || b.date);
@@ -200,7 +208,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       interventionsList = list;
       await chrome.storage.local.set({ cachedInterventions: list });
 
-      const totalEnCours = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+      const totalEnCours = interventionsList.filter((i) => !isItemTermine(i)).length;
       if (totalEnCours === 0 && interventionsList.length > 0) {
         statusTabFilter = "all";
         document.querySelectorAll(".popup-pill").forEach((pill) => {
@@ -226,8 +234,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   function renderPopupOptions() {
     if (!popupInterventionSelect) return;
 
-    const totalEnCours = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
-    const totalTerminees = interventionsList.filter((i) => (i.statut || "").toLowerCase() === "termine").length;
+    const totalEnCours = interventionsList.filter((i) => !isItemTermine(i)).length;
+    const totalTerminees = interventionsList.filter((i) => isItemTermine(i)).length;
     const totalAll = interventionsList.length;
 
     if (popupCountEnCours) popupCountEnCours.textContent = String(totalEnCours);
@@ -247,9 +255,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     } else {
       if (statusTabFilter === "en_cours") {
-        matching = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine");
-      } else if (statusTabFilter === "termine") {
-        matching = interventionsList.filter((i) => (i.statut || "").toLowerCase() === "termine");
+        matching = interventionsList.filter((i) => !isItemTermine(i));
+      } else if (statusTabFilter === "termine" || statusTabFilter === "terminees") {
+        matching = interventionsList.filter((i) => isItemTermine(i));
       }
     }
 
@@ -266,8 +274,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Select natif groupé
     popupInterventionSelect.innerHTML = '<option value="">-- Choisir une intervention --</option>';
 
-    const enCoursGroup = matching.filter((i) => (i.statut || "").toLowerCase() !== "termine");
-    const termineesGroup = matching.filter((i) => (i.statut || "").toLowerCase() === "termine");
+    const enCoursGroup = matching.filter((i) => !isItemTermine(i));
+    const termineesGroup = matching.filter((i) => isItemTermine(i));
 
     if (enCoursGroup.length > 0) {
       const optgroup = document.createElement("optgroup");
@@ -318,7 +326,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const limit = Math.min(items.length, 8);
     for (let i = 0; i < limit; i++) {
       const item = items[i];
-      const isDone = (item.statut || "").toLowerCase() === "termine";
+      const isDone = isItemTermine(item);
       const client = (item.nom_client || "Sans nom").trim();
       const fat = item.fat_ref ? item.fat_ref.trim() : "";
       const phone = item.mobile || item.telephone_ligne || "";

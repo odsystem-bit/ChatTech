@@ -6,7 +6,16 @@ import { parseServerDate } from "./date.js";
  * @returns {boolean}
  */
 export function isInterventionTerminee(intv) {
-  return (intv?.statut || "").toLowerCase() === "termine";
+  if (!intv || typeof intv !== "object") return false;
+  const s = String(intv.statut || "").trim().toLowerCase();
+  const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done") {
+    return true;
+  }
+  if (intv.date_cloture || intv.cloture_le || intv.cloture_at) {
+    return true;
+  }
+  return false;
 }
 
 /**

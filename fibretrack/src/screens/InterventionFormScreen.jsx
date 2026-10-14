@@ -35,6 +35,7 @@ import {
   ALL_FAT_PORTS,
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
+import { isInterventionTerminee } from "../lib/interventionFilters";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
@@ -1731,12 +1732,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         </div>
       </header>
 
-      {data.statut === "termine" && (
-        <div className="status-banner">
-          ✅ Intervention terminée
+      {isInterventionTerminee(data) && (
+        <div className="status-banner" style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "10px 14px", borderRadius: 8, margin: "12px 0", fontWeight: 500 }}>
+          ✅ <strong>Intervention clôturée et validée</strong>
           {data.modifie_par &&
-            ` - dernière modification par ${data.modifie_par} le ${new Date(data.modifie_le).toLocaleString()}`}
-          . Vous pouvez continuer à la modifier ; les autres techniciens verront vos changements.
+            ` — dernière modification par ${data.modifie_par} le ${new Date(data.modifie_le).toLocaleString()}`}
+          . Les modifications que vous apportez sont enregistrées en temps réel.
         </div>
       )}
 
@@ -3175,25 +3176,59 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       </div>
 
       <footer className="form-footer">
-        <div className="form-finish-card">
-          <div className="form-finish-header">
-            <span className="form-finish-icon">🏁</span>
-            <div>
-              <h4 className="form-finish-title">Clôture de l'intervention</h4>
-              <p className="form-finish-desc">
-                Assurez-vous que les informations, photos et poteaux sont bien complets avant de clôturer.
-              </p>
+        {isInterventionTerminee(data) ? (
+          <div className="form-finish-card is-done-card" style={{ background: "#f0fdf4", borderColor: "#86efac", padding: 18, borderRadius: 12, border: "1px solid #86efac" }}>
+            <div className="form-finish-header" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <span className="form-finish-icon" style={{ fontSize: 32 }}>✅</span>
+              <div>
+                <h4 className="form-finish-title" style={{ margin: "0 0 4px", color: "#166534", fontSize: 16, fontWeight: 700 }}>
+                  Intervention clôturée et validée (Terminée)
+                </h4>
+                <p className="form-finish-desc" style={{ margin: 0, color: "#15803d", fontSize: 13 }}>
+                  Ce dossier a été validé. Vos modifications sont enregistrées automatiquement.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: "#16a34a", borderColor: "#16a34a", padding: "10px 18px", fontWeight: 700 }}
+                onClick={() => onFinish(data)}
+              >
+                📄 Voir le rapport & les fiches →
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "10px 16px", fontWeight: 600 }}
+                onClick={() => onClose("terminees")}
+              >
+                🏠 Revenir à l'accueil
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            className="btn-finish-intervention"
-            onClick={() => setFinishModalOpen(true)}
-            disabled={finishing}
-          >
-            {finishing ? "Finalisation en cours…" : "🏁 Terminer l'intervention"}
-          </button>
-        </div>
+        ) : (
+          <div className="form-finish-card">
+            <div className="form-finish-header">
+              <span className="form-finish-icon">🏁</span>
+              <div>
+                <h4 className="form-finish-title">Clôture de l'intervention</h4>
+                <p className="form-finish-desc">
+                  Assurez-vous que les informations, photos et poteaux sont bien complets avant de clôturer.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn-finish-intervention"
+              onClick={() => setFinishModalOpen(true)}
+              disabled={finishing}
+            >
+              {finishing ? "Finalisation en cours…" : "🏁 Terminer l'intervention"}
+            </button>
+          </div>
+        )}
       </footer>
 
       {finishModalOpen && (
@@ -3267,7 +3302,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     onClick={() => {
                       setFinishModalOpen(false);
                       setFinishSuccessData(null);
-                      onClose();
+                      onClose("terminees");
                     }}
                   >
                     🏠 Accueil

@@ -1,10 +1,9 @@
 {
-  "version": "2.9.6",
-  "buildTime": "2026-10-14T22:05:00Z",
+  "version": "2.9.7",
+  "buildTime": "2026-10-14T22:50:00Z",
   "features": [
-    "Migration intégrale des photos sur disque SSD Hostinger : allègement de 99.7% de la BDD (187 Mo -> 445 Ko)",
-    "Compression automatique garantie à 1280px / 78% pour 100% des futures photos prises dans l'application",
-    "Génération de fiches PDF instantanée directement depuis le disque SSD",
-    "Synchronisation en direct ultra-légère et fin définitive des lenteurs d'actualisation"
+    "Clôture garantie et redirection automatique vers l'onglet Terminées : le dossier clôturé est immédiatement visible en haut de liste sans ambiguïté",
+    "Détection de statut ultra-robuste : tolérance des variantes orthographiques, accents et majuscules pour garantir un affichage fidèle",
+    "Interface formulaire réouvert clarifiée : badge explicite Intervention clôturée et validée, suppression de toute confusion d'état"
   ]
 }

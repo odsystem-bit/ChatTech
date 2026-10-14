@@ -253,6 +253,13 @@
       return isNaN(ts) ? 0 : ts;
     }
 
+    isItemTermine(item) {
+      if (!item) return false;
+      const s = String(item.statut || "").trim().toLowerCase();
+      const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done" || Boolean(item.date_cloture);
+    }
+
     async fetchApi(action, method = "GET", body = null) {
       let apiUrl = "https://fibretrack.mantota.com/api/index.php";
       let apiCode = "9999";
@@ -365,8 +372,8 @@
       if (Array.isArray(list) && list.length > 0) {
         // Tri chronologique strict (du plus récent au plus ancien)
         list.sort((a, b) => {
-          const aIsDone = (a.statut || "").toLowerCase() === "termine";
-          const bIsDone = (b.statut || "").toLowerCase() === "termine";
+          const aIsDone = this.isItemTermine(a);
+          const bIsDone = this.isItemTermine(b);
           if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
           const da = this.parseTimestampSafely(a.modifie_le || a.updated_at || a.date);
           const db = this.parseTimestampSafely(b.modifie_le || b.updated_at || b.date);
@@ -378,7 +385,7 @@
           chrome.storage.local.set({ cachedInterventions: list }).catch(() => {});
         }
 
-        const totalEnCours = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+        const totalEnCours = this.interventions.filter((i) => !this.isItemTermine(i)).length;
         if (totalEnCours === 0 && this.interventions.length > 0) {
           this.statusTabFilter = "all";
           document.querySelectorAll(".chaptech-filter-pill").forEach((pill) => {
@@ -423,8 +430,8 @@
       const countTerminees = document.getElementById("count-terminees");
 
       // Calcul des compteurs globaux
-      const totalEnCours = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
-      const totalTerminees = this.interventions.filter((i) => (i.statut || "").toLowerCase() === "termine").length;
+      const totalEnCours = this.interventions.filter((i) => !this.isItemTermine(i)).length;
+      const totalTerminees = this.interventions.filter((i) => this.isItemTermine(i)).length;
       const totalAll = this.interventions.length;
 
       if (countEnCours) countEnCours.textContent = String(totalEnCours);
@@ -444,11 +451,11 @@
           return text.includes(filter);
         });
       } else {
-        // Sans recherche textuelle, appliquer l'onglet actif ('en_cours', 'termine', 'all')
+        // Sans recherche textuelle, appliquer l'onglet actif ('en_cours', 'termine', 'terminees', 'all')
         if (this.statusTabFilter === "en_cours") {
-          matchingInterventions = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine");
-        } else if (this.statusTabFilter === "termine") {
-          matchingInterventions = this.interventions.filter((i) => (i.statut || "").toLowerCase() === "termine");
+          matchingInterventions = this.interventions.filter((i) => !this.isItemTermine(i));
+        } else if (this.statusTabFilter === "termine" || this.statusTabFilter === "terminees") {
+          matchingInterventions = this.interventions.filter((i) => this.isItemTermine(i));
         }
       }
 
@@ -466,8 +473,8 @@
       if (!select) return;
       select.innerHTML = '<option value="">-- Choisir une intervention --</option>';
 
-      const enCoursGroup = matchingInterventions.filter((i) => (i.statut || "").toLowerCase() !== "termine");
-      const termineesGroup = matchingInterventions.filter((i) => (i.statut || "").toLowerCase() === "termine");
+      const enCoursGroup = matchingInterventions.filter((i) => !this.isItemTermine(i));
+      const termineesGroup = matchingInterventions.filter((i) => this.isItemTermine(i));
 
       if (enCoursGroup.length > 0) {
         const optgroup = document.createElement("optgroup");
@@ -520,7 +527,7 @@
       const limit = Math.min(items.length, 10);
       for (let i = 0; i < limit; i++) {
         const item = items[i];
-        const isDone = (item.statut || "").toLowerCase() === "termine";
+        const isDone = this.isItemTermine(item);
         const client = (item.nom_client || "Sans nom").trim();
         const fat = item.fat_ref ? item.fat_ref.trim() : "";
         const phone = item.mobile || item.telephone_ligne || "";
@@ -663,8 +670,9 @@
       card.style.display = "block";
       btnAutofill.disabled = false;
 
+      const isDone = this.isItemTermine(d);
       document.getElementById("card-client-name").textContent = d.nom_client || "Client Inconnu";
-      document.getElementById("card-status").textContent = d.statut === "termine" ? "✅ Terminé" : "⏳ En cours";
+      document.getElementById("card-status").textContent = isDone ? "✅ Terminé" : "⏳ En cours";
       document.getElementById("card-phone").textContent = d.mobile || d.telephone_ligne || "-";
       document.getElementById("card-zone").textContent = d.adresse_zone || "-";
       document.getElementById("card-fat").textContent = d.fat_ref ? `${d.fat_ref} (${d.msan || "MSAN"})` : "-";

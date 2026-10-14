@@ -122,12 +122,19 @@ async function fetchInterventionsList() {
       return isNaN(ts) ? 0 : ts;
     };
 
+    const isItemTermine = (item) => {
+      if (!item) return false;
+      const s = String(item.statut || "").trim().toLowerCase();
+      const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      return norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done" || Boolean(item.date_cloture);
+    };
+
     const list = await res.json();
     if (Array.isArray(list)) {
       // Trier : 'en_cours' en priorité, puis par date décroissante
       list.sort((a, b) => {
-        const aIsDone = (a.statut || "").toLowerCase() === "termine";
-        const bIsDone = (b.statut || "").toLowerCase() === "termine";
+        const aIsDone = isItemTermine(a);
+        const bIsDone = isItemTermine(b);
         if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
         const da = parseTimestampSafely(a.modifie_le || a.updated_at || a.date);
         const db = parseTimestampSafely(b.modifie_le || b.updated_at || b.date);
