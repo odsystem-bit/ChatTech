@@ -40,8 +40,55 @@ function canonicalDesignation($designation) {
     'connecteur mecanique' => 'connecteur',
     'connecteur mécanique' => 'connecteur',
     'connecteur' => 'connecteur',
+    'ont box' => 'ont',
+    'box ont' => 'ont',
+    'routeur ont' => 'ont',
+    'pto fibre' => 'pto',
+    'prise pto' => 'pto',
   ];
   return $aliases[$normalized] ?? trim((string)$designation);
+}
+
+function buildTotalMaterielPose(array $d): array {
+  $incomingMat = $d['materiel_pose'] ?? [];
+  if (is_object($incomingMat)) $incomingMat = (array)$incomingMat;
+  if (!is_array($incomingMat)) $incomingMat = [];
+
+  $total = [];
+  foreach ($incomingMat as $rawDesig => $qty) {
+    $canon = canonicalDesignation($rawDesig);
+    $q = (int)$qty;
+    if ($q > 0) {
+      $total[$canon] = ($total[$canon] ?? 0) + $q;
+    }
+  }
+
+  // Déduction automatique ONT posé (1 unité) si serial number / mac renseigné
+  if (!empty($d['ont_sn']) || !empty($d['sn']) || !empty($d['mac'])) {
+    if (!isset($total['ont'])) {
+      $total['ont'] = 1;
+    }
+  }
+
+  // Déduction automatique PTO posé
+  $ptoQte = (int)($d['pto_qte'] ?? 0);
+  if ($ptoQte > 0 && !isset($total['pto'])) {
+    $total['pto'] = $ptoQte;
+  }
+
+  // Déduction automatique Répéteur WiFi posé
+  $repeteurQte = (int)($d['repeteur_wifi_qte'] ?? 0);
+  if ($repeteurQte > 0 && !isset($total['repeteur_wifi'])) {
+    $total['repeteur_wifi'] = $repeteurQte;
+  }
+
+  // Déduction automatique Jarretière optique si renseignée
+  $jarretiereQte = (int)($d['jarretiere_qte'] ?? 0);
+  if ($jarretiereQte > 0 && !isset($total['jarretiere'])) {
+    $total['jarretiere'] = $jarretiereQte;
+  }
+
+  return $total;
 }
 
 function lockStockQuantity(PDO $pdo, string $designation): int {
@@ -52,12 +99,14 @@ function lockStockQuantity(PDO $pdo, string $designation): int {
   return (int)$stmt->fetchColumn();
 }
 
-function changeStockQuantity(PDO $pdo, string $designation, int $delta, array $details = []): int {
-  $designation = trim($designation);
+function changeStockQuantity(PDO $pdo, string $designation, int $delta, array $details = [], bool $allowNegative = false): int {
+  $designation = canonicalDesignation($designation);
   if ($designation === '') throw new Exception('Désignation requise');
   $current = lockStockQuantity($pdo, $designation);
   $next = $current + $delta;
-  if ($next < 0) throw new Exception("Stock insuffisant pour $designation");
+  if (!$allowNegative && $next < 0) {
+    throw new Exception("Stock insuffisant pour $designation (actuel: $current, demandé: " . abs($delta) . ")");
+  }
   $stmt = $pdo->prepare('UPDATE stock SET quantite = ? WHERE designation = ?');
   $stmt->execute([$next, $designation]);
   if ($delta !== 0) {
@@ -71,7 +120,7 @@ function changeStockQuantity(PDO $pdo, string $designation, int $delta, array $d
 function setStockQuantity(PDO $pdo, string $designation, int $quantity, array $details = []): int {
   if ($quantity < 0) throw new Exception('La quantité ne peut pas être négative');
   $current = lockStockQuantity($pdo, trim($designation));
-  return changeStockQuantity($pdo, trim($designation), $quantity - $current, $details);
+  return changeStockQuantity($pdo, trim($designation), $quantity - $current, $details, false);
 }
 
 function db() {
@@ -482,17 +531,19 @@ try {
       if (!is_array($incomingGps)) $incomingGps = [];
       if ($existing) {
         $serverGps = json_decode($existing['points_gps'] ?? '[]', true) ?? [];
-        if (empty($incomingGps)) {
-          // Liste vide envoyée -> garder la liste serveur complète
+        if (empty($incomingGps) && !($changedFields !== null && in_array('points_gps', $changedFields, true))) {
+          // Liste vide envoyée -> garder la liste serveur complète seulement si points_gps n'est pas dans changed_fields
           $incomingGps = $serverGps;
         } else {
-          $serverByHoro = [];
+          $serverByIdOrHoro = [];
           foreach ($serverGps as $pt) {
-            if (!empty($pt['horodatage'])) $serverByHoro[$pt['horodatage']] = $pt;
+            $k = !empty($pt['id']) ? $pt['id'] : ($pt['horodatage'] ?? '');
+            if ($k !== '') $serverByIdOrHoro[$k] = $pt;
           }
           foreach ($incomingGps as &$pt) {
-            if (empty($pt['photo']) && !empty($pt['horodatage']) && isset($serverByHoro[$pt['horodatage']])) {
-              $pt['photo'] = $serverByHoro[$pt['horodatage']]['photo'] ?? '';
+            $k = !empty($pt['id']) ? $pt['id'] : ($pt['horodatage'] ?? '');
+            if (empty($pt['photo']) && $k !== '' && isset($serverByIdOrHoro[$k])) {
+              $pt['photo'] = $serverByIdOrHoro[$k]['photo'] ?? '';
             }
           }
           unset($pt);
@@ -504,7 +555,7 @@ try {
       if (!is_array($incomingWa)) $incomingWa = [];
       if ($existing) {
         $serverWa = json_decode($existing['whatsapp_photos'] ?? '[]', true) ?? [];
-        if (empty($incomingWa)) {
+        if (empty($incomingWa) && !($changedFields !== null && in_array('whatsapp_photos', $changedFields, true))) {
           $incomingWa = $serverWa;
         } else {
           $serverById = [];
@@ -552,28 +603,48 @@ try {
         $incomingMat = $mergedMat;
       }
       if ($patchMode && in_array('points_gps', $changedFields, true)) {
-        $serverByHoro = [];
+        $serverByIdOrHoro = [];
         $deletedPoints = array_fill_keys($d['deleted_points'] ?? [], true);
         foreach (json_decode($existing['points_gps'] ?? '[]', true) ?? [] as $point) {
-          $key = $point['horodatage'] ?? '';
-          if ($key !== '' && !isset($deletedPoints[$key])) $serverByHoro[$key] = $point;
+          $idKey = $point['id'] ?? '';
+          $horoKey = $point['horodatage'] ?? '';
+          if (($idKey !== '' && isset($deletedPoints[$idKey])) || ($horoKey !== '' && isset($deletedPoints[$horoKey]))) {
+            continue;
+          }
+          $itemKey = $idKey !== '' ? $idKey : ($horoKey !== '' ? $horoKey : uniqid());
+          $serverByIdOrHoro[$itemKey] = $point;
         }
         foreach ($incomingGps as $point) {
-          $key = $point['horodatage'] ?? '';
-          if ($key !== '' && !isset($deletedPoints[$key])) $serverByHoro[$key] = array_merge($serverByHoro[$key] ?? [], $point);
+          $idKey = $point['id'] ?? '';
+          $horoKey = $point['horodatage'] ?? '';
+          if (($idKey !== '' && isset($deletedPoints[$idKey])) || ($horoKey !== '' && isset($deletedPoints[$horoKey]))) {
+            continue;
+          }
+          $itemKey = $idKey !== '' ? $idKey : ($horoKey !== '' ? $horoKey : uniqid());
+          $serverByIdOrHoro[$itemKey] = array_merge($serverByIdOrHoro[$itemKey] ?? [], $point);
         }
-        $incomingGps = array_values($serverByHoro);
+        $incomingGps = array_values($serverByIdOrHoro);
       }
       if ($patchMode && in_array('whatsapp_photos', $changedFields, true)) {
         $serverById = [];
         $deletedPhotos = array_fill_keys($d['deleted_whatsapp_photos'] ?? [], true);
         foreach (json_decode($existing['whatsapp_photos'] ?? '[]', true) ?? [] as $photo) {
-          $key = $photo['id'] ?? '';
-          if ($key !== '' && !isset($deletedPhotos[$key])) $serverById[$key] = $photo;
+          $idKey = $photo['id'] ?? '';
+          $slotKey = $photo['slot'] ?? '';
+          if (($idKey !== '' && isset($deletedPhotos[$idKey])) || ($slotKey !== '' && isset($deletedPhotos[$slotKey]))) {
+            continue;
+          }
+          $itemKey = $idKey !== '' ? $idKey : ($slotKey !== '' ? $slotKey : uniqid());
+          $serverById[$itemKey] = $photo;
         }
         foreach ($incomingWa as $photo) {
-          $key = $photo['id'] ?? '';
-          if ($key !== '' && !isset($deletedPhotos[$key])) $serverById[$key] = array_merge($serverById[$key] ?? [], $photo);
+          $idKey = $photo['id'] ?? '';
+          $slotKey = $photo['slot'] ?? '';
+          if (($idKey !== '' && isset($deletedPhotos[$idKey])) || ($slotKey !== '' && isset($deletedPhotos[$slotKey]))) {
+            continue;
+          }
+          $itemKey = $idKey !== '' ? $idKey : ($slotKey !== '' ? $slotKey : uniqid());
+          $serverById[$itemKey] = array_merge($serverById[$itemKey] ?? [], $photo);
         }
         $incomingWa = array_values($serverById);
       }
@@ -638,10 +709,11 @@ try {
           $usageStmt->execute([$d['id']]);
           $recordedUsage = [];
           foreach ($usageStmt->fetchAll() as $movement) $recordedUsage[$movement['designation']] = (int)$movement['quantite'];
-          $designations = array_unique(array_merge(array_keys($recordedUsage), array_keys($incomingMat)));
+          $totalMat = buildTotalMaterielPose($d);
+          $designations = array_unique(array_merge(array_keys($recordedUsage), array_keys($totalMat)));
           foreach ($designations as $desig) {
-            $target = (int)($incomingMat[$desig] ?? 0);
-            if ($target < 0) throw new Exception("Quantité invalide pour $desig");
+            $target = (int)($totalMat[$desig] ?? 0);
+            if ($target < 0) continue;
             $delta = $target - ($recordedUsage[$desig] ?? 0);
             if ($delta === 0) continue;
             changeStockQuantity($pdo, $desig, -$delta, [
@@ -649,7 +721,7 @@ try {
               'nom_client' => $d['nom_client'] ?? ($existing['nom_client'] ?? ''),
               'nom_technicien' => $d['nom_technicien'] ?? ($existing['nom_technicien'] ?? ''),
               'motif' => $delta > 0 ? 'Pose intervention' : 'Correction matériel intervention',
-            ]);
+            ], true);
             $deducted++;
           }
         }
@@ -797,16 +869,16 @@ try {
       $pdo->beginTransaction();
       try {
         $deducted = 0;
-        $updStmt = $pdo->prepare('UPDATE stock SET quantite = quantite - ? WHERE designation = ?');
-        $mvStmt = $pdo->prepare('INSERT INTO stock_movements (designation, type, quantite, intervention_id, nom_client, nom_technicien, motif) VALUES (?, ?, ?, ?, ?, ?, ?)');
         foreach ($materiel as $rawDesig => $qty) {
           $desig = canonicalDesignation($rawDesig);
           $qty = (int)$qty;
           if ($qty <= 0) continue;
-          $updStmt = $pdo->prepare('UPDATE stock SET quantite = quantite - ? WHERE designation = ? AND quantite >= ?');
-          $updStmt->execute([$qty, $desig, $qty]);
-          if ($updStmt->rowCount() !== 1) throw new Exception("Stock insuffisant pour $desig");
-          $mvStmt->execute([$desig, 'sortie', $qty, $interventionId, $nomClient, $nomTech, 'Pose intervention']);
+          changeStockQuantity($pdo, $desig, -$qty, [
+            'intervention_id' => $interventionId ?: null,
+            'nom_client' => $nomClient ?: null,
+            'nom_technicien' => $nomTech ?: null,
+            'motif' => 'Pose intervention',
+          ], true);
           $deducted++;
         }
         if ($interventionId) {

@@ -298,3 +298,28 @@ test('FieldMapping - Dynamic materiel_pose and piton extraction works with real 
   assert.equal(matched.definition.valueExtractor(intvWithCustom), '8');
 });
 
+test('FieldMapping - Independent pole options with type_poteau (SBEE / Petit Jean) and boolean options', () => {
+  const defs = FieldMapping.FIELD_DEFINITIONS;
+
+  const intv = {
+    points_gps: [
+      { id: 'p1', type: 'Poteau', numero: 1, type_poteau: 'SBEE', traverse: true, implante: false, arme: true },
+      { id: 'p2', type: 'Poteau', numero: 2, type_poteau: 'Petit Jean', traverse: false, implante: true, arme: false },
+      { id: 'p3', type: 'Poteau', numero: 3, type_poteau: 'SBEE', traverse: true, implante: false, arme: false },
+    ],
+  };
+
+  // Unique poles total
+  assert.equal(defs.poteaux_utilises.valueExtractor(intv), '3');
+  // SBEE count: p1, p3 -> 2
+  assert.equal(defs.poteaux_sbee_utilises.valueExtractor(intv), '2');
+  // Petit Jean count: p2 -> 1
+  assert.equal(defs.poteaux_petit_jean_utilises.valueExtractor(intv), '1');
+  // Traversés: p1, p3 -> 2
+  assert.equal(defs.nb_poteaux_traverses.valueExtractor(intv), '2');
+  // Implantés: p2 -> 1
+  assert.equal(defs.nb_poteaux_implantes.valueExtractor(intv), '1');
+  // Armés: p1 -> 1
+  assert.equal(defs.nb_poteaux_armes.valueExtractor(intv), '1');
+});
+

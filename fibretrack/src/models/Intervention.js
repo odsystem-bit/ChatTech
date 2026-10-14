@@ -1,9 +1,9 @@
-import { getApiAuthHeaders } from "./Account";
+import { getApiAuthHeaders } from "./Account.js";
 
 // Modèle de données "Intervention" - synchronisé avec le backend MySQL.
 // Toutes les interventions sont partagées entre tous les techniciens.
 
-const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
+const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
 async function apiPost(action, body = {}) {
   const res = await fetch(`${API_URL}?action=${action}`, {
@@ -30,10 +30,73 @@ const INTV_STORAGE_PREFIX = "fibretrack_intv_";
 export function ensureInterventionDefaults(data) {
   if (!data || typeof data !== "object") return createEmptyIntervention();
   const empty = createEmptyIntervention(data.nom_technicien || "");
+  const pointsGps = Array.isArray(data.points_gps) ? data.points_gps.map((pt, idx) => {
+    if (pt && pt.type === "Poteau") {
+      const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (pt.sous_type !== "Implanté");
+      const isImplante = pt.implante !== undefined ? Boolean(pt.implante) : (pt.sous_type === "Implanté");
+      const isArme = pt.arme !== undefined ? Boolean(pt.arme) : (pt.sous_type === "Armé");
+      const typePoteau = pt.type_poteau || pt.proprietaire || "";
+      return {
+        id: pt.id || crypto.randomUUID(),
+        ...pt,
+        numero: Number(pt.numero || idx + 1),
+        type_poteau: typePoteau,
+        proprietaire: typePoteau,
+        traverse: isTraverse,
+        implante: isImplante,
+        arme: isArme,
+        sous_type: pt.sous_type || (isImplante ? "Implanté" : isArme ? "Armé" : "Traversé"),
+      };
+    }
+    return pt;
+  }) : [];
+
+  const existingPoleNums = new Set(pointsGps.filter((p) => p && p.type === "Poteau").map((p) => Number(p.numero)));
+  if (Array.isArray(data.whatsapp_photos)) {
+    data.whatsapp_photos.forEach((wa) => {
+      const m = wa?.slot?.match(/^poteau_(\d+)$/);
+      if (m) {
+        const num = Number(m[1]);
+        if (!existingPoleNums.has(num)) {
+          existingPoleNums.add(num);
+          pointsGps.push({
+            id: wa.id || crypto.randomUUID(),
+            type: "Poteau",
+            numero: num,
+            traverse: true,
+            implante: false,
+            arme: false,
+            type_poteau: "",
+            proprietaire: "",
+            sous_type: "Traversé",
+            photo: wa.url || "",
+            lat: wa.lat ?? null,
+            lng: wa.lng ?? null,
+            precision_m: wa.precision_m ?? null,
+            horodatage: wa.horodatage || new Date().toISOString(),
+            lieu: wa.lieu || "",
+            ajoute_par: data.nom_technicien || "",
+          });
+        }
+      }
+    });
+  }
+
+  const poleItems = pointsGps.filter((p) => p && p.type === "Poteau");
+  const computedTraverses = poleItems.length > 0
+    ? poleItems.filter((p) => Boolean(p.traverse)).length
+    : Number(data.nb_poteaux_traverses ?? 0);
+  const computedImplantes = poleItems.length > 0
+    ? poleItems.filter((p) => Boolean(p.implante)).length
+    : Number(data.nb_poteaux_implantes ?? 0);
+  const computedArmes = poleItems.length > 0
+    ? poleItems.filter((p) => Boolean(p.arme)).length
+    : Number(data.nb_poteaux_armes ?? 0);
+
   return {
     ...empty,
     ...data,
-    points_gps: Array.isArray(data.points_gps) ? data.points_gps : [],
+    points_gps: pointsGps,
     whatsapp_photos: Array.isArray(data.whatsapp_photos) ? data.whatsapp_photos : [],
     materiel_pose: (data.materiel_pose && typeof data.materiel_pose === "object") ? data.materiel_pose : {},
     depart_m: Number(data.depart_m ?? 0),
@@ -41,9 +104,9 @@ export function ensureInterventionDefaults(data) {
     lineaire_m: Number(data.lineaire_m ?? 0),
     puissance_fat_dbm: Number(data.puissance_fat_dbm ?? 0),
     puissance_pto_dbm: Number(data.puissance_pto_dbm ?? 0),
-    nb_poteaux_traverses: Number(data.nb_poteaux_traverses ?? 0),
-    nb_poteaux_implantes: Number(data.nb_poteaux_implantes ?? 0),
-    nb_poteaux_armes: Number(data.nb_poteaux_armes ?? 0),
+    nb_poteaux_traverses: computedTraverses,
+    nb_poteaux_implantes: computedImplantes,
+    nb_poteaux_armes: computedArmes,
     pto_qte: Number(data.pto_qte ?? 0),
     repeteur_wifi_qte: Number(data.repeteur_wifi_qte ?? 0),
     port_disponible: Number(data.port_disponible ?? 0),

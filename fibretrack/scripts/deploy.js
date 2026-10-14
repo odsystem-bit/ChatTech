@@ -75,7 +75,13 @@ conn.on('ready', () => {
     }
 
     walkAndUpload(distDir, remoteBase)
-      .then(() => {
+      .then(async () => {
+        const localApiFile = path.join(projectRoot, 'api', 'index.php');
+        if (fs.existsSync(localApiFile)) {
+          await ensureRemoteDir(`${remoteBase}/api`);
+          await uploadFile(localApiFile, `${remoteBase}/api/index.php`);
+          console.log('✓ api/index.php mis à jour sur Hostinger !');
+        }
         console.log('✓ Tous les fichiers mis à jour avec succès sur Hostinger !');
         // Vérification
         conn.exec(`cat ${remoteBase}/version.json`, (err, stream) => {

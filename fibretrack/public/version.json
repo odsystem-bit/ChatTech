@@ -1,14 +1,13 @@
 {
-  "version": "2.7.0",
-  "buildTime": "2026-10-14T01:45:00Z",
+  "version": "2.8.0",
+  "buildTime": "2026-10-14T11:35:00Z",
   "features": [
-    "Automatisation dynamique des ports FAT disponibles (ports 1 à 8) calculés immédiatement dès la saisie du port accordé",
-    "Masquage ergonomique temporaire des champs RP1 et Rue dans le matériel standard sans suppression de données",
-    "Masquage des onglets Mise en service et Satisfaction dans la navigation du formulaire",
-    "Refonte responsive complète PC / Tablette / Mobile : dashboard multi-colonnes jusqu'à 1440px sur PC, grille fluide sur tablette, affichage sans débordement sur smartphone",
-    "Gestion dynamique des photos de poteaux géolocalisés dans la section Photos CelPros (Ajouter un poteau, GPS haute précision obligatoire, incrustation photo)",
-    "Reconnaissance OCR automatique des références FAT et MSAN sur photo du boîtier FAT",
-    "Scanner ultra-rapide MAC et SN avec moteur OCR hybride",
-    "Détection GPS automatique de l'adresse et de la zone d'intervention"
+    "Repositionnement ergonomique du bouton Terminer l'intervention en fin de formulaire avec modale de confirmation obligatoire (zéro clic accidentel)",
+    "Refonte complète du module de Stock : dashboard KPI, recherche instantanée, filtres d'état, badges de disponibilité et mouvements express",
+    "Correction intégrale de la déduction de stock : déduction automatique de l'ONT, PTO, jarretière, tolérance des stocks négatifs tracés sans échec de sauvegarde",
+    "Module Poteaux Terrain : Annulation réelle du poteau sélectionné sans décalage, options indépendantes Petit Jean/SBEE et Traversé/Implanté/Armé, bouton + Ajouter en bas",
+    "Zone de saisie rapide des informations client avec préservation absolue des zéros initiaux et détection des conflits",
+    "Audit et validation à 100% de l'extension CelPros : extraction fidèle de toutes les colonnes et des caractéristiques de poteaux",
+    "Automatisation dynamique des ports FAT disponibles (ports 1 à 8) calculés dès la saisie du port accordé"
   ]
 }

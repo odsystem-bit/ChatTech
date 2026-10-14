@@ -31,6 +31,7 @@ import {
   computeAvailablePorts,
   ALL_FAT_PORTS,
 } from "../lib/ports";
+import { parseClientInfo } from "../lib/clientParser";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
@@ -193,11 +194,24 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [scannerTarget, setScannerTarget] = useState("both");
   const [finishing, setFinishing] = useState(false);
   const finishingRef = useRef(false);
+  const [finishModalOpen, setFinishModalOpen] = useState(false);
 
   // Géolocalisation automatique de la zone (Quartier, Ville)
   const [detectingZone, setDetectingZone] = useState(false);
   const [zoneStatus, setZoneStatus] = useState("");
   const [zoneStatusType, setZoneStatusType] = useState("info");
+
+  const dataRef = useRef(data);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+
+  // Saisie rapide des informations client
+  const [quickClientOpen, setQuickClientOpen] = useState(true);
+  const [quickClientText, setQuickClientText] = useState("");
+  const [quickClientStatus, setQuickClientStatus] = useState("");
+  const [quickClientWarnings, setQuickClientWarnings] = useState([]);
+  const [quickClientConflictModal, setQuickClientConflictModal] = useState(null);
 
   // Détection OCR automatique sur photo FAT (fat_ref & msan)
   const [ocrNotification, setOcrNotification] = useState(null);
@@ -215,8 +229,6 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const poleGalleryInputRef = useRef(null);
   const targetPoleNumeroRef = useRef(1);
   const [poleCapturingNumero, setPoleCapturingNumero] = useState(null);
-  const [poleSousTypes, setPoleSousTypes] = useState({});
-  const [extraPoleSlots, setExtraPoleSlots] = useState(0);
 
   const selectedPorts = (data.ports_disponibles || "")
     .split(",")
@@ -332,9 +344,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   function update(field, value) {
     if (field === "points_gps") {
-      const remaining = new Set(value.map((point) => point.horodatage));
-      for (const point of data.points_gps) {
-        if (!remaining.has(point.horodatage)) deletedGpsPointIdsRef.current.add(point.horodatage);
+      const remainingHoros = new Set((value || []).map((point) => point.horodatage).filter(Boolean));
+      const remainingIds = new Set((value || []).map((point) => point.id).filter(Boolean));
+      for (const point of (data.points_gps || [])) {
+        const hasHoro = point.horodatage && remainingHoros.has(point.horodatage);
+        const hasId = point.id && remainingIds.has(point.id);
+        if (!hasHoro && !hasId) {
+          if (point.horodatage) deletedGpsPointIdsRef.current.add(point.horodatage);
+          if (point.id) deletedGpsPointIdsRef.current.add(point.id);
+        }
       }
     }
     markDirty(
@@ -355,15 +373,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         next.lineaire_m = Math.max(0, arrivee - depart);
       }
       if (field === "points_gps") {
-        next.nb_poteaux_traverses = value.filter(
-          (p) => p.type === "Poteau" && p.sous_type === "Traversé"
-        ).length;
-        next.nb_poteaux_implantes = value.filter(
-          (p) => p.type === "Poteau" && p.sous_type === "Implanté"
-        ).length;
-        next.nb_poteaux_armes = value.filter(
-          (p) => p.type === "Poteau" && p.sous_type === "Armé"
-        ).length;
+        const poleList = (value || []).filter((p) => p && p.type === "Poteau");
+        next.nb_poteaux_traverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
+        next.nb_poteaux_implantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
+        next.nb_poteaux_armes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
       }
       // Sauvegarde locale instantanée à 0ms dans le navigateur/smartphone
       saveInterventionLocally(next);
@@ -480,9 +493,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function commitPoint() {
+    const isPoteau = resolvedType === "Poteau";
     const point = {
+      id: crypto.randomUUID(),
       type: resolvedType,
-      ...(resolvedType === "Poteau" ? { sous_type: sousType, proprietaire: proprietaire.trim() } : {}),
+      ...(isPoteau ? {
+        sous_type: sousType,
+        proprietaire: proprietaire.trim(),
+        type_poteau: proprietaire.trim(),
+        traverse: sousType !== "Implanté",
+        implante: sousType === "Implanté",
+        arme: sousType === "Armé",
+      } : {}),
       ...pendingCapture,
       ajoute_par: currentUser,
     };
@@ -492,14 +514,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (pendingCapture.photo) {
       const isFat = resolvedType === "FAT";
       const isAbonne = resolvedType === "Abonné";
-      const isPoteau = resolvedType === "Poteau";
-      const slot = isFat ? "fat" : isAbonne ? "ont_sn" : isPoteau ? "poteau" : undefined;
+      const slot = isFat ? "fat" : isAbonne ? "ont_sn" : isPoteau ? `poteau_${point.numero}` : undefined;
       const galleryPhoto = {
         id: crypto.randomUUID(),
         ...(slot
           ? {
               slot,
-              type: slot,
+              type: isPoteau ? "poteau" : slot,
               label: isFat ? "Boîtier FAT" : isAbonne ? "Étiquette Box ONT (MAC & SN)" : `Poteau ${sousType} ${point.numero}`,
               name: `${slot}.jpg`,
               description: `${isFat ? "Boîtier FAT" : isAbonne ? "Étiquette Box ONT (MAC & SN)" : `Poteau ${sousType}`} - ${data.nom_client || "Intervention"}`,
@@ -514,7 +535,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         from_gps: true,
         added: new Date().toISOString(),
       };
-      setWhatsappPhotos((prev) => [...prev, galleryPhoto]);
+      setWhatsappPhotos((prev) => {
+        const filtered = slot ? prev.filter((p) => p.slot !== slot) : prev;
+        return [...filtered, galleryPhoto];
+      });
       markDirty("whatsapp_photos");
 
       if (isFat) {
@@ -621,34 +645,87 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
-  // ===== OCR automatique sur photo du boîtier FAT =====
+  // ===== OCR automatique sur photo du boîtier FAT (avec vérification de conformité) =====
 
   const runFatOcrOnPhoto = useCallback(async (photoDataUrl) => {
     if (!photoDataUrl) return;
     setOcrProcessing(true);
     try {
       const ocrResult = await recognizeFatAndMsanFromImage(photoDataUrl);
-      let foundAny = false;
-      if (ocrResult.fat_ref) {
-        update("fat_ref", ocrResult.fat_ref);
-        foundAny = true;
+      const currentFat = dataRef.current?.fat_ref || "";
+      const currentMsan = dataRef.current?.msan || "";
+
+      const norm = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+      const hasOcrFat = Boolean(ocrResult.fat_ref);
+      const hasOcrMsan = Boolean(ocrResult.msan);
+
+      if (!hasOcrFat && !hasOcrMsan) {
+        setOcrNotification({
+          text: "ℹ️ Photo FAT enregistrée. Référence FAT et MSAN non lisibles automatiquement sur la boîte, vous pouvez les renseigner manuellement.",
+          success: false,
+        });
+        setTimeout(() => setOcrNotification(null), 9000);
+        return;
       }
-      if (ocrResult.msan) {
-        update("msan", ocrResult.msan);
-        foundAny = true;
+
+      const updates = {};
+      const statusParts = [];
+      let isConforme = true;
+      let hadExisting = false;
+
+      // 1. Vérification / affectation Référence FAT
+      if (hasOcrFat) {
+        const ocrFat = ocrResult.fat_ref;
+        if (currentFat) {
+          hadExisting = true;
+          if (norm(currentFat) === norm(ocrFat)) {
+            statusParts.push(`FAT conforme (${ocrFat})`);
+          } else {
+            isConforme = false;
+            updates.fat_ref = ocrFat;
+            statusParts.push(`FAT non conforme corrigé ("${currentFat}" ➔ "${ocrFat}")`);
+          }
+        } else {
+          updates.fat_ref = ocrFat;
+          statusParts.push(`FAT détecté ("${ocrFat}")`);
+        }
       }
-      let msg = "";
-      if (ocrResult.fat_ref && ocrResult.msan) {
-        msg = `✅ OCR FAT : FAT = "${ocrResult.fat_ref}" et MSAN = "${ocrResult.msan}" détectés et enregistrés automatiquement !`;
-      } else if (ocrResult.fat_ref) {
-        msg = `✅ OCR FAT : Référence FAT = "${ocrResult.fat_ref}" détectée et enregistrée automatiquement !`;
-      } else if (ocrResult.msan) {
-        msg = `✅ OCR FAT : MSAN = "${ocrResult.msan}" détecté et enregistré automatiquement !`;
+
+      // 2. Vérification / affectation MSAN
+      if (hasOcrMsan) {
+        const ocrMsan = ocrResult.msan;
+        if (currentMsan) {
+          hadExisting = true;
+          if (norm(currentMsan) === norm(ocrMsan)) {
+            statusParts.push(`MSAN conforme (${ocrMsan})`);
+          } else {
+            isConforme = false;
+            updates.msan = ocrMsan;
+            statusParts.push(`MSAN non conforme corrigé ("${currentMsan}" ➔ "${ocrMsan}")`);
+          }
+        } else {
+          updates.msan = ocrMsan;
+          statusParts.push(`MSAN détecté ("${ocrMsan}")`);
+        }
+      }
+
+      // Appliquer les mises à jour / corrections
+      for (const [k, v] of Object.entries(updates)) {
+        update(k, v);
+      }
+
+      let notifMsg = "";
+      if (hadExisting && isConforme) {
+        notifMsg = `✅ Conforme : La photo du boîtier FAT valide parfaitement les informations (${statusParts.join(", ")}). Validé automatiquement !`;
+      } else if (hadExisting && !isConforme) {
+        notifMsg = `⚠️ Contrôle photo FAT : Correction effectuée d'après la photo du boîtier (${statusParts.join(", ")}).`;
       } else {
-        msg = "ℹ️ Photo FAT enregistrée. Renseignez Référence FAT et MSAN manuellement si non lisibles sur la boîte.";
+        notifMsg = `✅ Boîtier FAT analysé : ${statusParts.join(", ")}. Validé automatiquement !`;
       }
-      setOcrNotification({ text: msg, success: foundAny });
-      setTimeout(() => setOcrNotification(null), 9000);
+
+      setOcrNotification({ text: notifMsg, success: isConforme || !hadExisting });
+      setTimeout(() => setOcrNotification(null), 10000);
     } catch (err) {
       console.warn("OCR FAT error:", err);
     } finally {
@@ -810,6 +887,93 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
+  // ===== Saisie rapide des informations client =====
+  function handleApplyQuickClientText(textToParse) {
+    const raw = typeof textToParse === "string" ? textToParse : quickClientText;
+    const parsed = parseClientInfo(raw);
+    if (!parsed.success || parsed.extractedCount === 0) {
+      setQuickClientStatus("⚠️ Aucune information reconnue dans le texte collé.");
+      setQuickClientWarnings(parsed.warnings);
+      return;
+    }
+
+    const { nom_client, telephone_ligne, mobile, msan, fat_ref } = parsed.data;
+
+    // Détecter les conflits avec les valeurs existantes déjà saisies
+    const conflicts = [];
+    if (nom_client && data.nom_client && data.nom_client.trim().toLowerCase() !== nom_client.trim().toLowerCase()) {
+      conflicts.push({ field: "nom_client", label: "Nom du client", currentVal: data.nom_client, newVal: nom_client });
+    }
+    if (telephone_ligne && data.telephone_ligne && data.telephone_ligne.trim() !== telephone_ligne.trim()) {
+      conflicts.push({ field: "telephone_ligne", label: "Numéro de ligne", currentVal: data.telephone_ligne, newVal: telephone_ligne });
+    }
+    if (mobile && data.mobile && data.mobile.trim() !== mobile.trim()) {
+      conflicts.push({ field: "mobile", label: "Numéro de téléphone", currentVal: data.mobile, newVal: mobile });
+    }
+    if (msan && data.msan && data.msan.trim().toLowerCase() !== msan.trim().toLowerCase()) {
+      conflicts.push({ field: "msan", label: "MSAN", currentVal: data.msan, newVal: msan });
+    }
+    if (fat_ref && data.fat_ref && data.fat_ref.trim().toLowerCase() !== fat_ref.trim().toLowerCase()) {
+      conflicts.push({ field: "fat_ref", label: "Référence FAT", currentVal: data.fat_ref, newVal: fat_ref });
+    }
+
+    if (conflicts.length > 0) {
+      setQuickClientConflictModal({
+        pendingData: parsed.data,
+        conflicts,
+        warnings: parsed.warnings,
+      });
+      return;
+    }
+
+    applyParsedClientData(parsed.data, parsed.warnings);
+  }
+
+  function applyParsedClientData(extracted, warnings = []) {
+    const fieldsToMark = [];
+    const appliedFields = [];
+
+    setData((prev) => {
+      const next = { ...prev, modifie_par: currentUser, modifie_le: new Date().toISOString() };
+      if (extracted.nom_client) {
+        next.nom_client = extracted.nom_client;
+        fieldsToMark.push("nom_client");
+        appliedFields.push(`Nom : "${extracted.nom_client}"`);
+      }
+      if (extracted.telephone_ligne) {
+        next.telephone_ligne = extracted.telephone_ligne;
+        fieldsToMark.push("telephone_ligne");
+        appliedFields.push(`Ligne : "${extracted.telephone_ligne}"`);
+      }
+      if (extracted.mobile) {
+        next.mobile = extracted.mobile;
+        fieldsToMark.push("mobile");
+        appliedFields.push(`Tél : "${extracted.mobile}"`);
+      }
+      if (extracted.msan) {
+        next.msan = extracted.msan;
+        fieldsToMark.push("msan");
+        appliedFields.push(`MSAN : "${extracted.msan}"`);
+      }
+      if (extracted.fat_ref) {
+        next.fat_ref = extracted.fat_ref;
+        fieldsToMark.push("fat_ref");
+        appliedFields.push(`FAT : "${extracted.fat_ref}"`);
+      }
+      saveInterventionLocally(next);
+      return next;
+    });
+
+    if (fieldsToMark.length > 0) {
+      markDirty(...fieldsToMark);
+    }
+
+    setQuickClientConflictModal(null);
+    setQuickClientWarnings(warnings);
+    setQuickClientStatus(`✅ Informations réparties avec succès (${appliedFields.join(", ")})`);
+    setTimeout(() => setQuickClientStatus(""), 7000);
+  }
+
   // ===== Photos de Poteaux Géolocalisés (section dynamique Photos CelPros) =====
   function openPoleCamera(numero) {
     targetPoleNumeroRef.current = numero;
@@ -827,8 +991,136 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
-  function setPoleSousTypeForNumero(numero, type) {
-    setPoleSousTypes((prev) => ({ ...prev, [numero]: type }));
+  function handleAddPole() {
+    const existingNums = [
+      ...(data.points_gps || [])
+        .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
+        .map((p) => Number(p.numero)),
+      ...(whatsappPhotos || [])
+        .map((p) => {
+          const m = p?.slot?.match(/^poteau_(\d+)$/);
+          return m ? Number(m[1]) : 0;
+        })
+        .filter((n) => n > 0),
+    ];
+    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+
+    const newPole = {
+      id: crypto.randomUUID(),
+      type: "Poteau",
+      numero: nextNum,
+      traverse: true,
+      implante: false,
+      arme: false,
+      type_poteau: "",
+      proprietaire: "",
+      sous_type: "Traversé",
+      photo: "",
+      lat: null,
+      lng: null,
+      precision_m: null,
+      horodatage: new Date().toISOString(),
+      lieu: "",
+      ajoute_par: currentUser || "Technicien",
+    };
+
+    const nextPoints = [...(data.points_gps || []), newPole];
+    const poleList = nextPoints.filter((p) => p && p.type === "Poteau");
+    const nbTraverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
+    const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
+    const nbArmes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+
+    markDirty("points_gps", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
+    setData((prev) => {
+      const next = {
+        ...prev,
+        points_gps: nextPoints,
+        nb_poteaux_traverses: nbTraverses,
+        nb_poteaux_implantes: nbImplantes,
+        nb_poteaux_armes: nbArmes,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+      };
+      saveInterventionLocally(next);
+      return next;
+    });
+
+    setSaveStatus("✓ Poteau ajouté");
+    setSlotActionFeedback(`➕ Poteau ${nextNum} ajouté`);
+    setTimeout(() => setSlotActionFeedback(""), 4000);
+    setTimeout(() => {
+      const el = document.getElementById(`pole-slot-card-${nextNum}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 60);
+  }
+
+  function handlePoleOptionChange(poleNum, optionKey, optionValue) {
+    const list = [...(data.points_gps || [])];
+    const poleIdx = list.findIndex(
+      (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
+    );
+
+    let currentPole;
+    if (poleIdx >= 0) {
+      currentPole = list[poleIdx];
+    } else {
+      const wa = (whatsappPhotos || []).find((p) => p && p.slot === `poteau_${poleNum}`);
+      currentPole = {
+        id: wa?.id || crypto.randomUUID(),
+        type: "Poteau",
+        numero: Number(poleNum),
+        traverse: true,
+        implante: false,
+        arme: false,
+        type_poteau: "",
+        proprietaire: "",
+        sous_type: "Traversé",
+        photo: wa?.url || "",
+        lat: wa?.lat ?? null,
+        lng: wa?.lng ?? null,
+        precision_m: wa?.precision_m ?? null,
+        lieu: wa?.lieu || "",
+        horodatage: wa?.horodatage || new Date().toISOString(),
+        ajoute_par: currentUser || "Technicien",
+      };
+    }
+
+    const updatedPole = { ...currentPole, [optionKey]: optionValue };
+
+    if (optionKey === "type_poteau") {
+      updatedPole.proprietaire = optionValue;
+    }
+
+    if (updatedPole.implante) updatedPole.sous_type = "Implanté";
+    else if (updatedPole.arme) updatedPole.sous_type = "Armé";
+    else if (updatedPole.traverse) updatedPole.sous_type = "Traversé";
+    else updatedPole.sous_type = "Poteau";
+
+    if (poleIdx >= 0) {
+      list[poleIdx] = updatedPole;
+    } else {
+      list.push(updatedPole);
+    }
+
+    const poleList = list.filter((p) => p && p.type === "Poteau");
+    const nbTraverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
+    const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
+    const nbArmes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+
+    markDirty("points_gps", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
+    setData((prev) => {
+      const next = {
+        ...prev,
+        points_gps: list,
+        nb_poteaux_traverses: nbTraverses,
+        nb_poteaux_implantes: nbImplantes,
+        nb_poteaux_armes: nbArmes,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+      };
+      saveInterventionLocally(next);
+      return next;
+    });
   }
 
   async function handlePolePhotoSelected(e) {
@@ -836,8 +1128,6 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (!file) return;
 
     const poleNum = targetPoleNumeroRef.current || 1;
-    const currentSousType = poleSousTypes[poleNum] || "Traversé";
-
     setPoleCapturingNumero(poleNum);
     setSlotActionFeedback(`📡 Acquisition GPS haute précision pour le Poteau ${poleNum}…`);
 
@@ -870,7 +1160,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         lieu = await reverseGeocode(lat, lng);
       } catch {}
 
-      const embeddedLabel = `Poteau ${currentSousType} ${poleNum}`;
+      const currentList = Array.isArray(data.points_gps) ? [...data.points_gps] : [];
+      const poleIdx = currentList.findIndex(
+        (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
+      );
+      const existingPole = poleIdx >= 0 ? currentList[poleIdx] : null;
+
+      const poleTypeStr = existingPole?.type_poteau || existingPole?.proprietaire || "";
+      const charBadges = [];
+      if (poleTypeStr) charBadges.push(poleTypeStr);
+      if (existingPole ? (existingPole.traverse !== false) : true) charBadges.push("Traversé");
+      if (existingPole?.implante) charBadges.push("Implanté");
+      if (existingPole?.arme) charBadges.push("Armé");
+      const charTitle = charBadges.join(" • ") || "Poteau";
+      const embeddedLabel = `Poteau ${poleNum} (${charTitle})`;
+
       const embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
         type: embeddedLabel,
         lieu,
@@ -880,52 +1184,58 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         horodatage,
       });
 
-      const newPoint = {
+      const updatedPoint = {
+        ...(existingPole || {}),
+        id: existingPole?.id || crypto.randomUUID(),
         type: "Poteau",
-        sous_type: currentSousType,
         numero: poleNum,
+        traverse: existingPole ? (existingPole.traverse !== undefined ? Boolean(existingPole.traverse) : existingPole.sous_type !== "Implanté") : true,
+        implante: existingPole ? Boolean(existingPole.implante) : false,
+        arme: existingPole ? Boolean(existingPole.arme) : false,
+        type_poteau: existingPole?.type_poteau || existingPole?.proprietaire || "",
+        proprietaire: existingPole?.type_poteau || existingPole?.proprietaire || "",
+        sous_type: existingPole?.implante ? "Implanté" : existingPole?.arme ? "Armé" : "Traversé",
         photo: embeddedPhoto,
         lat,
         lng,
         precision_m,
-        horodatage,
+        horodatage: existingPole?.horodatage || horodatage,
         lieu,
         ajoute_par: currentUser,
       };
 
+      if (poleIdx >= 0) {
+        currentList[poleIdx] = updatedPoint;
+      } else {
+        currentList.push(updatedPoint);
+      }
+
+      const poleList = currentList.filter((p) => p && p.type === "Poteau");
+      const nbTraverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
+      const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
+      const nbArmes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+
       setData((prev) => {
-        const list = Array.isArray(prev.points_gps) ? [...prev.points_gps] : [];
-        const existingIdx = list.findIndex(
-          (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
-        );
-        if (existingIdx >= 0) {
-          list[existingIdx] = newPoint;
-        } else {
-          list.push(newPoint);
-        }
-
-        const nbTraverses = list.filter((p) => p.type === "Poteau" && p.sous_type === "Traversé").length;
-        const nbImplantes = list.filter((p) => p.type === "Poteau" && p.sous_type === "Implanté").length;
-        const nbArmes = list.filter((p) => p.type === "Poteau" && p.sous_type === "Armé").length;
-
-        return {
+        const next = {
           ...prev,
-          points_gps: list,
+          points_gps: currentList,
           nb_poteaux_traverses: nbTraverses,
           nb_poteaux_implantes: nbImplantes,
           nb_poteaux_armes: nbArmes,
           modifie_par: currentUser,
           modifie_le: new Date().toISOString(),
         };
+        saveInterventionLocally(next);
+        return next;
       });
 
       const galleryPhoto = {
         id: crypto.randomUUID(),
         slot: `poteau_${poleNum}`,
         type: "poteau",
-        label: `Poteau ${currentSousType} ${poleNum}`,
+        label: embeddedLabel,
         name: `poteau_${poleNum}.jpg`,
-        description: `Poteau ${currentSousType} ${poleNum} - ${data.nom_client || "Intervention"}`,
+        description: `${embeddedLabel} - ${data.nom_client || "Intervention"}`,
         url: embeddedPhoto,
         lat,
         lng,
@@ -937,13 +1247,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       };
 
       setWhatsappPhotos((prev) => {
+        const oldPhotos = prev.filter((p) => p && p.slot === `poteau_${poleNum}`);
+        oldPhotos.forEach((p) => {
+          if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
+        });
         const filtered = prev.filter((p) => p.slot !== `poteau_${poleNum}`);
-        return [...filtered, galleryPhoto];
+        const nextPhotos = [...filtered, galleryPhoto];
+        saveInterventionLocally({ ...data, points_gps: currentList, whatsapp_photos: nextPhotos });
+        return nextPhotos;
       });
 
       markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
       setSaveStatus("✓ Poteau enregistré");
       setSlotActionFeedback(`✅ Photo géolocalisée enregistrée pour le Poteau ${poleNum} (±${precision_m.toFixed(1)} m)`);
+      setTimeout(() => setSlotActionFeedback(""), 5000);
     } catch (err) {
       alert(`Erreur lors de la capture du Poteau ${poleNum} : ${err.message}`);
     } finally {
@@ -952,36 +1269,66 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function removePole(numero) {
-    if (!confirm(`Supprimer la photo et les coordonnées GPS du Poteau ${numero} ?`)) return;
+    const targetPoles = (data.points_gps || []).filter(
+      (p) => p && p.type === "Poteau" && Number(p.numero) === Number(numero)
+    );
+    const targetWaPhotos = (whatsappPhotos || []).filter(
+      (p) => p && (p.slot === `poteau_${numero}` || targetPoles.some((tp) => tp.id === p.id))
+    );
+    const hasPhotoOrGps = targetPoles.some((p) => p.photo || p.lat != null) || targetWaPhotos.some((p) => p.url);
+
+    if (hasPhotoOrGps) {
+      if (!confirm(`Supprimer réellement le Poteau ${numero} ainsi que sa photo et ses coordonnées GPS ?`)) {
+        return;
+      }
+    }
+
+    // Enregistrer l'horodatage et l'id pour la répercussion de suppression sur le serveur MySQL
+    for (const p of targetPoles) {
+      if (p.horodatage) deletedGpsPointIdsRef.current.add(p.horodatage);
+      if (p.id) deletedGpsPointIdsRef.current.add(p.id);
+    }
+    for (const p of targetWaPhotos) {
+      if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
+      if (p.slot) deletedWhatsappPhotoIdsRef.current.add(p.slot);
+    }
+    deletedWhatsappPhotoIdsRef.current.add(`poteau_${numero}`);
+
+    const updatedPoints = (data.points_gps || []).filter(
+      (p) => !(p && p.type === "Poteau" && Number(p.numero) === Number(numero))
+    );
+
+    const remainingPoles = updatedPoints.filter((p) => p && p.type === "Poteau");
+    const nbTraverses = remainingPoles.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
+    const nbImplantes = remainingPoles.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
+    const nbArmes = remainingPoles.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+
+    const targetPoleIds = new Set(targetPoles.map((p) => p.id).filter(Boolean));
+    const nextPhotos = (whatsappPhotos || []).filter(
+      (p) => p.slot !== `poteau_${numero}` && !targetPoleIds.has(p.id)
+    );
+    setWhatsappPhotos(nextPhotos);
 
     markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
 
     setData((prev) => {
-      const list = (prev.points_gps || []).filter(
-        (p) => !(p && p.type === "Poteau" && Number(p.numero) === Number(numero))
-      );
-      for (const p of prev.points_gps || []) {
-        if (p && p.type === "Poteau" && Number(p.numero) === Number(numero)) {
-          deletedGpsPointIdsRef.current.add(p.horodatage);
-        }
-      }
-      return {
+      const next = {
         ...prev,
-        points_gps: list,
-        nb_poteaux_traverses: list.filter((p) => p.type === "Poteau" && p.sous_type === "Traversé").length,
-        nb_poteaux_implantes: list.filter((p) => p.type === "Poteau" && p.sous_type === "Implanté").length,
-        nb_poteaux_armes: list.filter((p) => p.type === "Poteau" && p.sous_type === "Armé").length,
+        points_gps: updatedPoints,
+        whatsapp_photos: nextPhotos,
+        nb_poteaux_traverses: nbTraverses,
+        nb_poteaux_implantes: nbImplantes,
+        nb_poteaux_armes: nbArmes,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
       };
-    });
-
-    setWhatsappPhotos((prev) => {
-      const target = prev.find((p) => p.slot === `poteau_${numero}`);
-      if (target?.id) deletedWhatsappPhotoIdsRef.current.add(target.id);
-      return prev.filter((p) => p.slot !== `poteau_${numero}`);
+      saveInterventionLocally(next);
+      return next;
     });
 
     setSaveStatus("✓ Poteau supprimé");
     setSlotActionFeedback(`🗑️ Poteau ${numero} supprimé`);
+    setTimeout(() => setSlotActionFeedback(""), 4000);
   }
 
   // ===== WhatsApp Photos (geolocalisees, hors rapport) =====
@@ -1223,6 +1570,132 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               <div className={`ocr-banner ${ocrNotification.success ? "success" : "info"}`}>
                 <span>{ocrNotification.text}</span>
                 <button type="button" onClick={() => setOcrNotification(null)}>✕</button>
+              </div>
+            )}
+
+            {/* ⚡ Saisie rapide des informations client */}
+            <div className="form-card client-quick-card">
+              <div
+                className="form-card-header"
+                style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                onClick={() => setQuickClientOpen((v) => !v)}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div className="form-card-icon" style={{ background: "#eff6ff", color: "#2563eb" }}>⚡</div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 16 }}>Saisie rapide des informations client</h3>
+                    <p className="form-card-sub" style={{ margin: "2px 0 0" }}>
+                      Collez le texte reçu (Nom, Ligne, Téléphone...) pour remplir automatiquement les champs
+                    </p>
+                  </div>
+                </div>
+                <span style={{ fontSize: 13, color: "var(--primary)", fontWeight: 600 }}>
+                  {quickClientOpen ? "Masquer ▲" : "Ouvrir ▼"}
+                </span>
+              </div>
+
+              {quickClientOpen && (
+                <div className="form-card-body" style={{ paddingTop: 10 }}>
+                  {quickClientStatus && (
+                    <div className={`quick-client-banner ${quickClientStatus.startsWith("✅") ? "success" : "info"}`} style={{ marginBottom: 12 }}>
+                      <span>{quickClientStatus}</span>
+                      <button type="button" onClick={() => setQuickClientStatus("")}>✕</button>
+                    </div>
+                  )}
+
+                  {quickClientWarnings.length > 0 && (
+                    <div className="quick-client-warnings" style={{ marginBottom: 12 }}>
+                      {quickClientWarnings.map((w, idx) => (
+                        <div key={idx} className="warning-line">⚠️ {w}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  <textarea
+                    className="quick-client-textarea"
+                    rows={3}
+                    placeholder="Collez ici le texte complet. Exemple :&#10;NOM(DOSSOU ABELLANGE CARTER ARMELLE ) , numéro de ligne(0121290332) , numéro téléphone (0147980366) MSAN(OGA-PL51) , réference FAT(FAT164)"
+                    value={quickClientText}
+                    onChange={(e) => setQuickClientText(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 10,
+                      border: "1.5px solid var(--border)",
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      resize: "vertical",
+                      boxSizing: "border-box",
+                    }}
+                  />
+
+                  <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      style={{ padding: "8px 18px", fontSize: 13, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}
+                      onClick={() => handleApplyQuickClientText(quickClientText)}
+                      disabled={!quickClientText.trim()}
+                    >
+                      🪄 Analyser et répartir
+                    </button>
+                    {quickClientText && (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        style={{ padding: "8px 14px", fontSize: 13 }}
+                        onClick={() => {
+                          setQuickClientText("");
+                          setQuickClientWarnings([]);
+                          setQuickClientStatus("");
+                        }}
+                      >
+                        Effacer
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal de confirmation de remplacement des données client */}
+            {quickClientConflictModal && (
+              <div className="modal-overlay" style={{ zIndex: 10000 }}>
+                <div className="modal-card" style={{ maxWidth: 480, padding: 20 }}>
+                  <h3 style={{ margin: "0 0 10px", fontSize: 16, color: "var(--text)" }}>
+                    ⚠️ Confirmer le remplacement des informations
+                  </h3>
+                  <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+                    Certains champs contiennent déjà des informations dans le formulaire. Souhaitez-vous les remplacer par les données extraites ?
+                  </p>
+
+                  <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, marginBottom: 16, border: "1px solid var(--border)" }}>
+                    {quickClientConflictModal.conflicts.map((c, i) => (
+                      <div key={i} style={{ fontSize: 13, marginBottom: i < quickClientConflictModal.conflicts.length - 1 ? 8 : 0 }}>
+                        <strong>{c.label} :</strong>{" "}
+                        <span style={{ textDecoration: "line-through", color: "#94a3b8" }}>{c.currentVal}</span>{" "}
+                        ➔ <span style={{ color: "var(--primary)", fontWeight: 700 }}>{c.newVal}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => setQuickClientConflictModal(null)}
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      onClick={() => applyParsedClientData(quickClientConflictModal.pendingData, quickClientConflictModal.warnings)}
+                    >
+                      Confirmer le remplacement
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
 
@@ -1708,75 +2181,168 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             {/* 🗼 Section Dynamique Photos de Poteaux Géolocalisés CelPros */}
             <div className="celpros-poles-section">
               <div className="photos-progress-card pole-section-header-card">
-                <div className="photos-progress-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 28, lineHeight: 1 }}>🗼</span>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 16 }}>Photos de poteaux géolocalisés (CelPros)</h3>
-                      <p className="photos-progress-sub" style={{ margin: "3px 0 0" }}>
-                        Chaque poteau dispose de sa propre géolocalisation haute précision et de sa photo
-                      </p>
-                    </div>
+                <div className="photos-progress-header" style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontSize: 28, lineHeight: 1 }}>🗼</span>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 16 }}>Photos de poteaux géolocalisés (CelPros)</h3>
+                    <p className="photos-progress-sub" style={{ margin: "3px 0 0" }}>
+                      Chaque poteau dispose de sa propre géolocalisation haute précision, photo et caractéristiques
+                    </p>
                   </div>
-                  <button
-                    type="button"
-                    className="btn-primary btn-add-pole"
-                    onClick={() => setExtraPoleSlots((prev) => prev + 1)}
-                  >
-                    ➕ Ajouter un poteau
-                  </button>
                 </div>
               </div>
 
               <div className="celpros-photos-grid celpros-poles-grid">
                 {(() => {
-                  const existingPoleNumbers = [
-                    ...(data.points_gps || [])
-                      .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
-                      .map((p) => Number(p.numero)),
-                    ...whatsappPhotos
-                      .map((p) => {
-                        const m = p?.slot?.match(/^poteau_(\d+)$/);
-                        return m ? Number(m[1]) : 0;
-                      })
-                      .filter((n) => n > 0),
-                  ];
-                  const maxExistingPole = existingPoleNumbers.length > 0 ? Math.max(...existingPoleNumbers) : 1;
-                  const totalPoleCount = Math.max(1, maxExistingPole + extraPoleSlots);
-                  const poleNumbers = Array.from({ length: totalPoleCount }, (_, i) => i + 1);
+                  const poleMap = new Map();
+                  (data.points_gps || []).forEach((pt) => {
+                    if (pt && pt.type === "Poteau" && Number(pt.numero) > 0) {
+                      poleMap.set(Number(pt.numero), { ...pt });
+                    }
+                  });
+                  (whatsappPhotos || []).forEach((wa) => {
+                    const m = wa?.slot?.match(/^poteau_(\d+)$/);
+                    if (m) {
+                      const num = Number(m[1]);
+                      if (!poleMap.has(num)) {
+                        poleMap.set(num, {
+                          id: wa.id || crypto.randomUUID(),
+                          type: "Poteau",
+                          numero: num,
+                          traverse: true,
+                          implante: false,
+                          arme: false,
+                          type_poteau: "",
+                          proprietaire: "",
+                          sous_type: "Traversé",
+                          photo: wa.url || "",
+                          lat: wa.lat ?? null,
+                          lng: wa.lng ?? null,
+                          precision_m: wa.precision_m ?? null,
+                          lieu: wa.lieu || "",
+                          horodatage: wa.horodatage || new Date().toISOString(),
+                        });
+                      }
+                    }
+                  });
 
-                  return poleNumbers.map((poleNum) => {
-                    const pt = (data.points_gps || []).find(
-                      (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
+                  const poleList = Array.from(poleMap.values()).sort(
+                    (a, b) => Number(a.numero) - Number(b.numero)
+                  );
+
+                  if (poleList.length === 0) {
+                    return (
+                      <div
+                        className="empty-poles-box"
+                        style={{
+                          gridColumn: "1 / -1",
+                          padding: "24px 16px",
+                          textAlign: "center",
+                          background: "#f8fafc",
+                          borderRadius: 12,
+                          border: "1px dashed #cbd5e1",
+                          color: "#64748b",
+                        }}
+                      >
+                        <span style={{ fontSize: 32, display: "block", marginBottom: 6 }}>🗼</span>
+                        <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: "#334155" }}>
+                          Aucun poteau enregistré
+                        </p>
+                        <p style={{ margin: "4px 0 0", fontSize: 12.5 }}>
+                          Cliquez sur le bouton ci-dessous pour ajouter un poteau géolocalisé.
+                        </p>
+                      </div>
                     );
-                    const wa = whatsappPhotos.find((p) => p && p.slot === `poteau_${poleNum}`);
+                  }
+
+                  return poleList.map((pt) => {
+                    const poleNum = Number(pt.numero);
+                    const wa = (whatsappPhotos || []).find((p) => p && p.slot === `poteau_${poleNum}`);
                     const photoUrl = wa?.url || pt?.photo;
                     const isTaken = !!photoUrl;
                     const isCapturingThis = poleCapturingNumero === poleNum;
-                    const currentSousType = pt?.sous_type || poleSousTypes[poleNum] || "Traversé";
                     const lat = wa?.lat ?? pt?.lat;
                     const lng = wa?.lng ?? pt?.lng;
                     const prec = wa?.precision_m ?? pt?.precision_m;
                     const lieu = wa?.lieu ?? pt?.lieu;
                     const horo = wa?.horodatage ?? pt?.horodatage;
 
+                    const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (pt.sous_type !== "Implanté");
+                    const isImplante = Boolean(pt.implante);
+                    const isArme = Boolean(pt.arme);
+                    const typePoteau = pt.type_poteau || pt.proprietaire || "";
+
+                    const charBadges = [];
+                    if (typePoteau) charBadges.push(typePoteau);
+                    if (isTraverse) charBadges.push("Traversé");
+                    if (isImplante) charBadges.push("Implanté");
+                    if (isArme) charBadges.push("Armé");
+                    const charTitle = charBadges.join(" • ") || "Poteau";
+
                     return (
-                      <div key={poleNum} className={`photo-slot-card pole-slot-card ${isTaken ? "taken" : "pending"}`}>
+                      <div key={poleNum} id={`pole-slot-card-${poleNum}`} className={`photo-slot-card pole-slot-card ${isTaken ? "taken" : "pending"}`}>
                         <div className="photo-slot-header">
                           <span className="photo-slot-icon">🗼</span>
-                          <div className="pole-slot-titles">
-                            <h4>Photos de poteau {poleNum}</h4>
-                            <div className="pole-type-selector-pills">
-                              {["Traversé", "Implanté", "Armé"].map((st) => (
-                                <button
-                                  key={st}
-                                  type="button"
-                                  className={`pill-btn ${currentSousType === st ? "active" : ""}`}
-                                  onClick={() => setPoleSousTypeForNumero(poleNum, st)}
-                                >
-                                  {st}
-                                </button>
-                              ))}
+                          <div className="pole-slot-titles" style={{ flex: 1 }}>
+                            <h4 style={{ margin: "0 0 4px", fontSize: 14 }}>Photos de poteau {poleNum}</h4>
+                            <div className="pole-options-box">
+                              <div className="pole-option-row">
+                                <span className="pole-option-label">Type :</span>
+                                <div className="pole-pills-group">
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${typePoteau === "Petit Jean" ? "active" : ""}`}
+                                    onClick={() =>
+                                      handlePoleOptionChange(
+                                        poleNum,
+                                        "type_poteau",
+                                        typePoteau === "Petit Jean" ? "" : "Petit Jean"
+                                      )
+                                    }
+                                  >
+                                    Petit Jean
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${typePoteau === "SBEE" ? "active" : ""}`}
+                                    onClick={() =>
+                                      handlePoleOptionChange(
+                                        poleNum,
+                                        "type_poteau",
+                                        typePoteau === "SBEE" ? "" : "SBEE"
+                                      )
+                                    }
+                                  >
+                                    SBEE
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="pole-option-row">
+                                <span className="pole-option-label">Options :</span>
+                                <div className="pole-pills-group">
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${isTraverse ? "active" : ""}`}
+                                    onClick={() => handlePoleOptionChange(poleNum, "traverse", !isTraverse)}
+                                  >
+                                    {isTraverse ? "✓ Traversée" : "Traversée"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${isImplante ? "active" : ""}`}
+                                    onClick={() => handlePoleOptionChange(poleNum, "implante", !isImplante)}
+                                  >
+                                    {isImplante ? "✓ Implanté" : "Implanté"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${isArme ? "active" : ""}`}
+                                    onClick={() => handlePoleOptionChange(poleNum, "arme", !isArme)}
+                                  >
+                                    {isArme ? "✓ Armé" : "Armé"}
+                                  </button>
+                                </div>
+                              </div>
                             </div>
                           </div>
                           <span className={`photo-slot-badge ${isTaken ? "badge-success" : "badge-pending"}`}>
@@ -1791,11 +2357,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                               onClick={() => {
                                 setViewingPhoto({
                                   url: photoUrl,
-                                  title: `Photos de poteau ${poleNum} (${currentSousType})`,
+                                  title: `Photos de poteau ${poleNum} (${charTitle})`,
                                   subtitle: lieu || (lat ? `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : ""),
                                   info: [
-                                    { label: "Catégorie", val: `Poteau ${currentSousType}` },
                                     { label: "Numéro", val: `#${poleNum}` },
+                                    { label: "Caractéristiques", val: charTitle },
                                     ...(lat != null ? [{ label: "Coordonnées GPS", val: `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` }] : []),
                                     ...(prec != null ? [{ label: "Précision GPS", val: `±${Number(prec).toFixed(1)} m` }] : []),
                                     ...(horo ? [{ label: "Prise le", val: new Date(horo).toLocaleString() }] : []),
@@ -1830,7 +2396,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                 className="btn-slot-subtle danger"
                                 onClick={() => removePole(poleNum)}
                               >
-                                🗑️ Retirer
+                                ✕ Annuler ce poteau
                               </button>
                             </div>
                           </div>
@@ -1856,16 +2422,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                 >
                                   🖼️ Importer
                                 </button>
-                                {poleNum > 1 && !isTaken && (
-                                  <button
-                                    type="button"
-                                    className="btn-slot-subtle danger"
-                                    style={{ marginTop: 6 }}
-                                    onClick={() => setExtraPoleSlots((prev) => Math.max(0, prev - 1))}
-                                  >
-                                    ✕ Annuler ce poteau
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  className="btn-slot-subtle danger"
+                                  style={{ marginTop: 6 }}
+                                  onClick={() => removePole(poleNum)}
+                                >
+                                  ✕ Annuler ce poteau
+                                </button>
                               </>
                             )}
                           </div>
@@ -1874,6 +2438,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     );
                   });
                 })()}
+              </div>
+
+              {/* Bouton "+ Ajouter un poteau" positionné au bas de la section de poteaux */}
+              <div className="pole-add-bottom-container" style={{ marginTop: 14, display: "flex", justifyContent: "center" }}>
+                <button
+                  type="button"
+                  className="btn-primary btn-add-pole-bottom"
+                  onClick={handleAddPole}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "10px 22px",
+                    fontSize: 14,
+                    fontWeight: 700,
+                    borderRadius: 10,
+                    cursor: "pointer",
+                  }}
+                >
+                  ➕ Ajouter un poteau
+                </button>
               </div>
             </div>
 
@@ -2410,10 +2995,120 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       </div>
 
       <footer className="form-footer">
-        <button type="button" className="btn-primary btn-large" onClick={finish} disabled={finishing}>
-          {finishing ? "Finalisation en cours…" : "Terminer l'intervention"}
-        </button>
+        <div className="form-finish-card">
+          <div className="form-finish-header">
+            <span className="form-finish-icon">🏁</span>
+            <div>
+              <h4 className="form-finish-title">Clôture de l'intervention</h4>
+              <p className="form-finish-desc">
+                Assurez-vous que les informations, photos et poteaux sont bien complets avant de clôturer.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn-finish-intervention"
+            onClick={() => setFinishModalOpen(true)}
+            disabled={finishing}
+          >
+            {finishing ? "Finalisation en cours…" : "🏁 Terminer l'intervention"}
+          </button>
+        </div>
       </footer>
+
+      {finishModalOpen && (
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.65)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: 16,
+          }}
+          onClick={() => setFinishModalOpen(false)}
+        >
+          <div
+            className="modal-card"
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              maxWidth: 480,
+              width: "100%",
+              padding: 24,
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.2)",
+              textAlign: "left",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <span style={{ fontSize: 32 }}>🏁</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, color: "#1e293b" }}>
+                  Confirmer la clôture d'intervention
+                </h3>
+                <p style={{ margin: "2px 0 0", fontSize: 13, color: "#64748b" }}>
+                  Vérification avant enregistrement final
+                </p>
+              </div>
+            </div>
+
+            <div
+              style={{
+                background: "#f8fafc",
+                borderRadius: 12,
+                padding: "12px 16px",
+                border: "1px solid #e2e8f0",
+                fontSize: 13.5,
+                lineHeight: 1.6,
+                color: "#334155",
+                marginBottom: 18,
+              }}
+            >
+              <div>👤 Client : <strong>{data.nom_client || "Non renseigné"}</strong></div>
+              <div>📞 Ligne : <strong>{data.telephone_ligne || "Non renseignée"}</strong></div>
+              <div>📱 Mobile : <strong>{data.mobile || "Non renseigné"}</strong></div>
+              <div>📦 FAT : <strong>{data.fat_ref || "N/A"}</strong> (Port {data.port || "N/A"})</div>
+              <div>🗼 Poteaux : <strong>{(data.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
+              <div>📸 Photos : <strong>{(whatsappPhotos || []).length}</strong></div>
+            </div>
+
+            <p style={{ fontSize: 13, color: "#475569", margin: "0 0 20px", lineHeight: 1.5 }}>
+              Cette action marquera l'intervention comme <strong>Terminée</strong>, synchronisera les données sur le serveur et déduira le matériel utilisé du stock.
+            </p>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "10px 16px", fontSize: 14 }}
+                onClick={() => setFinishModalOpen(false)}
+              >
+                ✕ Revenir au relevé
+              </button>
+              <button
+                type="button"
+                className="btn-finish-intervention"
+                style={{ padding: "10px 20px", fontSize: 14 }}
+                disabled={finishing}
+                onClick={async () => {
+                  setFinishModalOpen(false);
+                  await finish();
+                }}
+              >
+                {finishing ? "Finalisation…" : "✓ Confirmer et clôturer"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <PhotoViewerModal photo={viewingPhoto} onClose={() => setViewingPhoto(null)} />
 

@@ -52,7 +52,7 @@
   // Helper pour compter les poteaux SBEE réels
   function countSbeePoles(data) {
     const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const sbee = list.filter((p) => p && normalizeText(p.type).includes("poteau") && normalizeText(p.proprietaire).includes("sbee")).length;
+    const sbee = list.filter((p) => p && normalizeText(p.type).includes("poteau") && normalizeText(p.type_poteau || p.proprietaire).includes("sbee")).length;
     if (sbee > 0) return String(sbee);
     const mp = data?.materiel_pose || {};
     const count = Number(mp.poteau_sbee_non_arme || 0) + Number(mp.poteau_sbee_arme || 0) + Number(mp.poteau_sbee || 0);
@@ -63,7 +63,7 @@
   // Helper pour compter les poteaux Petit Jean réels
   function countPetitJeanPoles(data) {
     const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const pj = list.filter((p) => p && normalizeText(p.type).includes("poteau") && (normalizeText(p.proprietaire).includes("petit") || normalizeText(p.proprietaire).includes("jean"))).length;
+    const pj = list.filter((p) => p && normalizeText(p.type).includes("poteau") && (normalizeText(p.type_poteau || p.proprietaire).includes("petit") || normalizeText(p.type_poteau || p.proprietaire).includes("jean"))).length;
     if (pj > 0) return String(pj);
     const mp = data?.materiel_pose || {};
     const count = Number(mp.poteau_petit_jean || mp.poteau_pj || mp.petit_jean || 0);
@@ -639,7 +639,7 @@
           if (!isNaN(n) && n > 0) return String(n);
         }
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const count = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Traversé").length;
+        const count = pts.filter((p) => p && p.type === "Poteau" && (p.traverse !== undefined ? Boolean(p.traverse) : p.sous_type !== "Implanté")).length;
         if (count > 0) return String(count);
         return "";
       },
@@ -670,7 +670,7 @@
           if (!isNaN(n) && n > 0) return String(n);
         }
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const count = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Implanté").length;
+        const count = pts.filter((p) => p && p.type === "Poteau" && (p.implante !== undefined ? Boolean(p.implante) : p.sous_type === "Implanté")).length;
         if (count > 0) return String(count);
         return "";
       },
@@ -701,7 +701,7 @@
           if (!isNaN(n) && n > 0) return String(n);
         }
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const count = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Armé").length;
+        const count = pts.filter((p) => p && p.type === "Poteau" && (p.arme !== undefined ? Boolean(p.arme) : p.sous_type === "Armé")).length;
         if (count > 0) return String(count);
         return "";
       },
@@ -1614,18 +1614,23 @@
         "poteaux",
       ],
       valueExtractor: (data) => {
-        let total = 0;
-        if (data?.nb_poteaux_traverses) total += Number(data.nb_poteaux_traverses) || 0;
-        if (data?.nb_poteaux_implantes) total += Number(data.nb_poteaux_implantes) || 0;
-        if (data?.nb_poteaux_armes) total += Number(data.nb_poteaux_armes) || 0;
-        if (total > 0) return String(total);
+        // 1. Compter d'abord les poteaux physiques uniques dans points_gps
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
         const polePts = pts.filter((p) => p && normalizeText(p.type).includes("poteau")).length;
         if (polePts > 0) return String(polePts);
+
+        // 2. Vérifier les poteaux comptabilisés par propriétaire (SBEE + Petit Jean)
         const sbeePoles = Number(countSbeePoles(data)) || 0;
         const pjPoles = Number(countPetitJeanPoles(data)) || 0;
         const sum = sbeePoles + pjPoles;
         if (sum > 0) return String(sum);
+
+        // 3. Fallback sur les compteurs (attention aux cumulées)
+        let total = 0;
+        if (data?.nb_poteaux_traverses) total += Number(data.nb_poteaux_traverses) || 0;
+        if (data?.nb_poteaux_implantes) total += Number(data.nb_poteaux_implantes) || 0;
+        if (total > 0) return String(total);
+        if (data?.nb_poteaux_armes) return String(Number(data.nb_poteaux_armes) || 0);
         const fromMat = getMaterielQuantity(data, "poteau", "poteaux", "poteau_sbee", "poteau_pj");
         if (fromMat) return fromMat;
         const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];

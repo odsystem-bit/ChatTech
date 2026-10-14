@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
+const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 const STORAGE_KEY = "fibretrack_account";
 
 export function getApiAuthHeaders(codeOverride) {

@@ -20,9 +20,9 @@ export function generateWhatsAppReport(intervention, compteurJour = {}) {
   const val = (key) => fmt2(mp[key]);
 
   const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
-  const poteauxTraverses = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Traversé");
-  const poteauxImplantes = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Implanté");
-  const poteauxArmes = pts.filter((p) => p && p.type === "Poteau" && p.sous_type === "Armé");
+  const poteauxTraverses = pts.filter((p) => p && p.type === "Poteau" && (p.traverse !== undefined ? Boolean(p.traverse) : p.sous_type !== "Implanté"));
+  const poteauxImplantes = pts.filter((p) => p && p.type === "Poteau" && (p.implante !== undefined ? Boolean(p.implante) : p.sous_type === "Implanté"));
+  const poteauxArmes = pts.filter((p) => p && p.type === "Poteau" && (p.arme !== undefined ? Boolean(p.arme) : p.sous_type === "Armé"));
   const abonne = pts.find((p) => p && p.type === "Abonné");
   const fat = pts.find((p) => p && p.type === "FAT");
 
