@@ -115,6 +115,13 @@ async function fetchInterventionsList() {
       throw new Error(msg);
     }
 
+    const parseTimestampSafely = (dateStr) => {
+      if (!dateStr || typeof dateStr !== "string") return 0;
+      const clean = dateStr.trim().replace(/\.+$/, "").replace(" ", "T");
+      const ts = Date.parse(clean);
+      return isNaN(ts) ? 0 : ts;
+    };
+
     const list = await res.json();
     if (Array.isArray(list)) {
       // Trier : 'en_cours' en priorité, puis par date décroissante
@@ -122,8 +129,8 @@ async function fetchInterventionsList() {
         const aIsDone = (a.statut || "").toLowerCase() === "termine";
         const bIsDone = (b.statut || "").toLowerCase() === "termine";
         if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
-        const da = new Date(a.date || 0).getTime();
-        const db = new Date(b.date || 0).getTime();
+        const da = parseTimestampSafely(a.modifie_le || a.updated_at || a.date);
+        const db = parseTimestampSafely(b.modifie_le || b.updated_at || b.date);
         return db - da;
       });
 

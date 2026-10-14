@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "ChapTech CelPros Autofill - Celtiis Fibre",
   "short_name": "CelPros Autofill",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Automatisation et remplissage intelligent des formulaires d'intervention fibre sur Celtiis CelPros et FAT Automation depuis ChapTech / FibreTrack.",
   "icons": {
     "16": "icons/icon16.png",

@@ -27,9 +27,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   const popupCountTerminees = document.getElementById("popup-count-terminees");
 
   let interventionsList = [];
-  let statusTabFilter = "en_cours";
+  let statusTabFilter = "all";
   let searchFilterText = "";
   let activeInterventionData = null;
+
+  function parseTimestampSafely(dateStr) {
+    if (!dateStr || typeof dateStr !== "string") return 0;
+    const clean = dateStr.trim().replace(/\.+$/, "").replace(" ", "T");
+    const ts = Date.parse(clean);
+    return isNaN(ts) ? 0 : ts;
+  }
 
   function showMessage(text, type = "success") {
     if (!msgBanner) return;
@@ -185,8 +192,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         const aIsDone = (a.statut || "").toLowerCase() === "termine";
         const bIsDone = (b.statut || "").toLowerCase() === "termine";
         if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
-        const da = new Date(a.date || 0).getTime();
-        const db = new Date(b.date || 0).getTime();
+        const da = parseTimestampSafely(a.modifie_le || a.updated_at || a.date);
+        const db = parseTimestampSafely(b.modifie_le || b.updated_at || b.date);
         return db - da;
       });
 
@@ -202,6 +209,13 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
 
       renderPopupOptions();
+
+      // Si aucune intervention active n'est définie ou si l'actuelle n'est pas dans la liste fraîche,
+      // sélectionner automatiquement le dossier #1 (le plus récent : ex. Dossou) !
+      const currentValid = activeInterventionData && interventionsList.some((i) => String(i.id) === String(activeInterventionData.id));
+      if (!currentValid && interventionsList.length > 0) {
+        selectInterventionById(interventionsList[0].id);
+      }
     } else {
       showMessage("⚠️ Impossible de charger les fiches FibreTrack", "error");
     }

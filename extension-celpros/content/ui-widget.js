@@ -20,7 +20,7 @@
       this.selectedIntervention = null;
       this.apiStatus = "unknown"; // "connected", "error", "loading"
       this.filterText = "";
-      this.statusTabFilter = "en_cours"; // "en_cours" (par défaut), "all", "termine"
+      this.statusTabFilter = "all"; // "all" (par défaut), "termine", "en_cours"
       this.lastFillReport = null;
       this.autoPilotEnabled = true;
       this.currentStepInfo = null;
@@ -87,14 +87,14 @@
 
               <!-- Filtres d'état rapides : En cours (Défaut) / Tous / Terminées -->
               <div class="chaptech-filter-pills-row" id="chaptech-filter-pills-row">
-                <button type="button" class="chaptech-filter-pill is-active" data-status="en_cours" id="filter-pill-en-cours">
-                  ⚡ En cours (<span id="count-en-cours">0</span>)
-                </button>
-                <button type="button" class="chaptech-filter-pill" data-status="all" id="filter-pill-all">
+                <button type="button" class="chaptech-filter-pill is-active" data-status="all" id="filter-pill-all">
                   Tous (<span id="count-all">0</span>)
                 </button>
                 <button type="button" class="chaptech-filter-pill" data-status="termine" id="filter-pill-terminees">
                   ✅ Terminées (<span id="count-terminees">0</span>)
+                </button>
+                <button type="button" class="chaptech-filter-pill" data-status="en_cours" id="filter-pill-en-cours">
+                  ⚡ En cours (<span id="count-en-cours">0</span>)
                 </button>
               </div>
 
@@ -246,46 +246,63 @@
       }, duration);
     }
 
+    parseTimestampSafely(dateStr) {
+      if (!dateStr || typeof dateStr !== "string") return 0;
+      const clean = dateStr.trim().replace(/\.+$/, "").replace(" ", "T");
+      const ts = Date.parse(clean);
+      return isNaN(ts) ? 0 : ts;
+    }
+
+    async fetchApi(action, method = "GET", body = null) {
+      let apiUrl = "https://fibretrack.mantota.com/api/index.php";
+      let apiCode = "9999";
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        try {
+          const stored = await chrome.storage.local.get(["apiUrl", "apiCode"]);
+          if (stored.apiUrl) apiUrl = stored.apiUrl;
+          if (stored.apiCode) apiCode = stored.apiCode;
+        } catch {}
+      }
+      let clean = (apiUrl || "https://fibretrack.mantota.com/api/index.php").trim().replace(/\/+$/, "");
+      if (!clean.includes(".php") && !clean.includes("?")) {
+        clean = `${clean}/index.php`;
+      }
+      const sep = clean.includes("?") ? "&" : "?";
+      const url = `${clean}${sep}action=${encodeURIComponent(action)}`;
+      const options = {
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiCode ? { "X-User-Code": apiCode } : {}),
+        },
+      };
+      if (body) {
+        options.body = JSON.stringify(body);
+      }
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    }
+
     async loadInitialState() {
-      // Vérifier si le panneau était replié dans la session
       const savedCollapsed = localStorage.getItem("chaptech_widget_collapsed") === "true";
       this.setCollapsed(savedCollapsed);
 
-      // Charger la configuration et l'intervention active
+      // Charger d'abord les fiches fraîches depuis l'API pour avoir la liste à jour
+      await this.fetchInterventions();
+
+      // Charger l'intervention active stockée si présente
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.get(["activeIntervention", "cachedInterventions"]).then((stored) => {
-          if (stored && stored.activeIntervention) {
-            this.setSelectedIntervention(stored.activeIntervention, false);
-            if (stored.activeIntervention.id) {
-              this.onInterventionChange(stored.activeIntervention.id);
-            }
+        try {
+          const stored = await chrome.storage.local.get(["activeIntervention"]);
+          if (stored && stored.activeIntervention && stored.activeIntervention.id) {
+            // Recharger les détails réels de cette intervention pour avoir toutes les photos et GPS à jour
+            await this.onInterventionChange(stored.activeIntervention.id);
+          } else if (!this.selectedIntervention && this.interventions.length > 0) {
+            // Sinon sélectionner le dossier #1 le plus récent
+            await this.onInterventionChange(this.interventions[0].id);
           }
-        }).catch(() => {});
-      }
-
-      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: "GET_CONFIG" }, (res) => {
-          if (chrome.runtime.lastError) {
-            // Silencieux si le background n'est pas encore réveillé
-            return;
-          }
-          if (res && res.ok && res.data) {
-            if (res.data.activeIntervention) {
-              this.setSelectedIntervention(res.data.activeIntervention, false);
-              // Rafraîchir systématiquement les détails réels complets pour charger points_gps, materiel_pose, photos
-              if (res.data.activeIntervention.id) {
-                this.onInterventionChange(res.data.activeIntervention.id);
-              }
-            }
-          }
-        });
-
-        // Charger la liste des interventions depuis l'API
-        this.fetchInterventions();
-      } else {
-        // Mode autonome hors-extension (test direct du fichier HTML / démo)
-        // Charger directement les données réelles depuis l'API FibreTrack (CORS activé)
-        this.fetchInterventions();
+        } catch {}
       }
     }
 
@@ -327,56 +344,55 @@
       const select = document.getElementById("chaptech-intervention-select");
       if (select) select.disabled = true;
 
-      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: "FETCH_INTERVENTIONS" }, (res) => {
-          if (chrome.runtime.lastError) {
-            console.warn("[CelPros Widget] Erreur FETCH_INTERVENTIONS:", chrome.runtime.lastError.message);
-            if (select) select.disabled = false;
-            this.setApiStatus("error", "Erreur connexion");
-            return;
-          }
-          if (select) select.disabled = false;
-          if (res && res.ok && Array.isArray(res.data)) {
-            this.interventions = res.data;
-            const totalEnCours = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
-            if (totalEnCours === 0 && this.interventions.length > 0) {
-              this.statusTabFilter = "all";
-              document.querySelectorAll(".chaptech-filter-pill").forEach((pill) => {
-                pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
-              });
+      let list = null;
+      try {
+        list = await this.fetchApi("interventions_list_light");
+      } catch (err) {
+        console.warn("[CelPros Widget] Erreur fetch direct:", err);
+      }
+
+      if (!Array.isArray(list) || list.length === 0) {
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          try {
+            const stored = await chrome.storage.local.get(["cachedInterventions"]);
+            if (Array.isArray(stored.cachedInterventions)) {
+              list = stored.cachedInterventions;
             }
-            this.setApiStatus("connected", `${res.data.length} fiches réelles`);
-            this.renderInterventionOptions();
-            this.tryAutoMatchInterventionFromPage();
-          } else {
-            this.setApiStatus("error", "Erreur connexion");
-            this.showToast(`⚠️ Impossible de joindre l'API FibreTrack: ${res?.error || "Inconnu"}`, "error");
-          }
-        });
-      } else {
-        // Mode autonome / hors-extension (direct fetch via API FibreTrack avec CORS)
-        try {
-          const res = await fetch("https://fibretrack.mantota.com/api/index.php?action=interventions_list_light", {
-            headers: { "X-User-Code": "9999" },
-          });
-          const data = await res.json();
-          if (select) select.disabled = false;
-          if (Array.isArray(data)) {
-            this.interventions = data;
-            this.setApiStatus("connected", `${data.length} fiches réelles`);
-            this.renderInterventionOptions();
-            if (!this.selectedIntervention && this.interventions.length > 0) {
-              this.onInterventionChange(this.interventions[0].id);
-            }
-          } else {
-            throw new Error(data.error || "Réponse invalide");
-          }
-        } catch (err) {
-          if (select) select.disabled = false;
-          this.setApiStatus("error", "Erreur connexion");
-          this.showToast(`⚠️ Impossible de joindre l'API FibreTrack: ${err.message}`, "error");
+          } catch {}
         }
       }
+
+      if (Array.isArray(list) && list.length > 0) {
+        // Tri chronologique strict (du plus récent au plus ancien)
+        list.sort((a, b) => {
+          const aIsDone = (a.statut || "").toLowerCase() === "termine";
+          const bIsDone = (b.statut || "").toLowerCase() === "termine";
+          if (aIsDone !== bIsDone) return aIsDone ? 1 : -1;
+          const da = this.parseTimestampSafely(a.modifie_le || a.updated_at || a.date);
+          const db = this.parseTimestampSafely(b.modifie_le || b.updated_at || b.date);
+          return db - da;
+        });
+
+        this.interventions = list;
+        if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          chrome.storage.local.set({ cachedInterventions: list }).catch(() => {});
+        }
+
+        const totalEnCours = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+        if (totalEnCours === 0 && this.interventions.length > 0) {
+          this.statusTabFilter = "all";
+          document.querySelectorAll(".chaptech-filter-pill").forEach((pill) => {
+            pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
+          });
+        }
+
+        this.setApiStatus("connected", `${list.length} fiches réelles`);
+        this.renderInterventionOptions();
+      } else {
+        this.setApiStatus("error", "Hors-ligne");
+      }
+
+      if (select) select.disabled = false;
     }
 
     tryAutoMatchInterventionFromPage() {
@@ -576,53 +592,30 @@
         return;
       }
 
-      this.showToast("Chargement des détails réels...", "info", 1500);
+      this.showToast("Chargement des détails réels...", "info", 1200);
 
-      // Récupérer les détails complets via background service worker
-      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: "FETCH_INTERVENTION_DETAILS", payload: { id } }, (res) => {
-          if (chrome.runtime.lastError) {
-            console.warn("[CelPros Widget] Erreur FETCH_INTERVENTION_DETAILS:", chrome.runtime.lastError.message);
-            const light = this.interventions.find((i) => i.id === id);
-            if (light) this.setSelectedIntervention(light, false);
-            return;
-          }
-          if (res && res.ok && res.data) {
-            this.setSelectedIntervention(res.data, true);
-            this.showToast(`Fiche réelle chargée : <strong>${res.data.nom_client}</strong>`, "success");
-          } else {
-            // En cas d'échec de fetch détaillé, chercher dans la liste locale light
-            const light = this.interventions.find((i) => i.id === id);
-            if (light) {
-              this.setSelectedIntervention(light, true);
-            }
-          }
-        });
+      let fullItem = null;
+      try {
+        fullItem = await this.fetchApi("intervention_get", "POST", { id: String(id) });
+      } catch (err) {
+        console.warn("[CelPros Widget] Erreur fetch détails direct:", err);
+      }
+
+      if (!fullItem || !fullItem.id) {
+        fullItem = this.interventions.find((i) => String(i.id) === String(id));
+      }
+
+      if (fullItem) {
+        this.setSelectedIntervention(fullItem, true);
+        const photosCount = (fullItem.whatsapp_photos || []).length;
+        const gpsCount = (fullItem.points_gps || []).length;
+        this.showToast(
+          `⚡ Dossier chargé : <strong>${this.escapeHtml(fullItem.nom_client)}</strong> (${photosCount} photos, ${gpsCount} GPS)`,
+          "success",
+          3500
+        );
       } else {
-        // Mode autonome / hors-extension (direct fetch via API FibreTrack avec CORS)
-        try {
-          const res = await fetch("https://fibretrack.mantota.com/api/index.php?action=intervention_get", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-User-Code": "9999",
-            },
-            body: JSON.stringify({ id: String(id) }),
-          });
-          const item = await res.json();
-          if (item && item.id) {
-            this.setSelectedIntervention(item, false);
-            this.showToast(`Fiche réelle chargée : <strong>${item.nom_client}</strong>`, "success");
-          } else {
-            throw new Error(item.error || "Fiche introuvable");
-          }
-        } catch (err) {
-          const light = this.interventions.find((i) => i.id === id);
-          if (light) {
-            this.setSelectedIntervention(light, false);
-          }
-          this.showToast(`⚠️ Erreur chargement détails réels: ${err.message}`, "error");
-        }
+        this.showToast("⚠️ Impossible de charger ce dossier", "error");
       }
     }
 
@@ -638,17 +631,19 @@
 
       // Synchroniser visuellement la sélection dans le <select>
       const select = document.getElementById("chaptech-intervention-select");
-      if (select && data.id && select.value !== data.id) {
+      if (select && data.id) {
         select.value = data.id;
       }
 
-      // Sauvegarder dans background pour persistance entre onglets uniquement si explicitement demandé
-      if (syncToBackground && typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: data }, () => {
-          if (chrome.runtime.lastError) {
-            /* ignoré silencieusement */
-          }
-        });
+      // Synchroniser l'input de recherche
+      const searchInput = document.getElementById("chaptech-search-input");
+      if (searchInput && data.nom_client) {
+        searchInput.value = (data.nom_client || "").trim();
+      }
+
+      // Sauvegarder dans le stockage local pour que tous les onglets et le popup soient synchronisés
+      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        chrome.storage.local.set({ activeIntervention: data }).catch(() => {});
       }
     }
 
@@ -780,6 +775,22 @@
       if (!this.selectedIntervention) {
         if (!isAuto) this.showToast("Veuillez d'abord sélectionner une intervention", "warning");
         return;
+      }
+
+      // Si l'intervention active est incomplète (pas de photos ou pas de points GPS), la recharger à chaud depuis l'API
+      if (!this.selectedIntervention.whatsapp_photos || !this.selectedIntervention.points_gps) {
+        this.showToast("Téléchargement des photos et détails de l'intervention...", "info", 1500);
+        try {
+          const full = await this.fetchApi("intervention_get", "POST", { id: String(this.selectedIntervention.id) });
+          if (full && full.id) {
+            this.selectedIntervention = full;
+            if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+              chrome.storage.local.set({ activeIntervention: full }).catch(() => {});
+            }
+          }
+        } catch (e) {
+          console.warn("[CelPros Widget] Recharge avant remplissage impossible:", e);
+        }
       }
 
       if (this.isAutofilling) return;
