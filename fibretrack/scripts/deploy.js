@@ -82,6 +82,12 @@ conn.on('ready', () => {
           await uploadFile(localApiFile, `${remoteBase}/api/index.php`);
           console.log('✓ api/index.php mis à jour sur Hostinger !');
         }
+        const localPdfFile = path.join(projectRoot, 'api', 'pdf.php');
+        if (fs.existsSync(localPdfFile)) {
+          await ensureRemoteDir(`${remoteBase}/api`);
+          await uploadFile(localPdfFile, `${remoteBase}/api/pdf.php`);
+          console.log('✓ api/pdf.php mis à jour sur Hostinger !');
+        }
         console.log('✓ Tous les fichiers mis à jour avec succès sur Hostinger !');
         // Vérification
         conn.exec(`cat ${remoteBase}/version.json`, (err, stream) => {

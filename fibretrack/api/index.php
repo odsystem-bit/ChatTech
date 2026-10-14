@@ -91,43 +91,61 @@ function buildTotalMaterielPose(array $d): array {
   return $total;
 }
 
-function compressBase64Image(string $dataUrl, int $maxDim = 1280, int $quality = 75): string {
-  if (strlen($dataUrl) < 180000) return $dataUrl; // déjà léger (< 180 KB)
-  if (!preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#si', $dataUrl, $m)) return $dataUrl;
+function saveBase64ImageToDisk(string $base64, string $interventionId, string $filenamePrefix = 'photo'): string {
+  if (empty($base64)) return '';
+  // Si c'est déjà une URL HTTP/HTTPS, ne rien faire
+  if (str_starts_with($base64, 'http://') || str_starts_with($base64, 'https://')) {
+    return $base64;
+  }
+  // Si ce n'est pas un format data:image, retourner tel quel
+  if (!preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#si', $base64, $m)) {
+    return $base64;
+  }
+
   $binary = base64_decode($m[2]);
-  if (!$binary) return $dataUrl;
+  if (!$binary) return $base64;
+
+  // Compression à 1280px max / 78 qualité avant écriture sur disque SSD
   $src = @imagecreatefromstring($binary);
-  if (!$src) return $dataUrl;
-  $w = imagesx($src);
-  $h = imagesy($src);
-  if ($w <= 0 || $h <= 0) { imagedestroy($src); return $dataUrl; }
-
-  $targetW = $w;
-  $targetH = $h;
-  if ($w > $maxDim || $h > $maxDim) {
-    if ($w > $h) {
-      $targetH = (int)round(($h * $maxDim) / $w);
-      $targetW = $maxDim;
-    } else {
-      $targetW = (int)round(($w * $maxDim) / $h);
-      $targetH = $maxDim;
+  if ($src) {
+    $w = imagesx($src);
+    $h = imagesy($src);
+    $maxDim = 1280;
+    if ($w > $maxDim || $h > $maxDim) {
+      if ($w > $h) {
+        $targetH = (int)round(($h * $maxDim) / $w);
+        $targetW = $maxDim;
+      } else {
+        $targetW = (int)round(($w * $maxDim) / $h);
+        $targetH = $maxDim;
+      }
+      $dst = imagecreatetruecolor($targetW, $targetH);
+      imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetW, $targetH, $w, $h);
+      imagedestroy($src);
+      $src = $dst;
     }
+    ob_start();
+    imagejpeg($src, null, 78);
+    $outBin = ob_get_clean();
+    imagedestroy($src);
+    if ($outBin) $binary = $outBin;
   }
 
-  $dst = imagecreatetruecolor($targetW, $targetH);
-  imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetW, $targetH, $w, $h);
-  imagedestroy($src);
-
-  ob_start();
-  imagejpeg($dst, null, $quality);
-  $outBin = ob_get_clean();
-  imagedestroy($dst);
-
-  if ($outBin && strlen($outBin) < strlen($binary)) {
-    return 'data:image/jpeg;base64,' . base64_encode($outBin);
+  $safeIntvId = preg_replace('/[^a-zA-Z0-9_-]/', '', $interventionId) ?: 'common';
+  $relativeDir = 'uploads/photos/' . $safeIntvId;
+  $absoluteDir = __DIR__ . '/' . $relativeDir;
+  if (!is_dir($absoluteDir)) {
+    @mkdir($absoluteDir, 0755, true);
   }
-  return $dataUrl;
+
+  $safePrefix = preg_replace('/[^a-zA-Z0-9_-]/', '', $filenamePrefix) ?: 'photo';
+  $filename = $safePrefix . '_' . substr(md5($binary), 0, 10) . '.jpg';
+  $filePath = $absoluteDir . '/' . $filename;
+  file_put_contents($filePath, $binary);
+
+  return 'https://fibretrack.mantota.com/api/' . $relativeDir . '/' . $filename;
 }
+
 
 
 function lockStockQuantity(PDO $pdo, string $designation): int {
@@ -691,17 +709,22 @@ try {
         $incomingWa = array_values($serverById);
       }
 
-      // Compression automatique des photos base64 côté serveur pour garantir légèreté et rapidité
+      // Sauvegarde des photos sur le disque SSD Hostinger et conversion en URLs pour alléger la BDD à 99%
+      $intvIdForPhotos = !empty($d['id']) ? $d['id'] : 'temp_' . uniqid();
       foreach ($incomingWa as &$ph) {
-        if (!empty($ph['url'])) {
-          $ph['url'] = compressBase64Image((string)$ph['url'], 1280, 75);
+        if (!empty($ph['url']) && strpos((string)$ph['url'], 'data:image') === 0) {
+          $slot = !empty($ph['slot']) ? $ph['slot'] : (!empty($ph['type']) ? $ph['type'] : 'wa');
+          $ph['url'] = saveBase64ImageToDisk((string)$ph['url'], $intvIdForPhotos, $slot);
         }
       }
       unset($ph);
 
       foreach ($incomingGps as &$pt) {
-        if (!empty($pt['photo'])) {
-          $pt['photo'] = compressBase64Image((string)$pt['photo'], 1280, 75);
+        if (!empty($pt['photo']) && strpos((string)$pt['photo'], 'data:image') === 0) {
+          $ptType = !empty($pt['type']) ? $pt['type'] : 'poteau';
+          $num = $pt['numero'] ?? '';
+          $prefix = $ptType . ($num !== '' ? '_' . $num : '');
+          $pt['photo'] = saveBase64ImageToDisk((string)$pt['photo'], $intvIdForPhotos, $prefix);
         }
       }
       unset($pt);

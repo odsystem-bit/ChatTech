@@ -187,11 +187,29 @@ class ChaptechPDF extends tFPDF {
     }
   }
 
-  function embedPhoto($base64Data, $x, $y, $w, $h) {
-    if (!$base64Data || strpos($base64Data, 'data:image') !== 0) return false;
-    $base64 = explode(',', $base64Data)[1] ?? '';
-    $imgData = base64_decode($base64);
+  function embedPhoto($src, $x, $y, $w, $h) {
+    if (empty($src)) return false;
+    $imgData = null;
+    if (strpos($src, 'data:image') === 0) {
+      $base64 = explode(',', $src)[1] ?? '';
+      $imgData = base64_decode($base64);
+    } elseif (strpos($src, 'http://') === 0 || strpos($src, 'https://') === 0) {
+      $prefix = 'https://fibretrack.mantota.com/api/';
+      if (strpos($src, $prefix) === 0) {
+        $localPath = __DIR__ . '/' . substr($src, strlen($prefix));
+        if (is_file($localPath)) {
+          $imgData = file_get_contents($localPath);
+        }
+      }
+      if (!$imgData) {
+        $ctx = stream_context_create(['http' => ['timeout' => 5]]);
+        $imgData = @file_get_contents($src, false, $ctx);
+      }
+    } elseif (is_file($src)) {
+      $imgData = file_get_contents($src);
+    }
     if (!$imgData) return false;
+
     $maxW = mmToPxAtDpi($w, PDF_DPI);
     $maxH = mmToPxAtDpi($h, PDF_DPI);
     $imgData = compressJpeg($imgData, $maxW, $maxH, 75);
@@ -215,6 +233,7 @@ class ChaptechPDF extends tFPDF {
     }
   }
 }
+
 
 
 function generateFichesPDF($d) {
