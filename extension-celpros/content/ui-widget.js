@@ -314,9 +314,22 @@
 
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({ action: "FETCH_INTERVENTIONS" }, (res) => {
+          if (chrome.runtime.lastError) {
+            console.warn("[CelPros Widget] Erreur FETCH_INTERVENTIONS:", chrome.runtime.lastError.message);
+            if (select) select.disabled = false;
+            this.setApiStatus("error", "Erreur connexion");
+            return;
+          }
           if (select) select.disabled = false;
           if (res && res.ok && Array.isArray(res.data)) {
             this.interventions = res.data;
+            const totalEnCours = this.interventions.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+            if (totalEnCours === 0 && this.interventions.length > 0) {
+              this.statusTabFilter = "all";
+              document.querySelectorAll(".chaptech-filter-pill").forEach((pill) => {
+                pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
+              });
+            }
             this.setApiStatus("connected", `${res.data.length} fiches réelles`);
             this.renderInterventionOptions();
             this.tryAutoMatchInterventionFromPage();
@@ -553,6 +566,12 @@
       // Récupérer les détails complets via background service worker
       if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
         chrome.runtime.sendMessage({ action: "FETCH_INTERVENTION_DETAILS", payload: { id } }, (res) => {
+          if (chrome.runtime.lastError) {
+            console.warn("[CelPros Widget] Erreur FETCH_INTERVENTION_DETAILS:", chrome.runtime.lastError.message);
+            const light = this.interventions.find((i) => i.id === id);
+            if (light) this.setSelectedIntervention(light, false);
+            return;
+          }
           if (res && res.ok && res.data) {
             this.setSelectedIntervention(res.data, true);
             this.showToast(`Fiche réelle chargée : <strong>${res.data.nom_client}</strong>`, "success");
@@ -610,7 +629,11 @@
 
       // Sauvegarder dans background pour persistance entre onglets uniquement si explicitement demandé
       if (syncToBackground && typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
-        chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: data }).catch(() => {});
+        chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: data }, () => {
+          if (chrome.runtime.lastError) {
+            /* ignoré silencieusement */
+          }
+        });
       }
     }
 

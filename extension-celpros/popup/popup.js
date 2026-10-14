@@ -70,6 +70,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 1. Charger la configuration et l'intervention active
   chrome.runtime.sendMessage({ action: "GET_CONFIG" }, (res) => {
+    if (chrome.runtime.lastError) {
+      console.warn("[CelPros Popup] GET_CONFIG error:", chrome.runtime.lastError.message);
+    }
     if (res && res.ok && res.data) {
       const cfg = res.data;
       cfgApiUrl.value = cfg.apiUrl || "https://fibretrack.mantota.com/api/index.php";
@@ -87,9 +90,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   function loadInterventions() {
     if (popupInterventionSelect) popupInterventionSelect.disabled = true;
     chrome.runtime.sendMessage({ action: "FETCH_INTERVENTIONS" }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[CelPros Popup] FETCH_INTERVENTIONS error:", chrome.runtime.lastError.message);
+        if (popupInterventionSelect) popupInterventionSelect.disabled = false;
+        showMessage(`⚠️ Erreur: ${chrome.runtime.lastError.message}`, "error");
+        return;
+      }
       if (popupInterventionSelect) popupInterventionSelect.disabled = false;
       if (res && res.ok && Array.isArray(res.data)) {
         interventionsList = res.data;
+
+        // Si aucun dossier n'est en cours mais qu'il y a des dossiers (ex: 62 terminés),
+        // basculer automatiquement sur "Tous" pour que la liste ne soit jamais vide !
+        const totalEnCours = interventionsList.filter((i) => (i.statut || "").toLowerCase() !== "termine").length;
+        if (totalEnCours === 0 && interventionsList.length > 0) {
+          statusTabFilter = "all";
+          document.querySelectorAll(".popup-pill").forEach((pill) => {
+            pill.classList.toggle("is-active", pill.getAttribute("data-status") === "all");
+          });
+        }
+
         renderPopupOptions();
       } else {
         showMessage(`⚠️ Erreur chargement des fiches: ${res?.error || "Inconnu"}`, "error");
@@ -229,19 +249,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     showMessage("Chargement des détails...", "success");
 
     chrome.runtime.sendMessage({ action: "FETCH_INTERVENTION_DETAILS", payload: { id } }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[CelPros Popup] FETCH_INTERVENTION_DETAILS error:", chrome.runtime.lastError.message);
+      }
       if (res && res.ok && res.data) {
         renderActiveIntervention(res.data);
         if (popupSearchInput) popupSearchInput.value = (res.data.nom_client || "").trim();
         showMessage(`⚡ Dossier actif : <strong>${escapeHtml(res.data.nom_client)}</strong>`);
 
-        // Propager aux onglets ouverts
-        chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: res.data });
+        // Propager aux onglets ouverts en toute sécurité
+        chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: res.data }, () => {
+          if (chrome.runtime.lastError) {
+            /* ignoré silencieusement */
+          }
+        });
       } else {
         const match = interventionsList.find((i) => i.id === id);
         if (match) {
           renderActiveIntervention(match);
           if (popupSearchInput) popupSearchInput.value = (match.nom_client || "").trim();
-          chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: match });
+          chrome.runtime.sendMessage({ action: "SET_ACTIVE_INTERVENTION", payload: match }, () => {
+            if (chrome.runtime.lastError) {
+              /* ignoré silencieusement */
+            }
+          });
         }
       }
     });
@@ -333,6 +364,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
 
     chrome.runtime.sendMessage({ action: "TEST_CONNECTION", payload: customPayload }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[CelPros Popup] TEST_CONNECTION error:", chrome.runtime.lastError.message);
+        connBadge.className = "badge badge-error";
+        connBadge.textContent = "Hors-ligne";
+        return;
+      }
       if (res && res.ok) {
         connBadge.className = "badge badge-connected";
         connBadge.textContent = `Connecté (${res.count} fiches)`;
@@ -345,6 +382,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // 4. Détecter l'onglet actif
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (chrome.runtime.lastError) {
+      console.warn("[CelPros Popup] tabs.query error:", chrome.runtime.lastError.message);
+      return;
+    }
     const activeTab = tabs[0];
     if (!activeTab || !activeTab.url) return;
 
@@ -363,18 +404,79 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // Injection dynamique des scripts si l'onglet était déjà ouvert avant le chargement de l'extension
+  async function injectContentScripts(tabId) {
+    if (typeof chrome === "undefined" || !chrome.scripting) return false;
+    try {
+      await chrome.scripting.insertCSS({
+        target: { tabId },
+        files: ["content/content.css"],
+      }).catch(() => {});
+      await chrome.scripting.executeScript({
+        target: { tabId, allFrames: true },
+        files: [
+          "content/field-mapping.js",
+          "content/photo-filler.js",
+          "content/form-filler.js",
+          "content/ui-widget.js",
+          "content/content.js",
+        ],
+      });
+      return true;
+    } catch (e) {
+      console.warn("[CelPros Popup] Injection dynamique impossible:", e);
+      return false;
+    }
+  }
+
   // 5. Déclencher le remplissage depuis le popup
   btnTriggerAutofill.addEventListener("click", () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { action: "TRIGGER_AUTOFILL" }, (res) => {
+      if (chrome.runtime.lastError) {
+        showMessage(`Erreur onglet : ${chrome.runtime.lastError.message}`, "error");
+        return;
+      }
+      const tabId = tabs[0]?.id;
+      if (!tabId) {
+        showMessage("Aucun onglet actif trouvé", "error");
+        return;
+      }
+
+      btnTriggerAutofill.disabled = true;
+      btnTriggerAutofill.textContent = "⏳ Remplissage en cours…";
+
+      const trySend = (allowInject = true) => {
+        chrome.tabs.sendMessage(tabId, { action: "TRIGGER_AUTOFILL" }, async (res) => {
+          if (chrome.runtime.lastError) {
+            const errStr = chrome.runtime.lastError.message || "";
+            console.warn("[CelPros Popup] TRIGGER_AUTOFILL error:", errStr);
+
+            if (allowInject && (errStr.includes("Receiving end does not exist") || errStr.includes("Could not establish connection"))) {
+              const injected = await injectContentScripts(tabId);
+              if (injected) {
+                setTimeout(() => trySend(false), 350);
+                return;
+              }
+            }
+
+            btnTriggerAutofill.disabled = false;
+            btnTriggerAutofill.textContent = "🚀 Remplir la page active";
+            showMessage("⚠️ Veuillez actualiser la page CelPros (F5) pour activer l'assistant !", "error");
+            return;
+          }
+
+          btnTriggerAutofill.disabled = false;
+          btnTriggerAutofill.textContent = "🚀 Remplir la page active";
+
           if (res && res.ok) {
             showMessage("⚡ Formulaire rempli avec succès !");
           } else {
             showMessage(res?.error || "Erreur de remplissage", "error");
           }
         });
-      }
+      };
+
+      trySend(true);
     });
   });
 
@@ -392,6 +494,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     };
 
     chrome.runtime.sendMessage({ action: "SAVE_CONFIG", payload }, (res) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[CelPros Popup] SAVE_CONFIG error:", chrome.runtime.lastError.message);
+        showMessage(`Erreur: ${chrome.runtime.lastError.message}`, "error");
+        return;
+      }
       if (res && res.ok) {
         showMessage("Configuration enregistrée avec succès !");
         testConnection();

@@ -13,6 +13,7 @@ import PhotoViewerModal from "../components/PhotoViewerModal";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
 import {
   getCurrentPositionHighAccuracy,
+  acquireBestPosition,
   findNearbyPoint,
   readFileAsDataUrl,
   embedGpsOnPhoto,
@@ -1070,7 +1071,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   // ===== Photos de Poteaux Géolocalisés (section dynamique Photos CelPros) =====
   function openPoleCamera(numero) {
-    targetPoleNumeroRef.current = numero;
+    targetPoleNumeroRef.current = Number(numero);
     if (poleCameraInputRef.current) {
       poleCameraInputRef.current.value = "";
       poleCameraInputRef.current.click();
@@ -1078,7 +1079,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function openPoleGallery(numero) {
-    targetPoleNumeroRef.current = numero;
+    targetPoleNumeroRef.current = Number(numero);
     if (poleGalleryInputRef.current) {
       poleGalleryInputRef.current.value = "";
       poleGalleryInputRef.current.click();
@@ -1086,8 +1087,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function handleAddPole() {
+    const currentLatestData = dataRef.current || data;
     const existingNums = [
-      ...(data.points_gps || [])
+      ...(currentLatestData.points_gps || [])
         .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
         .map((p) => Number(p.numero)),
       ...(whatsappPhotos || [])
@@ -1118,7 +1120,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       ajoute_par: currentUser || "Technicien",
     };
 
-    const nextPoints = [...(data.points_gps || []), newPole];
+    const nextPoints = [
+      ...(currentLatestData.points_gps || []).filter(
+        (p) => !(p && p.type === "Poteau" && Number(p.numero) === nextNum)
+      ),
+      newPole,
+    ];
     const poleList = nextPoints.filter((p) => p && p.type === "Poteau");
     const nbTraverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
     const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
@@ -1134,6 +1141,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         nb_poteaux_armes: nbArmes,
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
+        _fully_loaded: true,
       };
       saveInterventionLocally(next);
       return next;
@@ -1149,7 +1157,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function handlePoleOptionChange(poleNum, optionKey, optionValue) {
-    const list = [...(data.points_gps || [])];
+    const currentLatestData = dataRef.current || data;
+    const list = [...(currentLatestData.points_gps || [])];
     const poleIdx = list.findIndex(
       (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
     );
@@ -1211,6 +1220,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         nb_poteaux_armes: nbArmes,
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
+        _fully_loaded: true,
       };
       saveInterventionLocally(next);
       return next;
@@ -1221,40 +1231,39 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const poleNum = targetPoleNumeroRef.current || 1;
+    const poleNum = Number(targetPoleNumeroRef.current || 1);
     setPoleCapturingNumero(poleNum);
-    setSlotActionFeedback(`📡 Acquisition GPS haute précision pour le Poteau ${poleNum}…`);
+    setSlotActionFeedback(`📡 Analyse photo & acquisition GPS pour le Poteau ${poleNum}…`);
 
     try {
-      let photoDataUrl, pos;
-      try {
-        [photoDataUrl, pos] = await Promise.all([
-          readFileAsDataUrl(file),
-          getCurrentPositionHighAccuracy(),
-        ]);
-      } catch (gpsErr) {
-        alert(
-          `⚠️ Géolocalisation refusée ou impossible à récupérer pour le Poteau ${poleNum}.\n\n` +
-          `Détail : ${gpsErr.message || "Signal GPS indisponible"}.\n\n` +
-          `Veuillez autoriser l'accès GPS et vérifier que la localisation haute précision est activée sur votre smartphone.`
-        );
-        setSlotActionFeedback(`⚠️ Échec GPS Poteau ${poleNum} : ${gpsErr.message}`);
-        return;
-      }
+      const currentLatestData = dataRef.current || data;
+      const fallbackBaseCoords = {
+        lat: currentLatestData.latitude || (Array.isArray(currentLatestData.points_gps) ? currentLatestData.points_gps.find(p => p?.lat != null)?.lat : null),
+        lng: currentLatestData.longitude || (Array.isArray(currentLatestData.points_gps) ? currentLatestData.points_gps.find(p => p?.lng != null)?.lng : null),
+        precision_m: 15,
+      };
+
+      // Lecture photo & résolution GPS ultra-résiliente (EXIF native d'abord, puis Geolocation API sans blocage)
+      const [photoDataUrl, posResult] = await Promise.all([
+        readFileAsDataUrl(file),
+        acquireBestPosition(file, fallbackBaseCoords),
+      ]);
 
       if (e.target) e.target.value = "";
 
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const precision_m = pos.coords.accuracy;
+      const lat = posResult?.lat ?? null;
+      const lng = posResult?.lng ?? null;
+      const precision_m = posResult?.precision_m ?? null;
       const horodatage = new Date().toISOString();
 
       let lieu = "";
-      try {
-        lieu = await reverseGeocode(lat, lng);
-      } catch {}
+      if (lat != null && lng != null) {
+        try {
+          lieu = await reverseGeocode(lat, lng);
+        } catch {}
+      }
 
-      const currentList = Array.isArray(data.points_gps) ? [...data.points_gps] : [];
+      const currentList = Array.isArray(currentLatestData.points_gps) ? [...currentLatestData.points_gps] : [];
       const poleIdx = currentList.findIndex(
         (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
       );
@@ -1269,20 +1278,26 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       const charTitle = charBadges.join(" • ") || "Poteau";
       const embeddedLabel = `Poteau ${poleNum} (${charTitle})`;
 
-      const embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
-        type: embeddedLabel,
-        lieu,
-        lat,
-        lng,
-        precision_m,
-        horodatage,
-      });
+      let embeddedPhoto = photoDataUrl;
+      try {
+        embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
+          type: embeddedLabel,
+          lieu,
+          lat,
+          lng,
+          precision_m: precision_m || 10,
+          horodatage,
+          warning: posResult?.warning,
+        });
+      } catch (embErr) {
+        console.warn("embedGpsOnPhoto warning:", embErr);
+      }
 
       const updatedPoint = {
         ...(existingPole || {}),
         id: existingPole?.id || crypto.randomUUID(),
         type: "Poteau",
-        numero: poleNum,
+        numero: Number(poleNum),
         traverse: existingPole ? (existingPole.traverse !== undefined ? Boolean(existingPole.traverse) : existingPole.sous_type !== "Implanté") : true,
         implante: existingPole ? Boolean(existingPole.implante) : false,
         arme: existingPole ? Boolean(existingPole.arme) : false,
@@ -1295,7 +1310,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         precision_m,
         horodatage: existingPole?.horodatage || horodatage,
         lieu,
-        ajoute_par: currentUser,
+        ajoute_par: currentUser || "Technicien",
       };
 
       if (poleIdx >= 0) {
@@ -1309,27 +1324,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
       const nbArmes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
 
-      setData((prev) => {
-        const next = {
-          ...prev,
-          points_gps: currentList,
-          nb_poteaux_traverses: nbTraverses,
-          nb_poteaux_implantes: nbImplantes,
-          nb_poteaux_armes: nbArmes,
-          modifie_par: currentUser,
-          modifie_le: new Date().toISOString(),
-        };
-        saveInterventionLocally(next);
-        return next;
-      });
-
       const galleryPhoto = {
         id: crypto.randomUUID(),
         slot: `poteau_${poleNum}`,
         type: "poteau",
         label: embeddedLabel,
         name: `poteau_${poleNum}.jpg`,
-        description: `${embeddedLabel} - ${data.nom_client || "Intervention"}`,
+        description: `${embeddedLabel} - ${currentLatestData.nom_client || "Intervention"}`,
         url: embeddedPhoto,
         lat,
         lng,
@@ -1340,22 +1341,40 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         added: new Date().toISOString(),
       };
 
+      let finalPhotos = [];
       setWhatsappPhotos((prev) => {
         const oldPhotos = prev.filter((p) => p && p.slot === `poteau_${poleNum}`);
         oldPhotos.forEach((p) => {
           if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
         });
         const filtered = prev.filter((p) => p.slot !== `poteau_${poleNum}`);
-        const nextPhotos = [...filtered, galleryPhoto];
-        saveInterventionLocally({ ...data, points_gps: currentList, whatsapp_photos: nextPhotos });
-        return nextPhotos;
+        finalPhotos = [...filtered, galleryPhoto];
+        return finalPhotos;
+      });
+
+      setData((prev) => {
+        const next = {
+          ...prev,
+          points_gps: currentList,
+          whatsapp_photos: finalPhotos.length > 0 ? finalPhotos : (prev.whatsapp_photos || []),
+          nb_poteaux_traverses: nbTraverses,
+          nb_poteaux_implantes: nbImplantes,
+          nb_poteaux_armes: nbArmes,
+          modifie_par: currentUser,
+          modifie_le: new Date().toISOString(),
+          _fully_loaded: true,
+        };
+        saveInterventionLocally(next);
+        return next;
       });
 
       markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
       setSaveStatus("✓ Poteau enregistré");
-      setSlotActionFeedback(`✅ Photo géolocalisée enregistrée pour le Poteau ${poleNum} (±${precision_m.toFixed(1)} m)`);
+      const sourceLabel = posResult?.source === "exif" ? "EXIF photo (très haute précision)" : (lat != null ? `±${(precision_m || 10).toFixed(1)} m` : "sans GPS");
+      setSlotActionFeedback(`✅ Photo enregistrée pour le Poteau ${poleNum} (${sourceLabel})`);
       setTimeout(() => setSlotActionFeedback(""), 5000);
     } catch (err) {
+      console.error("handlePolePhotoSelected error:", err);
       alert(`Erreur lors de la capture du Poteau ${poleNum} : ${err.message}`);
     } finally {
       setPoleCapturingNumero(null);
@@ -1363,7 +1382,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function removePole(numero) {
-    const targetPoles = (data.points_gps || []).filter(
+    const currentLatestData = dataRef.current || data;
+    const targetPoles = (currentLatestData.points_gps || []).filter(
       (p) => p && p.type === "Poteau" && Number(p.numero) === Number(numero)
     );
     const targetWaPhotos = (whatsappPhotos || []).filter(
@@ -1377,7 +1397,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
     }
 
-    // Enregistrer l'horodatage et l'id pour la répercussion de suppression sur le serveur MySQL
+    // Enregistrer l'horodatage et l'id pour la répercussion de suppression sur le serveur MySQL et localStorage
     for (const p of targetPoles) {
       if (p.horodatage) deletedGpsPointIdsRef.current.add(p.horodatage);
       if (p.id) deletedGpsPointIdsRef.current.add(p.id);
@@ -1388,7 +1408,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
     deletedWhatsappPhotoIdsRef.current.add(`poteau_${numero}`);
 
-    const updatedPoints = (data.points_gps || []).filter(
+    const updatedPoints = (currentLatestData.points_gps || []).filter(
       (p) => !(p && p.type === "Poteau" && Number(p.numero) === Number(numero))
     );
 
@@ -1415,6 +1435,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         nb_poteaux_armes: nbArmes,
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
+        _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+        _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
+        _fully_loaded: true,
       };
       saveInterventionLocally(next);
       return next;

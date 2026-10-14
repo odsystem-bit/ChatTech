@@ -262,3 +262,49 @@ test("ensureInterventionDefaults preserves additional photos and their CelPros e
   assert.equal(addPhoto.slot, "additionnelle");
 });
 
+test("saveInterventionLocally replaces slot photos and prevents duplicate pole entries", async () => {
+  const { saveInterventionLocally, getStoredIntervention } = await import("./Intervention.js");
+  const testId = "test-pole2-slot-replace";
+
+  // Initial state with Pole 1 and Pole 2 without photo
+  const initial = {
+    id: testId,
+    nom_client: "Test Pole 2",
+    points_gps: [
+      { id: "pole-1", type: "Poteau", numero: 1, lat: 6.36, lng: 2.42 },
+      { id: "pole-2-old", type: "Poteau", numero: 2, lat: null, lng: null },
+    ],
+    whatsapp_photos: [
+      { id: "wa-pole-1", slot: "poteau_1", url: "data:image/jpeg;base64,pole1" },
+    ],
+  };
+  saveInterventionLocally(initial);
+
+  // Technician takes photo for Pole 2 (new id, slot poteau_2, new coordinates)
+  const updated = {
+    id: testId,
+    nom_client: "Test Pole 2",
+    points_gps: [
+      { id: "pole-1", type: "Poteau", numero: 1, lat: 6.36, lng: 2.42 },
+      { id: "pole-2-new", type: "Poteau", numero: 2, lat: 6.371, lng: 2.428, photo: "data:image/jpeg;base64,pole2" },
+    ],
+    whatsapp_photos: [
+      { id: "wa-pole-1", slot: "poteau_1", url: "data:image/jpeg;base64,pole1" },
+      { id: "wa-pole-2-new", slot: "poteau_2", url: "data:image/jpeg;base64,pole2", lat: 6.371, lng: 2.428 },
+    ],
+  };
+  saveInterventionLocally(updated);
+
+  const stored = getStoredIntervention(testId);
+  assert.equal(stored.points_gps.length, 2, "There must be exactly 2 poles, no duplicate Pole 2");
+  const pole2 = stored.points_gps.find((p) => Number(p.numero) === 2);
+  assert.ok(pole2);
+  assert.equal(pole2.lat, 6.371);
+  assert.equal(pole2.photo, "data:image/jpeg;base64,pole2");
+
+  assert.equal(stored.whatsapp_photos.length, 2, "There must be exactly 2 photos, one per slot");
+  const wa2 = stored.whatsapp_photos.find((p) => p.slot === "poteau_2");
+  assert.ok(wa2);
+  assert.equal(wa2.lat, 6.371);
+});
+

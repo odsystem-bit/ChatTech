@@ -1,10 +1,9 @@
 {
-  "version": "2.9.3",
-  "buildTime": "2026-10-14T17:00:00Z",
+  "version": "2.9.4",
+  "buildTime": "2026-10-14T17:35:00Z",
   "features": [
-    "Design mobile moderne et soigné sur la page d'accueil : barre de recherche stylisée avec icône et effacement rapide, onglets segmentés En cours / Terminées avec pastilles de comptage, sélecteurs de tri et technicien, cartes d'intervention professionnelles avec bordures statut, badges et puces cliquables",
-    "Extension CelPros v1.0.1 : sélection intuitive des dossiers avec autocomplétion instantanée, recherche par nom client / FAT / téléphone / ID, sélection au clavier (Entrée), sélection directe dans le Popup de l'extension et dans le widget flottant, synchronisation instantanée inter-onglets",
-    "Gestion du stockage sans quota dans l'extension (unlimitedStorage) et support complet de tous les cadres (all_frames) sur CelPros Celtiis",
-    "PWA iPhone & Android : Service Worker v2.9.3 avec purge automatique du cache pour affichage instantané du nouveau design"
+    "Gestion robuste des poteaux et photos multiples : extraction automatique des coordonnées GPS exactes depuis l'EXIF natif de l'appareil photo, suppression de tout rejet de photo sur timeout GPS, conservation intégrale des photos pour le poteau 2 et suivants",
+    "Extension CelPros v1.0.2 : sélection immédiate parmi l'ensemble des 62 interventions existantes avec bascule automatique intelligente, injection transparente du script sur les onglets CelPros ouverts pour supprimer l'erreur de connexion",
+    "PWA iPhone & Android : Service Worker v2.9.4 garantissant la mise à jour immédiate et l'affichage des dernières données"
   ]
 }

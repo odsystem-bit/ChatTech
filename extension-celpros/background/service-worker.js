@@ -245,7 +245,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 chrome.tabs.sendMessage(tab.id, {
                   action: "ACTIVE_INTERVENTION_UPDATED",
                   payload,
-                }).catch(() => {});
+                }, () => {
+                  // Consomme systématiquement chrome.runtime.lastError pour éviter tout avertissement non intercepté
+                  if (chrome.runtime.lastError) {
+                    /* onglet sans content script actif, ignoré en toute sécurité */
+                  }
+                });
               }
             });
           });

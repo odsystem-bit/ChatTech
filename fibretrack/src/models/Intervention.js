@@ -176,20 +176,44 @@ export function saveInterventionLocally(intervention) {
     // 1. Sauvegarde dans le stockage dédié par intervention avec protection anti-écrasement des photos
     const existing = getStoredIntervention(defaulted.id);
     if (existing) {
+      const deletedPhotoIds = new Set(Array.isArray(defaulted._deleted_photo_ids) ? defaulted._deleted_photo_ids : []);
+      const deletedPointIds = new Set(Array.isArray(defaulted._deleted_point_ids) ? defaulted._deleted_point_ids : []);
+
       if ((!defaulted.whatsapp_photos || defaulted.whatsapp_photos.length === 0) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
-        defaulted.whatsapp_photos = existing.whatsapp_photos;
+        defaulted.whatsapp_photos = existing.whatsapp_photos.filter((p) => p && !deletedPhotoIds.has(p.id) && !deletedPhotoIds.has(p.slot));
       } else if (Array.isArray(defaulted.whatsapp_photos) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
         const incomingIds = new Set(defaulted.whatsapp_photos.map((p) => p?.id).filter(Boolean));
-        const localOnly = existing.whatsapp_photos.filter((p) => p?.id && !incomingIds.has(p.id));
+        const incomingSlots = new Set(defaulted.whatsapp_photos.map((p) => p?.slot).filter(Boolean));
+        const localOnly = existing.whatsapp_photos.filter((p) => {
+          if (!p || !p.id) return false;
+          if (deletedPhotoIds.has(p.id) || (p.slot && deletedPhotoIds.has(p.slot))) return false;
+          if (incomingIds.has(p.id)) return false;
+          if (p.slot && incomingSlots.has(p.slot)) return false;
+          return true;
+        });
         if (localOnly.length > 0) {
           defaulted.whatsapp_photos = [...defaulted.whatsapp_photos, ...localOnly];
         }
       }
+
       if ((!defaulted.points_gps || defaulted.points_gps.length === 0) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
-        defaulted.points_gps = existing.points_gps;
+        defaulted.points_gps = existing.points_gps.filter((p) => p && !deletedPointIds.has(p.id) && !deletedPointIds.has(p.horodatage));
       } else if (Array.isArray(defaulted.points_gps) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
         const incomingIds = new Set(defaulted.points_gps.map((p) => p?.id).filter(Boolean));
-        const localOnly = existing.points_gps.filter((p) => p?.id && !incomingIds.has(p.id));
+        const incomingPoleNums = new Set(
+          defaulted.points_gps
+            .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
+            .map((p) => Number(p.numero))
+        );
+        const localOnly = existing.points_gps.filter((p) => {
+          if (!p || !p.id) return false;
+          if (deletedPointIds.has(p.id) || (p.horodatage && deletedPointIds.has(p.horodatage))) return false;
+          if (incomingIds.has(p.id)) return false;
+          if (p.type === "Poteau" && Number(p.numero) > 0 && incomingPoleNums.has(Number(p.numero))) {
+            return false;
+          }
+          return true;
+        });
         if (localOnly.length > 0) {
           defaulted.points_gps = [...defaulted.points_gps, ...localOnly];
         }
