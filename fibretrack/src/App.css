@@ -24,9 +24,10 @@
 
 /* ===== App Shell ===== */
 .app-home {
-  max-width: 600px;
+  max-width: 1400px;
   margin: 0 auto;
   min-height: 100svh;
+  padding: 0 16px 40px;
 }
 
 .app-home header {
@@ -167,6 +168,15 @@
   margin-bottom: 28px;
 }
 
+@media (min-width: 640px) {
+  .home-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+}
+
 .home-action-card {
   display: flex;
   align-items: center;
@@ -265,6 +275,20 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+@media (min-width: 640px) {
+  .intervention-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+}
+
+@media (min-width: 1100px) {
+  .intervention-list {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .intervention-list li {
@@ -449,9 +473,15 @@
 
 /* ===== Form ===== */
 .intervention-form {
-  max-width: 820px;
+  max-width: 1440px;
   margin: 0 auto;
-  padding-bottom: calc(90px + var(--safe-bottom));
+  padding: 0 16px calc(90px + var(--safe-bottom));
+}
+
+@media (min-width: 768px) {
+  .intervention-form {
+    padding: 0 24px calc(90px + var(--safe-bottom));
+  }
 }
 
 .form-header {
@@ -477,7 +507,7 @@
   display: flex;
   gap: 4px;
   overflow-x: auto;
-  margin: 16px 16px 16px;
+  margin: 16px 0;
   padding: 4px;
   background: #fff;
   border-radius: 14px;
@@ -512,7 +542,7 @@
 
 /* ===== Tab Content ===== */
 .tab-content {
-  padding: 0 16px;
+  padding: 0;
 }
 
 .tab-content section {
@@ -537,6 +567,18 @@
   flex-direction: column;
   gap: 16px;
   animation: fadeIn 0.2s ease-out;
+}
+
+@media (min-width: 960px) {
+  .form-section-stack {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .form-card:only-child {
+    grid-column: 1 / -1;
+  }
 }
 
 .form-card {
@@ -1056,6 +1098,12 @@
   }
 }
 
+@media (min-width: 1280px) {
+  .celpros-photos-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
 .photo-slot-card {
   background: #ffffff;
   border-radius: 16px;
@@ -1262,6 +1310,116 @@
   border: 1px solid var(--border);
   padding: 18px 20px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+}
+
+/* ===== Dynamic Pole Section (Photos CelPros) ===== */
+.celpros-poles-section {
+  margin: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pole-section-header-card {
+  border-left: 4px solid var(--primary) !important;
+  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%) !important;
+}
+
+.btn-add-pole {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-add-pole:active {
+  transform: scale(0.96);
+}
+
+.pole-type-selector-pills {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.pill-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #f8fafc;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.pill-btn:hover {
+  background: #f1f5f9;
+  color: var(--text);
+}
+
+.pill-btn.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.25);
+}
+
+.pole-gps-details {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  margin-top: 6px;
+}
+
+.gps-chip-coord {
+  font-family: monospace;
+  font-weight: 700;
+  color: #166534;
+}
+
+.gps-chip-acc {
+  background: #dcfce7;
+  color: #15803d;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+}
+
+.gps-chip-lieu {
+  color: #1e3a8a;
+  font-size: 11px;
+  width: 100%;
+}
+
+.pole-capturing-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: #eff6ff;
+  border-radius: 12px;
+  border: 1.5px dashed var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-dark);
 }
 
 .photo-tag-pill {
@@ -1494,7 +1652,25 @@
 .materiel-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
+  gap: 10px;
+}
+
+@media (min-width: 640px) {
+  .materiel-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1024px) {
+  .materiel-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+@media (min-width: 1280px) {
+  .materiel-grid {
+    grid-template-columns: repeat(5, 1fr);
+  }
 }
 
 .materiel-item {
@@ -1557,14 +1733,21 @@
   line-height: 1.6;
 }
 
-/* ===== Stock Screen ===== */
+/* ===== Stock Screen, Report Screen, Admin Screen ===== */
 .stock-screen,
 .report-screen,
 .admin-screen {
-  max-width: 640px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 16px;
+  padding: 16px 20px;
   min-height: 100svh;
+}
+
+@media (min-width: 640px) {
+  .report-screen .btn-large {
+    flex: 1 1 240px;
+    width: auto;
+  }
 }
 
 .stock-form {

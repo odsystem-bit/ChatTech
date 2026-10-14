@@ -1,15 +1,14 @@
 {
-  "version": "2.6.0",
-  "buildTime": "2026-10-13T22:45:00Z",
+  "version": "2.7.0",
+  "buildTime": "2026-10-14T01:45:00Z",
   "features": [
-    "Ergonomie mobile/tablette moderne avec cartes thématiques et contrôles tactiles optimisés",
-    "Détection GPS 1-clic de l'Adresse / Zone avec reverse géocodage OpenStreetMap / Nominatim (Quartier, Ville)",
-    "Extraction OCR automatique des références FAT et MSAN depuis la photo du FAT (OGA, FAT, multi-lignes)",
-    "Galerie photos CelPros structurée alignée 1:1 sur les 13 emplacements réglementaires CelPros",
-    "Compatibilité directe avec l'extension CelPros par taggage explicite de slot et type sur les photos",
-    "Steppers tactiles ergonomiques pour le métrage câble et comptage de matériel sur le terrain",
-    "Scan instantané et continu dès l'ouverture de la caméra (BarcodeDetector W3C GPU + découpage 5 zones ZXing + OCR automatique)",
-    "Reconnaissance optique du texte (OCR) au-dessus des codes-barres pour MAC et SN en cas de code flou, rayé ou abîmé",
-    "Support hors-ligne intégral avec repli automatique sur core standard local si SIMD absent"
+    "Automatisation dynamique des ports FAT disponibles (ports 1 à 8) calculés immédiatement dès la saisie du port accordé",
+    "Masquage ergonomique temporaire des champs RP1 et Rue dans le matériel standard sans suppression de données",
+    "Masquage des onglets Mise en service et Satisfaction dans la navigation du formulaire",
+    "Refonte responsive complète PC / Tablette / Mobile : dashboard multi-colonnes jusqu'à 1440px sur PC, grille fluide sur tablette, affichage sans débordement sur smartphone",
+    "Gestion dynamique des photos de poteaux géolocalisés dans la section Photos CelPros (Ajouter un poteau, GPS haute précision obligatoire, incrustation photo)",
+    "Reconnaissance OCR automatique des références FAT et MSAN sur photo du boîtier FAT",
+    "Scanner ultra-rapide MAC et SN avec moteur OCR hybride",
+    "Détection GPS automatique de l'adresse et de la zone d'intervention"
   ]
 }

@@ -27,13 +27,17 @@ import {
   resolveOrCreateDesignation,
   findExistingDesignation,
 } from "../lib/stock";
+import {
+  computeAvailablePorts,
+  ALL_FAT_PORTS,
+} from "../lib/ports";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
   { id: "photos", label: "📸 Photos CelPros" },
   { id: "gps", label: "📍 Poteaux & GPS" },
-  { id: "mise_en_service", label: "⚙️ Mise en service" },
-  { id: "satisfaction", label: "✍️ Satisfaction" },
+  { id: "mise_en_service", label: "⚙️ Mise en service", hidden: true },
+  { id: "satisfaction", label: "✍️ Satisfaction", hidden: true },
 ];
 
 export const CELPROS_PHOTO_SLOTS = [
@@ -139,13 +143,13 @@ const PORTS_DISPONIBLES = Array.from({ length: 8 }, (_, index) => `Port ${index 
 const PROPRIETAIRES_SUGGERES = ["SBEE", "Petit Jean"];
 
 const MATERIEL_STANDARD = [
-  { key: "rue", label: "Rue" },
+  { key: "rue", label: "Rue", hidden: true },
   { key: "pince", label: "Pince" },
   { key: "crochets", label: "Crochets" },
   { key: "susp", label: "Suspente (Susp)" },
   { key: "piton", label: "Piton" },
   { key: "closer", label: "Closer" },
-  { key: "rp1", label: "RP1" },
+  { key: "rp1", label: "RP1", hidden: true },
   { key: "traverse_13t", label: "Traverse 13T" },
   { key: "traverse_15t", label: "Traverse 15T" },
   { key: "semelle_eq", label: "Semelle Eq" },
@@ -206,6 +210,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [slotCapturing, setSlotCapturing] = useState(false);
   const [slotActionFeedback, setSlotActionFeedback] = useState("");
 
+  // Gestion dynamique des photos de poteaux géolocalisés (Photos CelPros)
+  const poleCameraInputRef = useRef(null);
+  const poleGalleryInputRef = useRef(null);
+  const targetPoleNumeroRef = useRef(1);
+  const [poleCapturingNumero, setPoleCapturingNumero] = useState(null);
+  const [poleSousTypes, setPoleSousTypes] = useState({});
+  const [extraPoleSlots, setExtraPoleSlots] = useState(0);
+
   const selectedPorts = (data.ports_disponibles || "")
     .split(",")
     .map((port) => port.trim())
@@ -216,6 +228,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       dirtyFieldsRef.current.add(field);
       dirtyRevisionsRef.current.set(field, ++changeRevisionRef.current);
     }
+  }
+
+  function handlePortChange(v) {
+    const computed = computeAvailablePorts(v);
+    markDirty("port", "ports_disponibles", "port_disponible");
+    setData((prev) => ({
+      ...prev,
+      port: v,
+      ports_disponibles: computed.ports_disponibles,
+      port_disponible: computed.port_disponible,
+      modifie_par: currentUser,
+      modifie_le: new Date().toISOString(),
+    }));
   }
 
   function togglePortDisponible(port) {
@@ -785,6 +810,180 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
+  // ===== Photos de Poteaux Géolocalisés (section dynamique Photos CelPros) =====
+  function openPoleCamera(numero) {
+    targetPoleNumeroRef.current = numero;
+    if (poleCameraInputRef.current) {
+      poleCameraInputRef.current.value = "";
+      poleCameraInputRef.current.click();
+    }
+  }
+
+  function openPoleGallery(numero) {
+    targetPoleNumeroRef.current = numero;
+    if (poleGalleryInputRef.current) {
+      poleGalleryInputRef.current.value = "";
+      poleGalleryInputRef.current.click();
+    }
+  }
+
+  function setPoleSousTypeForNumero(numero, type) {
+    setPoleSousTypes((prev) => ({ ...prev, [numero]: type }));
+  }
+
+  async function handlePolePhotoSelected(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const poleNum = targetPoleNumeroRef.current || 1;
+    const currentSousType = poleSousTypes[poleNum] || "Traversé";
+
+    setPoleCapturingNumero(poleNum);
+    setSlotActionFeedback(`📡 Acquisition GPS haute précision pour le Poteau ${poleNum}…`);
+
+    try {
+      let photoDataUrl, pos;
+      try {
+        [photoDataUrl, pos] = await Promise.all([
+          readFileAsDataUrl(file),
+          getCurrentPositionHighAccuracy(),
+        ]);
+      } catch (gpsErr) {
+        alert(
+          `⚠️ Géolocalisation refusée ou impossible à récupérer pour le Poteau ${poleNum}.\n\n` +
+          `Détail : ${gpsErr.message || "Signal GPS indisponible"}.\n\n` +
+          `Veuillez autoriser l'accès GPS et vérifier que la localisation haute précision est activée sur votre smartphone.`
+        );
+        setSlotActionFeedback(`⚠️ Échec GPS Poteau ${poleNum} : ${gpsErr.message}`);
+        return;
+      }
+
+      if (e.target) e.target.value = "";
+
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+      const precision_m = pos.coords.accuracy;
+      const horodatage = new Date().toISOString();
+
+      let lieu = "";
+      try {
+        lieu = await reverseGeocode(lat, lng);
+      } catch {}
+
+      const embeddedLabel = `Poteau ${currentSousType} ${poleNum}`;
+      const embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
+        type: embeddedLabel,
+        lieu,
+        lat,
+        lng,
+        precision_m,
+        horodatage,
+      });
+
+      const newPoint = {
+        type: "Poteau",
+        sous_type: currentSousType,
+        numero: poleNum,
+        photo: embeddedPhoto,
+        lat,
+        lng,
+        precision_m,
+        horodatage,
+        lieu,
+        ajoute_par: currentUser,
+      };
+
+      setData((prev) => {
+        const list = Array.isArray(prev.points_gps) ? [...prev.points_gps] : [];
+        const existingIdx = list.findIndex(
+          (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
+        );
+        if (existingIdx >= 0) {
+          list[existingIdx] = newPoint;
+        } else {
+          list.push(newPoint);
+        }
+
+        const nbTraverses = list.filter((p) => p.type === "Poteau" && p.sous_type === "Traversé").length;
+        const nbImplantes = list.filter((p) => p.type === "Poteau" && p.sous_type === "Implanté").length;
+        const nbArmes = list.filter((p) => p.type === "Poteau" && p.sous_type === "Armé").length;
+
+        return {
+          ...prev,
+          points_gps: list,
+          nb_poteaux_traverses: nbTraverses,
+          nb_poteaux_implantes: nbImplantes,
+          nb_poteaux_armes: nbArmes,
+          modifie_par: currentUser,
+          modifie_le: new Date().toISOString(),
+        };
+      });
+
+      const galleryPhoto = {
+        id: crypto.randomUUID(),
+        slot: `poteau_${poleNum}`,
+        type: "poteau",
+        label: `Poteau ${currentSousType} ${poleNum}`,
+        name: `poteau_${poleNum}.jpg`,
+        description: `Poteau ${currentSousType} ${poleNum} - ${data.nom_client || "Intervention"}`,
+        url: embeddedPhoto,
+        lat,
+        lng,
+        precision_m,
+        horodatage,
+        lieu,
+        from_gps: true,
+        added: new Date().toISOString(),
+      };
+
+      setWhatsappPhotos((prev) => {
+        const filtered = prev.filter((p) => p.slot !== `poteau_${poleNum}`);
+        return [...filtered, galleryPhoto];
+      });
+
+      markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
+      setSaveStatus("✓ Poteau enregistré");
+      setSlotActionFeedback(`✅ Photo géolocalisée enregistrée pour le Poteau ${poleNum} (±${precision_m.toFixed(1)} m)`);
+    } catch (err) {
+      alert(`Erreur lors de la capture du Poteau ${poleNum} : ${err.message}`);
+    } finally {
+      setPoleCapturingNumero(null);
+    }
+  }
+
+  function removePole(numero) {
+    if (!confirm(`Supprimer la photo et les coordonnées GPS du Poteau ${numero} ?`)) return;
+
+    markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
+
+    setData((prev) => {
+      const list = (prev.points_gps || []).filter(
+        (p) => !(p && p.type === "Poteau" && Number(p.numero) === Number(numero))
+      );
+      for (const p of prev.points_gps || []) {
+        if (p && p.type === "Poteau" && Number(p.numero) === Number(numero)) {
+          deletedGpsPointIdsRef.current.add(p.horodatage);
+        }
+      }
+      return {
+        ...prev,
+        points_gps: list,
+        nb_poteaux_traverses: list.filter((p) => p.type === "Poteau" && p.sous_type === "Traversé").length,
+        nb_poteaux_implantes: list.filter((p) => p.type === "Poteau" && p.sous_type === "Implanté").length,
+        nb_poteaux_armes: list.filter((p) => p.type === "Poteau" && p.sous_type === "Armé").length,
+      };
+    });
+
+    setWhatsappPhotos((prev) => {
+      const target = prev.find((p) => p.slot === `poteau_${numero}`);
+      if (target?.id) deletedWhatsappPhotoIdsRef.current.add(target.id);
+      return prev.filter((p) => p.slot !== `poteau_${numero}`);
+    });
+
+    setSaveStatus("✓ Poteau supprimé");
+    setSlotActionFeedback(`🗑️ Poteau ${numero} supprimé`);
+  }
+
   // ===== WhatsApp Photos (geolocalisees, hors rapport) =====
 
   function openWaCamera() {
@@ -1015,7 +1214,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         </div>
       )}
 
-      <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />
+      <Tabs tabs={TABS.filter((t) => !t.hidden)} activeTab={activeTab} onChange={setActiveTab} />
 
       <div className="tab-content">
         {activeTab === "rapport" && (
@@ -1107,10 +1306,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
                 <div className="form-row-2">
                   <TextField
-                    label="Port raccordé"
-                    placeholder="Ex: Port 2"
+                    label="Port accordé"
+                    placeholder="Ex: 3 ou Port 3"
                     value={data.port}
-                    onChange={(v) => update("port", v)}
+                    onChange={handlePortChange}
                   />
                   <TextField
                     label="Type de câble"
@@ -1123,10 +1322,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 <div className="form-field">
                   <div className="field-label-row">
                     <span>Ports disponibles (1 à 8)</span>
-                    <span className="badge-count">{selectedPorts.length} sélectionné(s)</span>
+                    <span className="badge-count">
+                      {selectedPorts.length} sélectionné(s) {data.port ? `(auto après port ${data.port})` : ""}
+                    </span>
                   </div>
                   <div className="ports-toggle-grid">
-                    {PORTS_DISPONIBLES.map((port) => (
+                    {ALL_FAT_PORTS.map((port) => (
                       <button
                         key={port}
                         type="button"
@@ -1137,9 +1338,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       </button>
                     ))}
                   </div>
-                  {!data.ports_disponibles && Number(data.port_disponible) > 0 && (
-                    <small className="field-hint">Ancienne fiche : {data.port_disponible} port(s) enregistré(s).</small>
-                  )}
+                  <small className="field-hint">
+                    ⚡ Sélection dynamique : dès que le port accordé est renseigné (ex: Port 3), les ports suivants (4, 5, 6, 7, 8) sont cochés automatiquement.
+                  </small>
                 </div>
 
                 <div className="form-row-3">
@@ -1259,7 +1460,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
                 <h4 style={{ margin: "16px 0 10px", fontSize: 14 }}>Matériel standard</h4>
                 <div className="materiel-grid">
-                  {MATERIEL_STANDARD.map(({ key, label }) => (
+                  {MATERIEL_STANDARD.filter((m) => !m.hidden).map(({ key, label }) => (
                     <div key={key} className="materiel-card-stepper">
                       <span className="materiel-label">{label}</span>
                       <div className="stepper-controls">
@@ -1346,6 +1547,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               accept="image/*"
               style={{ display: "none" }}
               onChange={handleSlotPhotoSelected}
+            />
+            <input
+              ref={poleCameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display: "none" }}
+              onChange={handlePolePhotoSelected}
+            />
+            <input
+              ref={poleGalleryInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={handlePolePhotoSelected}
             />
 
             {ocrNotification && (
@@ -1487,6 +1703,178 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   </div>
                 );
               })}
+            </div>
+
+            {/* 🗼 Section Dynamique Photos de Poteaux Géolocalisés CelPros */}
+            <div className="celpros-poles-section">
+              <div className="photos-progress-card pole-section-header-card">
+                <div className="photos-progress-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <span style={{ fontSize: 28, lineHeight: 1 }}>🗼</span>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 16 }}>Photos de poteaux géolocalisés (CelPros)</h3>
+                      <p className="photos-progress-sub" style={{ margin: "3px 0 0" }}>
+                        Chaque poteau dispose de sa propre géolocalisation haute précision et de sa photo
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-primary btn-add-pole"
+                    onClick={() => setExtraPoleSlots((prev) => prev + 1)}
+                  >
+                    ➕ Ajouter un poteau
+                  </button>
+                </div>
+              </div>
+
+              <div className="celpros-photos-grid celpros-poles-grid">
+                {(() => {
+                  const existingPoleNumbers = [
+                    ...(data.points_gps || [])
+                      .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
+                      .map((p) => Number(p.numero)),
+                    ...whatsappPhotos
+                      .map((p) => {
+                        const m = p?.slot?.match(/^poteau_(\d+)$/);
+                        return m ? Number(m[1]) : 0;
+                      })
+                      .filter((n) => n > 0),
+                  ];
+                  const maxExistingPole = existingPoleNumbers.length > 0 ? Math.max(...existingPoleNumbers) : 1;
+                  const totalPoleCount = Math.max(1, maxExistingPole + extraPoleSlots);
+                  const poleNumbers = Array.from({ length: totalPoleCount }, (_, i) => i + 1);
+
+                  return poleNumbers.map((poleNum) => {
+                    const pt = (data.points_gps || []).find(
+                      (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
+                    );
+                    const wa = whatsappPhotos.find((p) => p && p.slot === `poteau_${poleNum}`);
+                    const photoUrl = wa?.url || pt?.photo;
+                    const isTaken = !!photoUrl;
+                    const isCapturingThis = poleCapturingNumero === poleNum;
+                    const currentSousType = pt?.sous_type || poleSousTypes[poleNum] || "Traversé";
+                    const lat = wa?.lat ?? pt?.lat;
+                    const lng = wa?.lng ?? pt?.lng;
+                    const prec = wa?.precision_m ?? pt?.precision_m;
+                    const lieu = wa?.lieu ?? pt?.lieu;
+                    const horo = wa?.horodatage ?? pt?.horodatage;
+
+                    return (
+                      <div key={poleNum} className={`photo-slot-card pole-slot-card ${isTaken ? "taken" : "pending"}`}>
+                        <div className="photo-slot-header">
+                          <span className="photo-slot-icon">🗼</span>
+                          <div className="pole-slot-titles">
+                            <h4>Photos de poteau {poleNum}</h4>
+                            <div className="pole-type-selector-pills">
+                              {["Traversé", "Implanté", "Armé"].map((st) => (
+                                <button
+                                  key={st}
+                                  type="button"
+                                  className={`pill-btn ${currentSousType === st ? "active" : ""}`}
+                                  onClick={() => setPoleSousTypeForNumero(poleNum, st)}
+                                >
+                                  {st}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <span className={`photo-slot-badge ${isTaken ? "badge-success" : "badge-pending"}`}>
+                            {isTaken ? "✓ Géolocalisé" : "En attente"}
+                          </span>
+                        </div>
+
+                        {isTaken ? (
+                          <div className="photo-slot-preview-box">
+                            <div
+                              className="photo-slot-img-wrap"
+                              onClick={() => {
+                                setViewingPhoto({
+                                  url: photoUrl,
+                                  title: `Photos de poteau ${poleNum} (${currentSousType})`,
+                                  subtitle: lieu || (lat ? `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : ""),
+                                  info: [
+                                    { label: "Catégorie", val: `Poteau ${currentSousType}` },
+                                    { label: "Numéro", val: `#${poleNum}` },
+                                    ...(lat != null ? [{ label: "Coordonnées GPS", val: `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` }] : []),
+                                    ...(prec != null ? [{ label: "Précision GPS", val: `±${Number(prec).toFixed(1)} m` }] : []),
+                                    ...(horo ? [{ label: "Prise le", val: new Date(horo).toLocaleString() }] : []),
+                                    ...(lieu ? [{ label: "Adresse / Lieu", val: lieu }] : []),
+                                  ],
+                                });
+                              }}
+                            >
+                              <img src={photoUrl} alt={`Poteau ${poleNum}`} />
+                              <span className="zoom-hint-chip">🔍 Agrandir</span>
+                            </div>
+
+                            {lat != null && (
+                              <div className="pole-gps-details">
+                                <span className="gps-chip-coord">📍 {Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}</span>
+                                {prec != null && <span className="gps-chip-acc">±{Number(prec).toFixed(1)}m</span>}
+                                {lieu && <span className="gps-chip-lieu">{lieu}</span>}
+                              </div>
+                            )}
+
+                            <div className="photo-slot-actions">
+                              <button
+                                type="button"
+                                className="btn-slot-subtle"
+                                disabled={isCapturingThis}
+                                onClick={() => openPoleCamera(poleNum)}
+                              >
+                                {isCapturingThis ? "📡 GPS..." : "🔄 Reprendre"}
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-slot-subtle danger"
+                                onClick={() => removePole(poleNum)}
+                              >
+                                🗑️ Retirer
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="photo-slot-upload-box">
+                            {isCapturingThis ? (
+                              <div className="pole-capturing-loader">
+                                <span className="pulse">📡 Acquisition GPS haute précision…</span>
+                              </div>
+                            ) : (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn-slot-upload btn-camera"
+                                  onClick={() => openPoleCamera(poleNum)}
+                                >
+                                  📷 Prendre photo
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-slot-upload btn-gallery"
+                                  onClick={() => openPoleGallery(poleNum)}
+                                >
+                                  🖼️ Importer
+                                </button>
+                                {poleNum > 1 && !isTaken && (
+                                  <button
+                                    type="button"
+                                    className="btn-slot-subtle danger"
+                                    style={{ marginTop: 6 }}
+                                    onClick={() => setExtraPoleSlots((prev) => Math.max(0, prev - 1))}
+                                  >
+                                    ✕ Annuler ce poteau
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
             </div>
 
             <div className="other-photos-card">
