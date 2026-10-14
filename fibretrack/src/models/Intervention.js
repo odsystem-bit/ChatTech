@@ -166,7 +166,26 @@ export function saveInterventionLocally(intervention) {
   if (!intervention?.id) return;
   const defaulted = ensureInterventionDefaults(intervention);
   try {
-    // 1. Sauvegarde dans le stockage dédié par intervention
+    // 1. Sauvegarde dans le stockage dédié par intervention avec protection anti-écrasement des photos
+    const existing = getStoredIntervention(defaulted.id);
+    if (existing) {
+      if ((!defaulted.whatsapp_photos || defaulted.whatsapp_photos.length === 0) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
+        defaulted.whatsapp_photos = existing.whatsapp_photos;
+      }
+      if ((!defaulted.points_gps || defaulted.points_gps.length === 0) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
+        defaulted.points_gps = existing.points_gps;
+      }
+      if (!defaulted.signature_client && existing.signature_client) {
+        defaulted.signature_client = existing.signature_client;
+      }
+      if (!defaulted.signature_technicien && existing.signature_technicien) {
+        defaulted.signature_technicien = existing.signature_technicien;
+      }
+      if (existing._fully_loaded) {
+        defaulted._fully_loaded = true;
+      }
+    }
+
     localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
 
     // 2. Mettre à jour la liste en cache pour la page d'accueil

@@ -101,9 +101,15 @@ export default function App() {
     const id = typeof target === "object" && target !== null ? target.id : target;
     if (!id || openingId) return;
 
-    // 1. Si nous avons l'intervention complète en cache local (0 ms instantané)
+    // 1. Si nous avons l'intervention complète en cache local (avec photos ou statut complet) : ouverture instantanée 0 ms
     const localFull = getStoredIntervention(id);
-    if (localFull) {
+    const hasFullLocalData = localFull && (
+      localFull._fully_loaded === true ||
+      (Array.isArray(localFull.whatsapp_photos) && localFull.whatsapp_photos.length > 0) ||
+      (Array.isArray(localFull.points_gps) && localFull.points_gps.length > 0)
+    );
+
+    if (hasFullLocalData) {
       setActiveIntervention(localFull);
       navigateTo(localFull.statut === "termine" ? "report" : "form");
 
@@ -111,44 +117,38 @@ export default function App() {
       getIntervention(id)
         .then((fresh) => {
           if (fresh && fresh.updated_at !== localFull.updated_at) {
-            setActiveIntervention(fresh);
+            const merged = { ...fresh, _fully_loaded: true };
+            saveInterventionLocally(merged);
+            setActiveIntervention(merged);
           }
         })
         .catch(() => {});
       return;
     }
 
-    // 2. Si pas encore en cache complet, mais présent dans la liste chargée (0 ms instantané !)
-    const listItem = typeof target === "object" && target !== null ? target : interventions.find((i) => i.id === id);
-    if (listItem) {
-      const initial = ensureInterventionDefaults(listItem);
-      setActiveIntervention(initial);
-      navigateTo(initial.statut === "termine" ? "report" : "form");
-
-      // Charger les photos et détails complets en tâche de fond sans bloquer l'interface
-      setOpeningId(id);
-      getIntervention(id)
-        .then((fresh) => {
-          if (fresh) {
-            setActiveIntervention(fresh);
-          }
-        })
-        .catch((e) => console.warn("Background fetch failed:", e))
-        .finally(() => setOpeningId(null));
-      return;
-    }
-
-    // 3. Première ouverture inconnue : chargement réseau avec indicateur
+    // 2. Première ouverture ou cache partiel : chargement complet sécurisé depuis le serveur avec indicateur
     setOpeningId(id);
     try {
       const intervention = await getIntervention(id);
       if (intervention) {
-        setActiveIntervention(intervention);
-        navigateTo(intervention.statut === "termine" ? "report" : "form");
+        const fullIntervention = { ...intervention, _fully_loaded: true };
+        saveInterventionLocally(fullIntervention);
+        setActiveIntervention(fullIntervention);
+        navigateTo(fullIntervention.statut === "termine" ? "report" : "form");
+      } else {
+        throw new Error("Intervention introuvable");
       }
     } catch (err) {
       console.error("openIntervention error:", err);
-      alert("Erreur lors de l'ouverture de l'intervention : " + (err.message || "Erreur réseau"));
+      // Fallback hors-ligne si présent dans la liste chargée
+      const listItem = typeof target === "object" && target !== null ? target : interventions.find((i) => i.id === id);
+      if (listItem) {
+        const initial = ensureInterventionDefaults(listItem);
+        setActiveIntervention(initial);
+        navigateTo(initial.statut === "termine" ? "report" : "form");
+      } else {
+        alert("Erreur lors de l'ouverture de l'intervention : " + (err.message || "Erreur réseau"));
+      }
     } finally {
       setOpeningId(null);
     }
@@ -190,6 +190,7 @@ export default function App() {
   if (screen === "form" && activeIntervention) {
     return (
       <InterventionFormScreen
+        key={activeIntervention.id}
         intervention={activeIntervention}
         onClose={handleCloseForm}
         onFinish={handleFinish}
@@ -201,6 +202,7 @@ export default function App() {
   if (screen === "report" && activeIntervention) {
     return (
       <ReportScreen
+        key={activeIntervention.id}
         intervention={activeIntervention}
         onClose={goToHome}
         onEdit={(intv) => {

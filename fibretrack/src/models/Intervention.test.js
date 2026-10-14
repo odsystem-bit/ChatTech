@@ -180,3 +180,51 @@ test("Removing all poles leaves empty array and 0 counters", () => {
   assert.equal(afterRemoval.nb_poteaux_implantes, 0);
   assert.equal(afterRemoval.nb_poteaux_armes, 0);
 });
+
+test("saveInterventionLocally protects against photo erasure when saving a light object", async () => {
+  // Mock localStorage for Node test environment
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => storage.get(k) || null,
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: (k) => storage.delete(k),
+  };
+
+  const { saveInterventionLocally, getStoredIntervention } = await import("./Intervention.js");
+
+  const fullRecord = {
+    id: "test-save-intv-1",
+    nom_client: "Client Test",
+    whatsapp_photos: [{ id: "wa-1", slot: "poteau_1", url: "data:image/jpeg;base64,aaa" }],
+    points_gps: [{ id: "pt-1", type: "Poteau", numero: 1, photo: "data:image/jpeg;base64,bbb" }],
+    signature_client: "data:image/png;base64,sig1",
+    signature_technicien: "data:image/png;base64,sig2",
+    _fully_loaded: true,
+  };
+
+  // 1. Sauvegarde complète
+  saveInterventionLocally(fullRecord);
+  const loadedFull = getStoredIntervention("test-save-intv-1");
+  assert.equal(loadedFull.whatsapp_photos.length, 1);
+  assert.equal(loadedFull.points_gps.length, 1);
+  assert.equal(loadedFull.signature_client, "data:image/png;base64,sig1");
+
+  // 2. Sauvegarde accidentelle d'un objet light (sans photos)
+  const lightRecord = {
+    id: "test-save-intv-1",
+    nom_client: "Client Test Renommé",
+    whatsapp_photos: [],
+    points_gps: [],
+    signature_client: "",
+    signature_technicien: "",
+  };
+  saveInterventionLocally(lightRecord);
+
+  // 3. Vérification : les photos et signatures DOIVENT ÊTRE PRÉSERVÉES !
+  const protectedRecord = getStoredIntervention("test-save-intv-1");
+  assert.equal(protectedRecord.nom_client, "Client Test Renommé");
+  assert.equal(protectedRecord.whatsapp_photos.length, 1, "Les photos WhatsApp ne doivent pas être écrasées");
+  assert.equal(protectedRecord.points_gps.length, 1, "Les points GPS ne doivent pas être écrasés");
+  assert.equal(protectedRecord.signature_client, "data:image/png;base64,sig1", "La signature client doit être préservée");
+  assert.equal(protectedRecord.signature_technicien, "data:image/png;base64,sig2", "La signature tech doit être préservée");
+});

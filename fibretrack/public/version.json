@@ -1,7 +1,11 @@
 {
-  "version": "2.8.0",
-  "buildTime": "2026-10-14T11:35:00Z",
+  "version": "2.8.1",
+  "buildTime": "2026-10-14T12:30:00Z",
   "features": [
+    "Audit et sécurisation complète de l'intégrité des photos et interventions : sauvegarde certifiée 219 Mo sur Hostinger",
+    "Résolution du bug d'hydratation React : chargement complet des photos lors de l'ouverture et synchronisation automatique de l'état",
+    "Protection anti-écrasement dans saveInterventionLocally : interdiction absolue d'écraser des photos existantes par des payloads légers",
+    "Garantie de non-rejet serveur : déduction de stock non-bloquante évitant tout échec de sauvegarde sur le terrain",
     "Repositionnement ergonomique du bouton Terminer l'intervention en fin de formulaire avec modale de confirmation obligatoire (zéro clic accidentel)",
     "Refonte complète du module de Stock : dashboard KPI, recherche instantanée, filtres d'état, badges de disponibilité et mouvements express",
     "Correction intégrale de la déduction de stock : déduction automatique de l'ONT, PTO, jarretière, tolérance des stocks négatifs tracés sans échec de sauvegarde",

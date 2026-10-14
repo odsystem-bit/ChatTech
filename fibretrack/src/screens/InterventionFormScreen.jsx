@@ -206,6 +206,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     dataRef.current = data;
   }, [data]);
 
+  // Synchronisation sécurisée si les photos ou points arrivent depuis un rechargement
+  useEffect(() => {
+    if (!intervention) return;
+    if (Array.isArray(intervention.whatsapp_photos) && intervention.whatsapp_photos.length > 0) {
+      setWhatsappPhotos((prev) => {
+        if (!prev || prev.length === 0) return intervention.whatsapp_photos;
+        const prevIds = new Set(prev.map((p) => p?.id || p?.slot).filter(Boolean));
+        const missing = intervention.whatsapp_photos.filter((p) => !prevIds.has(p?.id || p?.slot));
+        return missing.length > 0 ? [...prev, ...missing] : prev;
+      });
+    }
+    if (Array.isArray(intervention.points_gps) && intervention.points_gps.length > 0) {
+      setData((prev) => {
+        if (!prev.points_gps || prev.points_gps.length === 0) {
+          return { ...prev, points_gps: intervention.points_gps };
+        }
+        return prev;
+      });
+    }
+  }, [intervention]);
+
   // Saisie rapide des informations client
   const [quickClientOpen, setQuickClientOpen] = useState(true);
   const [quickClientText, setQuickClientText] = useState("");
