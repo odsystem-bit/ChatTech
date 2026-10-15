@@ -1,11 +1,11 @@
 {
-  "version": "3.1.0",
-  "buildTime": "2026-10-15T02:50:00Z",
+  "version": "3.1.1",
+  "buildTime": "2026-10-15T03:07:00Z",
   "features": [
-    "Les 2 fiches officielles sont disponibles et séparées : Fiche 1 (Mise en service SBIN) et Fiche 2 (Satisfaction ENR-02)",
-    "Module Fiches & Signatures avec onglets clairs pour basculer entre Fiche SBIN, Fiche Satisfaction ou les 2 réunies",
-    "Téléchargements et aperçus PDF distincts : PDF SBIN seul, PDF Satisfaction seul, ou Dossier Complet (2 pages)",
-    "Double signature tactile numérique (Client et Technicien/Prestataire) synchronisée",
-    "Écriture manuscrite bleue authentique (Caveat) sur les deux documents"
+    "Refonte 100% fidèle de la Fiche SBIN Mise en Service (conforme au gabarit Word)",
+    "Repositionnement exact du logo SBIN en haut à gauche et de la bannière biseautée noire à droite",
+    "Grille d'en-tête d'identification avec lignes pointillées et écriture manuscrite bleue",
+    "Restructuration exacte des 3 tableaux : 1- Installation, 2- Vérification offres B2B2G, 3- Interventions & constats",
+    "Signatures Client et Prestataire conformes"
   ]
 }
