@@ -217,6 +217,33 @@ if ($input === null && strlen((string)$rawBody) > 0) {
 $input = $input ?? [];
 
 function normalizeInterventionTypes(array &$r): void {
+  $r['nom_technicien'] = (string)($r['nom_technicien'] ?? '');
+  $r['nom_equipe'] = (string)($r['nom_equipe'] ?? 'TELECOM BTP Services');
+  $r['nom_client'] = (string)($r['nom_client'] ?? '');
+  $r['adresse_zone'] = (string)($r['adresse_zone'] ?? '');
+  $r['telephone_ligne'] = (string)($r['telephone_ligne'] ?? '');
+  $r['mobile'] = (string)($r['mobile'] ?? '');
+  $r['etat'] = (string)($r['etat'] ?? 'PON');
+  $r['msan'] = (string)($r['msan'] ?? '');
+  $r['fat_ref'] = (string)($r['fat_ref'] ?? '');
+  $r['port'] = (string)($r['port'] ?? '');
+  $r['ports_disponibles'] = (string)($r['ports_disponibles'] ?? '');
+  $r['type_cable'] = (string)($r['type_cable'] ?? '');
+  $r['mac'] = (string)($r['mac'] ?? '');
+  $r['sn'] = (string)($r['sn'] ?? '');
+  $r['ont_sn'] = (string)($r['ont_sn'] ?? '');
+  $r['emplacement_ont'] = (string)($r['emplacement_ont'] ?? '');
+  $r['offre_souscrite'] = (string)($r['offre_souscrite'] ?? 'Fibre Pro');
+  $r['appreciation_satisfaction_libre'] = (string)($r['appreciation_satisfaction_libre'] ?? '');
+  $r['qualite'] = (string)($r['qualite'] ?? 'Satisfait');
+  $r['delais'] = (string)($r['delais'] ?? 'Satisfait');
+  $r['professionnalisme'] = (string)($r['professionnalisme'] ?? 'Satisfait');
+  $r['nom_client_declaration'] = (string)($r['nom_client_declaration'] ?? '');
+  $r['remarque_libre'] = (string)($r['remarque_libre'] ?? '');
+  $r['signature_client'] = (string)($r['signature_client'] ?? '');
+  $r['signature_technicien'] = (string)($r['signature_technicien'] ?? '');
+  $r['modifie_par'] = (string)($r['modifie_par'] ?? '');
+  $r['statut'] = (string)($r['statut'] ?? 'en_cours');
   $r['depart_m'] = is_numeric($r['depart_m'] ?? null) ? (float)$r['depart_m'] : 0.0;
   $r['arrivee_m'] = is_numeric($r['arrivee_m'] ?? null) ? (float)$r['arrivee_m'] : 0.0;
   $r['lineaire_m'] = is_numeric($r['lineaire_m'] ?? null) ? (float)$r['lineaire_m'] : 0.0;
@@ -228,7 +255,6 @@ function normalizeInterventionTypes(array &$r): void {
   $r['pto_qte'] = (int)($r['pto_qte'] ?? 0);
   $r['repeteur_wifi_qte'] = (int)($r['repeteur_wifi_qte'] ?? 0);
   $r['port_disponible'] = (int)($r['port_disponible'] ?? 0);
-  $r['ports_disponibles'] = (string)($r['ports_disponibles'] ?? '');
   $r['client_confirme_emplacement'] = (bool)($r['client_confirme_emplacement'] ?? false);
   $r['remise_equipement_ok'] = (bool)($r['remise_equipement_ok'] ?? false);
   $r['travaux_conformes'] = (bool)($r['travaux_conformes'] ?? false);
@@ -542,6 +568,7 @@ try {
 
     case 'intervention_save':
       $d = $input;
+      normalizeInterventionTypes($d);
       $portDisponible = (int)($d['port_disponible'] ?? 0);
       if ($portDisponible < 0 || $portDisponible > 8) {
         http_response_code(400);

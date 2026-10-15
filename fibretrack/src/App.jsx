@@ -78,14 +78,14 @@ export default function App() {
     };
   }, []);
 
-  // Polling automatique en arrière-plan toutes les 12 secondes sur l'écran d'accueil
+  // Polling automatique en arrière-plan toutes les 8 secondes sur l'écran d'accueil
   // Permet à l'Admin et aux techniciens de voir instantanément les nouvelles interventions créées par les autres
   useEffect(() => {
     if (!user || screen !== "home") return;
     const timer = setInterval(() => {
       refreshInterventions(false);
       flushSyncOutbox();
-    }, 12000);
+    }, 8000);
     return () => clearInterval(timer);
   }, [user, screen]);
 

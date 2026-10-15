@@ -50,11 +50,14 @@ export function getInterventionBadge(intv) {
  */
 export function normalizeSearchText(text) {
   if (!text) return "";
-  return String(text)
+  let norm = String(text)
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
+  // Tolérance orthographique prénoms courants de l'équipe
+  if (norm.includes("rodolphe")) norm = norm.replace(/rodolphe/g, "rodolpho");
+  return norm;
 }
 
 /**

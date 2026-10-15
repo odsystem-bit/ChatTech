@@ -23,6 +23,8 @@ local.properties
 
 # API secrets
 api/_env.php
+backups/
+*.tar.gz
 
 # Vendor (managed externally)
 api/vendor
