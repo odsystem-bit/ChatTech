@@ -116,3 +116,25 @@ export async function previewSatisfactionPdf(intervention) {
   return null;
 }
 
+export async function generateSbinPdf(intervention) {
+  const url = getPdfUrl("pdf_sbin", intervention.id);
+  if (isInWebView()) {
+    window.AndroidBridge.downloadUrl(url, `fiche_sbin_${intervention.nom_client || intervention.id}.pdf`);
+    return;
+  }
+  window.location.href = url;
+}
+
+export async function previewSbinPdf(intervention) {
+  const url = getPdfUrl("pdf_sbin_view", intervention.id);
+  if (isInWebView()) {
+    window.AndroidBridge.openUrl(url);
+    return null;
+  }
+  window.open(url, "_blank");
+  return null;
+}
+
+export const generateFichesPdf = generateInterventionPdf;
+export const previewFichesPdf = previewInterventionPdf;
+

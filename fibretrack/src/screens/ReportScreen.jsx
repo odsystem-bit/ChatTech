@@ -9,8 +9,12 @@ import {
   shareInterventionPdf,
   generateSatisfactionPdf,
   previewSatisfactionPdf,
+  generateSbinPdf,
+  previewSbinPdf,
+  generateFichesPdf,
+  previewFichesPdf,
 } from "../lib/pdf";
-import FicheSatisfactionDocument from "../components/FicheSatisfactionDocument";
+import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 
 export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [data, setData] = useState(ensureInterventionDefaults(intervention));
@@ -44,7 +48,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [reportStatus, setReportStatus] = useState("");
   const [shareStatus, setShareStatus] = useState("");
   const [satStatus, setSatStatus] = useState("");
-  const [showSatModal, setShowSatModal] = useState(false);
+  const [showFichesModal, setShowFichesModal] = useState(false);
   const [realises, setRealises] = useState("");
   const [recus, setRecus] = useState("");
   const [loadingAction, setLoadingAction] = useState(null);
@@ -55,13 +59,41 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   };
   const report = generateWhatsAppReport(data, compteurJour);
 
+  // --- Actions Fiche 1 : SBIN ---
+  async function handleDownloadSbin() {
+    if (loadingAction) return;
+    setLoadingAction("downloadSbin");
+    setSatStatus("Génération de la fiche SBIN (Mise en service)…");
+    try {
+      await generateSbinPdf(data);
+      setSatStatus("Fiche SBIN téléchargée.");
+    } catch (err) {
+      setSatStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
+  async function handlePreviewSbin() {
+    if (loadingAction) return;
+    setLoadingAction("previewSbin");
+    setSatStatus("Ouverture de la fiche SBIN…");
+    try {
+      await previewSbinPdf(data);
+      setSatStatus("");
+    } catch (err) {
+      setSatStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
+  // --- Actions Fiche 2 : Satisfaction Client ---
   async function handleDownloadSatisfaction() {
     if (loadingAction) return;
     setLoadingAction("downloadSat");
-    setSatStatus("Génération de la fiche de satisfaction…");
+    setSatStatus("Génération de la fiche de satisfaction (ENR-02)…");
     try {
       await generateSatisfactionPdf(data);
-      setSatStatus("Fiche téléchargée.");
+      setSatStatus("Fiche de satisfaction téléchargée.");
     } catch (err) {
       setSatStatus(`Erreur : ${err.message}`);
     }
@@ -81,7 +113,34 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction(null);
   }
 
-  async function handleSaveSatisfactionChanges(updated) {
+  // --- Actions Dossier Complet (2 fiches réunies) ---
+  async function handleDownloadBothFiches() {
+    if (loadingAction) return;
+    setLoadingAction("downloadBoth");
+    setPdfStatus("Génération du dossier complet (2 pages : SBIN + Satisfaction)…");
+    try {
+      await generateFichesPdf(data);
+      setPdfStatus("Dossier complet téléchargé.");
+    } catch (err) {
+      setPdfStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
+  async function handlePreviewBothFiches() {
+    if (loadingAction) return;
+    setLoadingAction("previewBoth");
+    setPdfStatus("Ouverture du dossier complet (2 pages)…");
+    try {
+      await previewFichesPdf(data);
+      setPdfStatus("");
+    } catch (err) {
+      setPdfStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
+  async function handleSaveFichesChanges(updated) {
     setData(updated);
     saveInterventionLocally(updated);
     try {
@@ -197,66 +256,77 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
         ✅ <strong>{data.nom_client || "Nouveau client"}</strong> — Intervention terminée
       </div>
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button type="button" className="btn-primary btn-large" onClick={handlePreviewPdf} disabled={loadingAction === "previewPdf"}>
-          {loadingAction === "previewPdf" ? "Chargement…" : "📄 Voir les fiches officielles"}
-        </button>
-        <button type="button" className="btn-secondary btn-large" onClick={handleDownloadPdf} disabled={loadingAction === "downloadPdf"}>
-          {loadingAction === "downloadPdf" ? "Chargement…" : "⬇ Télécharger les fiches"}
-        </button>
-      </div>
-      {pdfStatus && <p className="gps-status">{pdfStatus}</p>}
-
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12 }}>
-        <button type="button" className="btn-primary btn-large" onClick={handlePreviewReport} disabled={loadingAction === "previewReport"}>
-          {loadingAction === "previewReport" ? "Chargement…" : "📸 Voir le rapport (photos + schéma)"}
-        </button>
-        <button type="button" className="btn-secondary btn-large" onClick={handleDownloadReport} disabled={loadingAction === "downloadReport"}>
-          {loadingAction === "downloadReport" ? "Chargement…" : "⬇ Télécharger le rapport"}
-        </button>
-      </div>
-      {reportStatus && <p className="gps-status">{reportStatus}</p>}
-
-      {/* Module Fiche de Satisfaction Client (ENR-02) */}
-      <div style={{ marginTop: 14, padding: 14, background: "#f8fafc", borderRadius: 12, border: "1px solid #cbd5e1" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <span style={{ fontSize: 24, lineHeight: 1 }}>✍️</span>
+      {/* SECTION DOCUMENTS OFFICIELS & SIGNATURES */}
+      <div style={{ marginTop: 14, padding: 16, background: "#f8fafc", borderRadius: 14, border: "1px solid #cbd5e1" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 14 }}>
           <div>
-            <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
-              Fiche d'Évaluation de la Satisfaction Client (ENR-02)
+            <h4 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
+              📑 Documents Officiels d'Intervention (2 Fiches)
             </h4>
             <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#64748b" }}>
-              Document officiel Premium Company Bénin pré-rempli avec signature numérique.
+              Pré-remplis avec écriture manuscrite et signatures numériques.
             </p>
           </div>
-        </div>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
           <button
             type="button"
             className="btn-primary"
-            style={{ background: "#2563eb", borderColor: "#2563eb", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}
-            onClick={() => setShowSatModal(true)}
+            style={{ background: "#2563eb", borderColor: "#2563eb", fontWeight: 700 }}
+            onClick={() => setShowFichesModal(true)}
           >
-            📋 Ouvrir la fiche & Signer
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={handlePreviewSatisfaction}
-            disabled={loadingAction === "previewSat"}
-          >
-            {loadingAction === "previewSat" ? "Chargement…" : "👁️ Aperçu PDF Officiel"}
-          </button>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={handleDownloadSatisfaction}
-            disabled={loadingAction === "downloadSat"}
-          >
-            {loadingAction === "downloadSat" ? "Chargement…" : "⬇ Télécharger PDF"}
+            ✍️ Ouvrir & Signer les Fiches
           </button>
         </div>
+
+        {/* Ligne 1 : Fiche SBIN */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#ffffff", borderRadius: 8, border: "1px solid #e2e8f0", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <strong style={{ fontSize: 13, color: "#0f172a" }}>📄 Fiche 1 : Mise en Service & Interventions (SBIN)</strong>
+            <div style={{ fontSize: 11.5, color: "#64748b" }}>ONT SN, PTO, offres FTTH B2B2G, constats, note qualité, signatures</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={handlePreviewSbin} disabled={loadingAction === "previewSbin"}>
+              {loadingAction === "previewSbin" ? "…" : "👁️ Aperçu PDF"}
+            </button>
+            <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={handleDownloadSbin} disabled={loadingAction === "downloadSbin"}>
+              {loadingAction === "downloadSbin" ? "…" : "⬇ Télécharger"}
+            </button>
+          </div>
+        </div>
+
+        {/* Ligne 2 : Fiche Satisfaction */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#ffffff", borderRadius: 8, border: "1px solid #e2e8f0", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <strong style={{ fontSize: 13, color: "#0f172a" }}>✍️ Fiche 2 : Satisfaction Client (ENR-02)</strong>
+            <div style={{ fontSize: 11.5, color: "#64748b" }}>Validation des 8 points, grille satisfaction, déclaration client, signatures</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={handlePreviewSatisfaction} disabled={loadingAction === "previewSat"}>
+              {loadingAction === "previewSat" ? "…" : "👁️ Aperçu PDF"}
+            </button>
+            <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={handleDownloadSatisfaction} disabled={loadingAction === "downloadSat"}>
+              {loadingAction === "downloadSat" ? "…" : "⬇ Télécharger"}
+            </button>
+          </div>
+        </div>
+
+        {/* Ligne 3 : Dossier complet 2 fiches */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f1f5f9", borderRadius: 8, border: "1px solid #cbd5e1", flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <strong style={{ fontSize: 13, color: "#0f172a" }}>📑 Dossier Complet (Les 2 Fiches Réunies)</strong>
+            <div style={{ fontSize: 11.5, color: "#64748b" }}>Document PDF de 2 pages officiel regroupant SBIN et Satisfaction</div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" className="btn-secondary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={handlePreviewBothFiches} disabled={loadingAction === "previewBoth"}>
+              {loadingAction === "previewBoth" ? "…" : "👁️ Aperçu PDF (2 pages)"}
+            </button>
+            <button type="button" className="btn-primary" style={{ padding: "6px 12px", fontSize: 12 }} onClick={handleDownloadBothFiches} disabled={loadingAction === "downloadBoth"}>
+              {loadingAction === "downloadBoth" ? "…" : "⬇ Télécharger Dossier"}
+            </button>
+          </div>
+        </div>
+
         {satStatus && <p className="gps-status" style={{ marginTop: 8 }}>{satStatus}</p>}
+        {pdfStatus && <p className="gps-status" style={{ marginTop: 8 }}>{pdfStatus}</p>}
       </div>
 
       <button type="button" className="btn-secondary btn-large" onClick={handleShare} disabled={loadingAction === "share"} style={{ marginTop: 12 }}>
@@ -311,8 +381,8 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
         ✏ Modifier cette intervention
       </button>
 
-      {/* Modal Fiche de Satisfaction Interactive & Signable */}
-      {showSatModal && (
+      {/* Modal Fiches Officielles Interactives & Signables */}
+      {showFichesModal && (
         <div
           style={{
             position: "fixed",
@@ -325,17 +395,17 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
             justifyContent: "center",
             alignItems: "flex-start",
           }}
-          onClick={() => setShowSatModal(false)}
+          onClick={() => setShowFichesModal(false)}
         >
           <div
-            style={{ maxWidth: 860, width: "100%" }}
+            style={{ maxWidth: 880, width: "100%" }}
             onClick={(e) => e.stopPropagation()}
           >
-            <FicheSatisfactionDocument
+            <FichesOfficiellesModule
               intervention={data}
-              onChange={handleSaveSatisfactionChanges}
-              onSave={handleSaveSatisfactionChanges}
-              onClose={() => setShowSatModal(false)}
+              onChange={handleSaveFichesChanges}
+              onSave={handleSaveFichesChanges}
+              onClose={() => setShowFichesModal(false)}
             />
           </div>
         </div>

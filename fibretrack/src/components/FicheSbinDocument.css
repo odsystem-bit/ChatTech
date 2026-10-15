@@ -1,0 +1,342 @@
+/* ==========================================================================
+   Fiche SBIN - Mise en Service et Interventions FTTH/Cuivre
+   Reproduction fidèle du document officiel SBIN
+   ========================================================================== */
+
+.fiche-sbin-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 12px 0 24px;
+}
+
+/* --- Barre d'outils supérieure --- */
+.fiche-sbin-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  background: #ffffff;
+  padding: 12px 18px;
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  margin-bottom: 16px;
+  max-width: 820px;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+}
+
+.fiche-sbin-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* --- Conteneur feuille A4 --- */
+.fiche-sbin-page {
+  background: #ffffff;
+  color: #111827;
+  width: 100%;
+  max-width: 820px;
+  min-height: 1100px;
+  padding: 32px 36px 40px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.35;
+  position: relative;
+}
+
+/* --- En-tête SBIN --- */
+.fiche-sbin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 14px;
+}
+
+.fiche-sbin-logo img {
+  height: 52px;
+  max-width: 150px;
+  object-fit: contain;
+}
+
+.fiche-sbin-title-group {
+  flex: 1;
+  text-align: center;
+}
+
+.fiche-sbin-main-title {
+  font-size: 14px;
+  font-weight: 900;
+  text-transform: uppercase;
+  color: #000000;
+  margin: 0 0 4px 0;
+  letter-spacing: 0.3px;
+}
+
+.fiche-sbin-banner-black {
+  background: #000000;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  letter-spacing: 0.6px;
+  display: inline-block;
+  width: 90%;
+  border-radius: 2px;
+}
+
+/* --- Tableaux SBIN --- */
+.fiche-sbin-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 12px;
+  font-size: 11px;
+}
+
+.fiche-sbin-table th,
+.fiche-sbin-table td {
+  border: 1.2px solid #000000;
+  padding: 5px 8px;
+  vertical-align: middle;
+}
+
+.fiche-sbin-table th {
+  background: #f1f5f9;
+  font-weight: 800;
+  font-size: 11.5px;
+  color: #0f172a;
+  text-transform: uppercase;
+}
+
+.fiche-sbin-section-header {
+  background: #0f172a !important;
+  color: #ffffff !important;
+  font-size: 11.5px !important;
+  font-weight: 800 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 6px 10px !important;
+}
+
+/* --- Écriture manuscrite bleue (police Caveat) --- */
+.handwritten-blue {
+  font-family: "Caveat", cursive, sans-serif;
+  color: #0c2d96;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  display: inline-block;
+  line-height: 1.1;
+}
+
+.handwritten-blue-input {
+  font-family: "Caveat", cursive, sans-serif;
+  color: #0c2d96;
+  font-size: 17px;
+  font-weight: 700;
+  border: none;
+  background: transparent;
+  outline: none;
+  width: 100%;
+  padding: 2px 4px;
+  box-sizing: border-box;
+}
+
+.handwritten-blue-input:focus {
+  background: rgba(37, 99, 235, 0.06);
+  border-radius: 4px;
+}
+
+/* --- Case à cocher manuscrite --- */
+.handwritten-check-box {
+  width: 20px;
+  height: 20px;
+  border: 1.5px solid #000000;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: #ffffff;
+  user-select: none;
+  margin: 0 4px;
+  vertical-align: middle;
+  border-radius: 2px;
+  transition: all 0.15s ease;
+}
+
+.handwritten-check-box:hover {
+  border-color: #2563eb;
+  background: #f0f7ff;
+}
+
+.handwritten-check-mark {
+  font-family: "Caveat", cursive, sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  color: #0c2d96;
+  line-height: 1;
+  margin-top: -3px;
+}
+
+/* --- Blocs d'intervention (Constat, Travaux, Observations) --- */
+.sbin-interv-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sbin-interv-box {
+  border: 1.2px solid #000000;
+  padding: 6px 8px;
+  min-height: 70px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sbin-interv-label {
+  font-weight: 800;
+  font-size: 11px;
+  margin-bottom: 4px;
+  color: #000000;
+  text-transform: uppercase;
+}
+
+.sbin-interv-textarea {
+  font-family: "Caveat", cursive, sans-serif;
+  font-size: 15px;
+  color: #0c2d96;
+  font-weight: 600;
+  border: none;
+  background: transparent;
+  outline: none;
+  resize: vertical;
+  width: 100%;
+  flex: 1;
+}
+
+/* --- Signatures en bas --- */
+.fiche-sbin-signatures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 16px;
+  border: 1.2px solid #000000;
+  padding: 12px 14px;
+}
+
+.sbin-sig-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.sbin-sig-title {
+  font-weight: 800;
+  font-size: 12px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  color: #000000;
+}
+
+.sbin-sig-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.sbin-sig-box {
+  width: 100%;
+  height: 90px;
+  border: 1.5px dashed #94a3b8;
+  border-radius: 6px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  margin-top: 6px;
+}
+
+.sbin-sig-box:hover {
+  border-color: #2563eb;
+  background: #f0f7ff;
+}
+
+.sbin-sig-img {
+  max-width: 90%;
+  max-height: 80px;
+  object-fit: contain;
+}
+
+.sbin-sig-placeholder {
+  color: #64748b;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.sbin-sig-delete-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(239, 68, 68, 0.9);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+/* --- Impression --- */
+@media print {
+  .fiche-sbin-toolbar,
+  .sig-modal-backdrop,
+  .sbin-sig-delete-btn,
+  button {
+    display: none !important;
+  }
+
+  .fiche-sbin-wrapper {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  .fiche-sbin-page {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 10mm 14mm !important;
+    min-height: auto !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+}

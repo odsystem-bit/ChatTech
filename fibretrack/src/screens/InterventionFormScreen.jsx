@@ -45,13 +45,13 @@ import {
   IconPole,
   IconAlertTriangle,
 } from "../components/Icons";
-import FicheSatisfactionDocument from "../components/FicheSatisfactionDocument";
+import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
   { id: "photos", label: "📸 Photos CelPros" },
   { id: "gps", label: "📍 Poteaux & GPS" },
-  { id: "satisfaction", label: "✍️ Satisfaction Client" },
+  { id: "satisfaction", label: "📄 Fiches & Signatures" },
   { id: "mise_en_service", label: "⚙️ Mise en service", hidden: true },
 ];
 
@@ -3165,7 +3165,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
         {activeTab === "satisfaction" && (
           <section className="form-satisfaction-section" style={{ padding: "4px 0" }}>
-            <FicheSatisfactionDocument
+            <FichesOfficiellesModule
               intervention={data}
               onChange={(updated) => {
                 setData((prev) => ({
@@ -3175,6 +3175,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   modifie_le: new Date().toISOString(),
                 }));
                 markDirty(
+                  "nom_client",
+                  "telephone_ligne",
+                  "mobile",
+                  "mail",
+                  "service_type",
+                  "ont_sn",
+                  "sn",
+                  "pto_qte",
+                  "repeteur_wifi_qte",
+                  "emplacement_ont",
+                  "offre_souscrite",
+                  "remise_equipement_ok",
+                  "constat_diagnostic",
+                  "travaux_executes",
+                  "observations_intervention",
+                  "materiel_recupere",
+                  "rdv_manques",
+                  "note_qualite_equipe",
+                  "autre_element",
+                  "note_appreciation_client",
+                  "appreciation_satisfaction_libre",
                   "travaux_conformes",
                   "emplacement_valide",
                   "travail_propre",

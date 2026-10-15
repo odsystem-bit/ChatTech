@@ -236,10 +236,7 @@ class ChaptechPDF extends tFPDF {
 
 
 
-function generateFichesPDF($d) {
-  $pdf = new ChaptechPDF();
-  $pdf->SetAutoPageBreak(false);
- 
+function renderSbinPage($pdf, $d) {
   $dateStr = date('d/m/Y', strtotime($d['date'] ?? 'now'));
   $etat = $d['etat'] ?? '';
   $gabaritsDir = __DIR__ . '/../public/templates/gabarits';
@@ -247,54 +244,44 @@ function generateFichesPDF($d) {
     $gabaritsDir = __DIR__ . '/../templates/gabarits';
   }
   $sbinBg = $gabaritsDir . '/fiche_sbin_word.jpg';
-  $satBg = $gabaritsDir . '/fiche_satisfaction_word.jpg';
+  if (!file_exists($sbinBg)) {
+    $sbinBg = $gabaritsDir . '/fiche_sbin_mise_en_service.jpg';
+  }
   $gabMaxW = mmToPxAtDpi(210, PDF_DPI);
   $gabMaxH = mmToPxAtDpi(297, PDF_DPI);
- 
-  // ===================== PAGE 1 : FICHE SBIN =====================
+
   $pdf->AddPage();
   if (file_exists($sbinBg)) {
     $pdf->Image(compressGabarit($sbinBg, $gabMaxW, $gabMaxH), 0, 0, 210, 297);
   }
- 
-  // --- En-tête identification (recalibré sur gabarit fiche_sbin_word.jpg) ---
-  // Les positions sont en mm depuis le coin supérieur gauche
-  // Ligne 1: Date d'intervention (NI/INT) | Client
-  $pdf->drawHand(62, 47, $dateStr, 10);                               // Date d'intervention
-  $pdf->drawHand(125, 47, $d['nom_client'] ?? '', 10);                // Client
- 
-  // Ligne 2: Service FTTH/CUIVRE (cases à cocher)
-  if ($etat === 'PON' || $etat === 'FTTH') $pdf->drawCheckboxHand(35, 52, true);   // case FTTH
-  if ($etat === 'Cuivre') $pdf->drawCheckboxHand(52, 52, true);                    // case CUIVRE
- 
-  // Ligne 3: vide gauche | Ligne (droite)
-  $pdf->drawHand(125, 55, $d['telephone_ligne'] ?? '', 10);           // Ligne
- 
-  // Ligne 4: Date de déclaration | Mobil
-  $pdf->drawHand(62, 60, $dateStr, 10);                               // Date de déclaration
-  $pdf->drawHand(125, 60, $d['mobile'] ?? '', 10);                    // Mobil
- 
-  // Ligne 5: Date de mise en service | Mail
-  $pdf->drawHand(62, 66, $dateStr, 10);                               // Date de mise en service
-  $pdf->drawHand(125, 66, $d['mail'] ?? '', 10);                      // Mail
- 
-  // --- 1. INSTALLATION (tableau sous "DÉSIGNATION / CONSTAT") ---
-  // Colonne QUANTITÉ à x≈105mm, colonne OBSERVATION à x≈155mm
-  // ONT/FT (Numéro de série) - ligne 1 du tableau
+
+  // --- En-tête identification (gabarit fiche_sbin_word.jpg) ---
+  $pdf->drawHand(62, 47, $dateStr, 10);
+  $pdf->drawHand(125, 47, $d['nom_client'] ?? '', 10);
+
+  // Service FTTH/CUIVRE
+  if ($etat === 'PON' || $etat === 'FTTH' || strtolower($d['service_type'] ?? '') === 'ftth') {
+    $pdf->drawCheckboxHand(35, 52, true);
+  }
+  if ($etat === 'Cuivre' || strtolower($d['service_type'] ?? '') === 'cuivre') {
+    $pdf->drawCheckboxHand(52, 52, true);
+  }
+
+  $pdf->drawHand(125, 55, $d['telephone_ligne'] ?? '', 10);
+  $pdf->drawHand(62, 60, $dateStr, 10);
+  $pdf->drawHand(125, 60, $d['mobile'] ?? '', 10);
+  $pdf->drawHand(62, 66, $dateStr, 10);
+  $pdf->drawHand(125, 66, $d['mail'] ?? '', 10);
+
+  // --- 1. INSTALLATION ---
   $pdf->drawHand(105, 80, $d['ont_sn'] ?? $d['sn'] ?? '', 9);
-  // PTO - ligne 2
   $pdf->drawHand(105, 85, (string)($d['pto_qte'] ?? ''), 9);
-  // Répéteur WIFI - ligne 3
   $pdf->drawHand(105, 90, (string)($d['repeteur_wifi_qte'] ?? ''), 9);
-  // Emplacement de l'ONT (dans la zone observation, ligne 4)
   $pdf->drawHand(105, 100, $d['emplacement_ont'] ?? '', 8);
- 
-  // --- Satisfaction du client (zone texte libre sous le tableau installation) ---
   $pdf->drawHand(15, 112, $d['appreciation_satisfaction_libre'] ?? '', 9);
- 
-  // --- 2. VÉRIFICATION SUR LES OFFRES FTTH B2B2G (cases à cocher) ---
-  $offreVal = $d['offre_souscrite'] ?? '';
-  // Positions Y des offres (mesuré sur gabarit - section 2)
+
+  // --- 2. VÉRIFICATION SUR LES OFFRES FTTH B2B2G ---
+  $offreVal = $d['offre_souscrite'] ?? 'Fibre Pro';
   $offreY = [
     'Fibre Pro' => 130,
     'Fibre Pro Max' => 135,
@@ -303,47 +290,42 @@ function generateFichesPDF($d) {
     'Fibre Office Mega' => 155,
   ];
   foreach ($offreY as $off => $oy) {
-    if ($offreVal === $off) $pdf->drawCheckboxHand(53, $oy, true);
+    if (strpos(strtolower($offreVal), strtolower($off)) !== false) {
+      $pdf->drawCheckboxHand(53, $oy, true);
+    }
   }
-  // Résultat Oui/Non (colonnes à droite: Oui≈170mm, Non≈185mm)
-  $remiseOk = $d['remise_equipement_ok'] ?? false;
+
+  $remiseOk = $d['remise_equipement_ok'] ?? true;
   $ouiX = 170;
   $nonX = 185;
   foreach ([135, 140, 147, 155] as $ry) {
     $pdf->drawCheckboxHand($remiseOk ? $ouiX : $nonX, $ry, true);
   }
- 
+
   // --- 3. INTERVENTIONS (CONSTATS ET TRAVAUX EXÉCUTÉS) ---
-  // Zone de texte libre (pas de champs spécifiques dans le formulaire actuel)
- 
-  // --- Matériels récupérés (à déposer à la SBIN ici contre décharge) ---
+  if (!empty($d['constat_diagnostic'])) $pdf->drawHand(15, 175, $d['constat_diagnostic'], 8);
+  if (!empty($d['travaux_executes'])) $pdf->drawHand(80, 175, $d['travaux_executes'], 8);
+  if (!empty($d['observations_intervention'])) $pdf->drawHand(150, 175, $d['observations_intervention'], 8);
+
   $pdf->drawHand(15, 207, $d['materiel_recupere'] ?? '', 9);
- 
-  // --- Nombre de rendez-vous manqués ---
-  $pdf->drawHand(62, 215, (string)($d['rdv_manques'] ?? ''), 10);
- 
-  // --- Qualité de l'intervention de l'équipe : .../10 ---
-  $pdf->drawHand(78, 220, ($d['appreciation_satisfaction_libre'] ?? ''), 10);
- 
-  // --- Autre élément à remplir par le prestataire sur demande du client ---
+  $pdf->drawHand(62, 215, (string)($d['rdv_manques'] ?? '0'), 10);
+  $pdf->drawHand(78, 220, ($d['note_qualite_equipe'] ?? $d['appreciation_satisfaction_libre'] ?? '10'), 10);
   $pdf->drawHand(15, 230, $d['autre_element'] ?? '', 9);
- 
-  // --- Appréciation générale du client .../10 ---
-  $pdf->drawHand(100, 240, ($d['appreciation_generale'] ?? ''), 10);
- 
-  // --- Signatures (zone "Client" à gauche, "Prestataire" à droite) ---
+  $pdf->drawHand(100, 240, ($d['note_appreciation_client'] ?? '10'), 10);
+
+  // Signatures Fiche SBIN
   $nomClient = $d['nom_client_declaration'] ?? $d['nom_client'] ?? '';
   $nomTech = $d['nom_technicien'] ?? '';
   if ($nomClient) $pdf->drawHand(15, 258, $nomClient, 10);
   if ($nomTech) $pdf->drawHand(155, 258, $nomTech, 10);
- 
+
   $sigClient = $d['signature_client'] ?? null;
   $sigTech = $d['signature_technicien'] ?? null;
   if ($sigClient && strpos($sigClient, 'data:image') === 0) {
     $base64 = explode(',', $sigClient)[1] ?? '';
     $imgData = base64_decode($base64);
     if ($imgData) {
-      $tmpFile = tempnam(sys_get_temp_dir(), 'sig') . '.png';
+      $tmpFile = tempnam(sys_get_temp_dir(), 'sig_sbin_c') . '.png';
       file_put_contents($tmpFile, $imgData);
       try { $pdf->Image($tmpFile, 15, 263, 45, 20); } catch (Exception $e) {}
       @unlink($tmpFile);
@@ -353,125 +335,15 @@ function generateFichesPDF($d) {
     $base64 = explode(',', $sigTech)[1] ?? '';
     $imgData = base64_decode($base64);
     if ($imgData) {
-      $tmpFile = tempnam(sys_get_temp_dir(), 'sig') . '.png';
+      $tmpFile = tempnam(sys_get_temp_dir(), 'sig_sbin_t') . '.png';
       file_put_contents($tmpFile, $imgData);
       try { $pdf->Image($tmpFile, 155, 263, 45, 20); } catch (Exception $e) {}
       @unlink($tmpFile);
     }
   }
- 
-  // ===================== PAGE 2 : FICHE SATISFACTION =====================
-  $pdf->AddPage();
-  if (file_exists($satBg)) {
-    $pdf->Image(compressGabarit($satBg, $gabMaxW, $gabMaxH), 0, 0, 210, 297);
-  }
- 
-  // --- Référence dossier / ticket (après "Référence dossier / ticket :") ---
-  $pdf->drawHand(62, 38, substr($d['id'] ?? '', 0, 8), 10);
- 
-  // --- 1. Informations client (colonne "Détails" à droite du tableau) ---
-  // Nom du client / Société
-  $pdf->drawHand(95, 48, $d['nom_client'] ?? '', 9);
-  // Téléphone
-  $pdf->drawHand(95, 53, $d['telephone_ligne'] ?? '', 9);
-  // Adresse / Zone
-  $pdf->drawHand(95, 58, $d['adresse_zone'] ?? '', 9);
-  // Type d'intervention - pas de case cochée pour l'instant
-  // Date de l'intervention
-  $pdf->drawHand(95, 68, $dateStr, 9);
- 
-  // --- 2. Validation de l'intervention (cases Oui/Non) ---
-  // Positions Y mesurées sur le gabarit (section "2. Validation de l'intervention")
-  $validations = [
-    $d['travaux_conformes'] ?? false,      // Les travaux réalisés correspondent à votre demande
-    $d['emplacement_valide'] ?? false,     // L'emplacement des équipements a été validé avec vous
-    $d['travail_propre'] ?? false,         // Les techniciens ont travaillé proprement et en sécurité
-    $d['service_teste'] ?? false,          // Le fonctionnement du service a été testé en votre présence
-    $d['service_fonctionne'] ?? false,     // Le service fonctionne correctement après intervention
-    $d['explications_donnees'] ?? false,   // Les explications ou consignes nécessaires vous ont été données
-  ];
-  $valY = [82, 87, 92, 97, 102, 107];
-  $ouiX = 180;
-  $nonX = 193;
-  foreach ($validations as $i => $checked) {
-    $pdf->drawCheckboxHand($checked ? $ouiX : $nonX, $valY[$i], true);
-  }
-  
-  // Recommanderiez-vous notre entreprise à un proche ?
-  $pdf->drawCheckboxHand(($d['recommanderait'] ?? false) ? $ouiX : $nonX, 112, true);
-  
-  // Accepteriez-vous d'être recontacté pour le suivi qualité ?
-  $pdf->drawCheckboxHand(($d['accepte_recontact'] ?? false) ? $ouiX : $nonX, 117, true);
- 
-  // --- 3. Votre niveau de satisfaction (tableau 4 colonnes) ---
-  // Colonnes: Très satisfait | Satisfait | Peu satisfait | Insatisfait
-  $niveaux = ['Très satisfait', 'Satisfait', 'Peu satisfait', 'Insatisfait'];
-  $satX = [122, 142, 162, 182];  // Positions X des 4 colonnes (cases)
-  $satY = [132, 137, 142];       // Positions Y des 3 critères
-  $criteres = [
-    $d['qualite'] ?? '',           // Qualité de la prestation
-    $d['delais'] ?? '',            // Respect des délais
-    $d['professionnalisme'] ?? '', // Professionnalisme des techniciens
-  ];
-  foreach ($criteres as $ci => $val) {
-    foreach ($niveaux as $i => $niv) {
-      if ($val === $niv) $pdf->drawCheckboxHand($satX[$i], $satY[$ci], true);
-    }
-  }
- 
-  // --- 4. Déclaration du client ("Je soussigné(e) ___") ---
-  $pdf->drawHand(45, 155, $d['nom_client_declaration'] ?? $d['nom_client'] ?? '', 10);
- 
-  // --- 5. Observation ou remarque du client ---
-  // Case "Aucune remarque" ou "Remarque / suggestion"
-  $remarque = $d['remarque_libre'] ?? '';
-  if (empty($remarque)) {
-    $pdf->drawCheckboxHand(15, 243, true);  // Aucune remarque
-  } else {
-    $pdf->drawCheckboxHand(15, 248, true);  // Remarque / suggestion
-    $pdf->drawHand(55, 249, $remarque, 9);
-  }
- 
-  // --- Signatures finales (tableau en bas de page) ---
-  // Colonnes: Nom et Prénom du client | Signature Client | Nom et prénom du Technicien | Signature Technicien
-  $nomClient2 = $d['nom_client_declaration'] ?? $d['nom_client'] ?? '';
-  $nomTech2 = $d['nom_technicien'] ?? '';
-  
-  // Nom du client (colonne 1)
-  if ($nomClient2) $pdf->drawHand(15, 275, $nomClient2, 9);
-  // Nom du technicien (colonne 3)
-  if ($nomTech2) $pdf->drawHand(115, 275, $nomTech2, 9);
- 
-  // Signature client (colonne 2)
-  if ($sigClient && strpos($sigClient, 'data:image') === 0) {
-    $base64 = explode(',', $sigClient)[1] ?? '';
-    $imgData = base64_decode($base64);
-    if ($imgData) {
-      $tmpFile = tempnam(sys_get_temp_dir(), 'sig2') . '.png';
-      file_put_contents($tmpFile, $imgData);
-      try { $pdf->Image($tmpFile, 55, 270, 35, 15); } catch (Exception $e) {}
-      @unlink($tmpFile);
-    }
-  }
-  // Signature technicien (colonne 4)
-  if ($sigTech && strpos($sigTech, 'data:image') === 0) {
-    $base64 = explode(',', $sigTech)[1] ?? '';
-    $imgData = base64_decode($base64);
-    if ($imgData) {
-      $tmpFile = tempnam(sys_get_temp_dir(), 'sig2') . '.png';
-      file_put_contents($tmpFile, $imgData);
-      try { $pdf->Image($tmpFile, 165, 270, 35, 15); } catch (Exception $e) {}
-      @unlink($tmpFile);
-    }
-  }
- 
-  return $pdf;
 }
 
-function generateSatisfactionPDF($d) {
-  $pdf = new ChaptechPDF();
-  $pdf->SetAutoPageBreak(false);
-
+function renderSatisfactionPage($pdf, $d) {
   $dateStr = date('d/m/Y', strtotime($d['date'] ?? 'now'));
   $gabaritsDir = __DIR__ . '/../public/templates/gabarits';
   if (!is_dir($gabaritsDir)) {
@@ -499,14 +371,14 @@ function generateSatisfactionPDF($d) {
   $pdf->drawHand(95, 53, $d['telephone_ligne'] ?? $d['mobile'] ?? '', 9);
   $pdf->drawHand(95, 58, $d['adresse_zone'] ?? '', 9);
 
-  // Type intervention (Installation par défaut)
+  // Type intervention
   $typeIntv = strtolower($d['type_intervention_satisfaction'] ?? 'installation');
   if ($typeIntv === 'sav') {
     $pdf->drawCheckboxHand(130, 63, true);
   } elseif ($typeIntv === 'maintenance') {
     $pdf->drawCheckboxHand(155, 63, true);
   } else {
-    $pdf->drawCheckboxHand(100, 63, true); // Installation par défaut
+    $pdf->drawCheckboxHand(100, 63, true);
   }
   $pdf->drawHand(95, 68, $dateStr, 9);
 
@@ -526,15 +398,15 @@ function generateSatisfactionPDF($d) {
     $pdf->drawCheckboxHand($checked ? $ouiX : $nonX, $valY[$i], true);
   }
 
-  // Recommanderiez-vous notre entreprise à un proche ?
+  // Recommanderiez-vous
   $recom = $d['recommanderait'] ?? true;
   $pdf->drawCheckboxHand($recom ? $ouiX : $nonX, 112, true);
 
-  // Accepteriez-vous d'être recontacté pour le suivi qualité ?
+  // Recontacté
   $recont = $d['accepte_recontact'] ?? true;
   $pdf->drawCheckboxHand($recont ? $ouiX : $nonX, 117, true);
 
-  // --- 3. Votre niveau de satisfaction ---
+  // --- 3. Niveau de satisfaction ---
   $niveaux = ['Très satisfait', 'Satisfait', 'Peu satisfait', 'Insatisfait'];
   $satX = [122, 142, 162, 182];
   $satY = [132, 137, 142];
@@ -552,7 +424,7 @@ function generateSatisfactionPDF($d) {
   // --- 4. Déclaration du client ---
   $pdf->drawHand(45, 155, $d['nom_client_declaration'] ?? $d['nom_client'] ?? '', 10);
 
-  // --- 5. Observation ou remarque du client ---
+  // --- 5. Remarque ---
   $remarque = $d['remarque_libre'] ?? '';
   $aucune = $d['remarque_aucune'] ?? (empty($remarque));
   if ($aucune || empty($remarque)) {
@@ -562,7 +434,7 @@ function generateSatisfactionPDF($d) {
     $pdf->drawHand(55, 249, $remarque, 9);
   }
 
-  // --- Signatures finales ---
+  // Signatures Fiche Satisfaction
   $nomClient2 = $d['nom_client_declaration'] ?? $d['nom_client'] ?? '';
   $nomTech2 = $d['nom_technicien'] ?? '';
   if ($nomClient2) $pdf->drawHand(15, 275, $nomClient2, 9);
@@ -590,7 +462,27 @@ function generateSatisfactionPDF($d) {
       @unlink($tmpFile);
     }
   }
+}
 
+function generateSbinPDF($d) {
+  $pdf = new ChaptechPDF();
+  $pdf->SetAutoPageBreak(false);
+  renderSbinPage($pdf, $d);
+  return $pdf;
+}
+
+function generateSatisfactionPDF($d) {
+  $pdf = new ChaptechPDF();
+  $pdf->SetAutoPageBreak(false);
+  renderSatisfactionPage($pdf, $d);
+  return $pdf;
+}
+
+function generateFichesPDF($d) {
+  $pdf = new ChaptechPDF();
+  $pdf->SetAutoPageBreak(false);
+  renderSbinPage($pdf, $d);
+  renderSatisfactionPage($pdf, $d);
   return $pdf;
 }
 
@@ -1170,6 +1062,18 @@ try {
       $pdf->Output('D', $filename);
     } elseif ($action === 'pdf_satisfaction_view') {
       $pdf = generateSatisfactionPDF($d);
+      header('Content-Type: application/pdf');
+      header('Access-Control-Allow-Origin: *');
+      $pdf->Output('I');
+    } elseif ($action === 'pdf_sbin') {
+      $pdf = generateSbinPDF($d);
+      $filename = 'fiche_sbin_' . ($d['nom_client'] ?? $id) . '.pdf';
+      header('Content-Type: application/pdf');
+      header('Content-Disposition: attachment; filename="' . $filename . '"');
+      header('Access-Control-Allow-Origin: *');
+      $pdf->Output('D', $filename);
+    } elseif ($action === 'pdf_sbin_view') {
+      $pdf = generateSbinPDF($d);
       header('Content-Type: application/pdf');
       header('Access-Control-Allow-Origin: *');
       $pdf->Output('I');

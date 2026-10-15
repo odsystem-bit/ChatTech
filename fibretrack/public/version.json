@@ -1,12 +1,11 @@
 {
-  "version": "3.0.0",
-  "buildTime": "2026-10-15T01:50:00Z",
+  "version": "3.1.0",
+  "buildTime": "2026-10-15T02:50:00Z",
   "features": [
-    "Nouveau module officiel : Fiche d'Évaluation de la Satisfaction du Client (ENR-02) Premium Company Bénin",
-    "Reproduction visuelle conforme à 100% du document officiel avec typographie manuscrite bleue (Caveat)",
-    "Pré-remplissage automatique des informations client et de mission",
-    "Module de double signature numérique tactile haute définition (Client et Technicien)",
-    "Exportation PDF officiel serveur et impression A4 instantanée via navigateur",
-    "Accès direct dans le formulaire d'intervention (onglet Satisfaction Client) et sur la page de rapport"
+    "Les 2 fiches officielles sont disponibles et séparées : Fiche 1 (Mise en service SBIN) et Fiche 2 (Satisfaction ENR-02)",
+    "Module Fiches & Signatures avec onglets clairs pour basculer entre Fiche SBIN, Fiche Satisfaction ou les 2 réunies",
+    "Téléchargements et aperçus PDF distincts : PDF SBIN seul, PDF Satisfaction seul, ou Dossier Complet (2 pages)",
+    "Double signature tactile numérique (Client et Technicien/Prestataire) synchronisée",
+    "Écriture manuscrite bleue authentique (Caveat) sur les deux documents"
   ]
 }
