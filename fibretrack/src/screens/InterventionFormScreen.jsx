@@ -67,10 +67,10 @@ export const CELPROS_PHOTO_SLOTS = [
   },
   {
     key: "scan_fat",
-    label: "Scan / Code-barres FAT",
+    label: "image scan fat",
     icon: "🏷️",
     description: "Code-barres ou numéro de série gravé sur le FAT",
-    keywords: ["scan fat", "code barre fat", "etiquette fat", "barcode fat"],
+    keywords: ["image scan fat", "scan fat", "code barre fat", "etiquette fat", "barcode fat"],
   },
   {
     key: "cable_interne",
@@ -921,6 +921,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           /^(abonn[eé]|ont|box)(\s*\d+)?$/i.test(p.name.trim())
       );
       if (legacyOnt) return legacyOnt;
+    }
+
+    if (slotKey === "scan_fat") {
+      const legacyScan = whatsappPhotos.find(
+        (p) =>
+          p &&
+          !p.additionnelle &&
+          !p.is_additionnelle &&
+          !p.exclude_celpros &&
+          p.name &&
+          /^(image\s*scan\s*fat|scan\s*fat|code[- ]barres?\s*fat)(\s*\d+)?$/i.test(p.name.trim())
+      );
+      if (legacyScan) return legacyScan;
     }
 
     // STRICT : Aucun repli par sous-chaîne ou mots-clés flous pour garantir l'étanchéité absolue de chaque catégorie

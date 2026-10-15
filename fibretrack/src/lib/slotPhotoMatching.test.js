@@ -72,6 +72,19 @@ function getPhotoForSlotStrict(slotKey, whatsappPhotos = [], pointsGps = []) {
     if (legacyOnt) return legacyOnt;
   }
 
+  if (slotKey === "scan_fat") {
+    const legacyScan = whatsappPhotos.find(
+      (p) =>
+        p &&
+        !p.additionnelle &&
+        !p.is_additionnelle &&
+        !p.exclude_celpros &&
+        p.name &&
+        /^(image\s*scan\s*fat|scan\s*fat|code[- ]barres?\s*fat)(\s*\d+)?$/i.test(p.name.trim())
+    );
+    if (legacyScan) return legacyScan;
+  }
+
   return null;
 }
 
@@ -151,7 +164,7 @@ test("CelPros slot isolation: additional photos (exclude_celpros) are excluded f
 test("CelPros slot isolation: direct slot match takes precedence and respects exact slotKey", () => {
   const photos = [
     { id: "1", slot: "fat", type: "fat", label: "Boîtier FAT", url: "https://example.com/fat.jpg" },
-    { id: "2", slot: "scan_fat", type: "scan_fat", label: "Scan FAT", url: "https://example.com/scan.jpg" },
+    { id: "2", slot: "scan_fat", type: "scan_fat", label: "image scan fat", url: "https://example.com/scan.jpg" },
     { id: "3", slot: "mesure_fat", type: "mesure_fat", label: "Mesure FAT", url: "https://example.com/m_fat.jpg" },
     { id: "4", slot: "mesure_pto", type: "mesure_pto", label: "Mesure PTO", url: "https://example.com/m_pto.jpg" },
   ];
