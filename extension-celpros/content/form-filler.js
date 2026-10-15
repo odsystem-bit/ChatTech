@@ -215,42 +215,73 @@
     }
   }
 
-  // Remplissage d'un élément unitaire à partir d'une valeur
-  function fillElement(element, value, _definition) {
+  // Écoute des modifications utilisateur pour protéger les modifications manuelles légitimes
+  function trackElementChanges(element) {
+    if (!element || element._chaptechTracked) return;
+    element._chaptechTracked = true;
+    const markModified = () => {
+      const filledVal = element.dataset ? element.dataset.chaptechFilledValue : undefined;
+      const currentVal = element.type === "checkbox" ? String(element.checked) : String(element.value);
+      if (element.dataset) {
+        if (filledVal !== undefined && currentVal !== filledVal) {
+          element.dataset.chaptechUserModified = "true";
+        }
+      }
+    };
+    if (element.addEventListener) {
+      element.addEventListener("input", markModified);
+      element.addEventListener("change", markModified);
+    }
+  }
+
+  // Vérifie si un élément a été manuellement modifié par l'utilisateur
+  function isElementUserModified(element) {
+    if (!element || !element.dataset) return false;
+    return element.dataset.chaptechUserModified === "true";
+  }
+
+  // Remplissage d'un élément unitaire à partir d'une valeur (avec protection des saisies manuelles)
+  function fillElement(element, value, _definition, options = {}) {
     if (!element || value === undefined || value === null) return false;
 
-    const tagName = element.tagName.toLowerCase();
-    const inputType = (element.getAttribute("type") || "text").toLowerCase();
+    // Protection des modifications manuelles de l'utilisateur
+    if (!options.forceOverwrite && isElementUserModified(element)) {
+      return false;
+    }
+
+    const tagName = element.tagName ? element.tagName.toLowerCase() : "";
+    const inputType = (element.getAttribute && element.getAttribute("type") ? element.getAttribute("type") : "text").toLowerCase();
+
+    let filled = false;
 
     if (tagName === "select") {
-      const ok = setNativeSelectValue(element, value);
-      if (ok) applyHighlight(element);
-      return ok;
-    }
-
-    if (tagName === "textarea") {
+      filled = setNativeSelectValue(element, value);
+    } else if (tagName === "textarea") {
       setNativeInputValue(element, value);
-      applyHighlight(element);
-      return true;
-    }
-
-    if (inputType === "checkbox") {
+      filled = true;
+    } else if (inputType === "checkbox") {
       const boolVal = typeof value === "boolean" ? value : Boolean(value && value !== "0" && value !== "false");
       setNativeCheckboxValue(element, boolVal);
+      filled = true;
+    } else if (inputType === "radio") {
+      filled = handleRadioGroup(element, value);
+    } else {
+      setNativeInputValue(element, value);
+      filled = true;
+    }
+
+    if (filled) {
       applyHighlight(element);
-      return true;
+      if (element.dataset) {
+        element.dataset.chaptechFilledValue = inputType === "checkbox" ? String(element.checked) : String(element.value);
+        element.dataset.chaptechFilledKey = _definition?.key || "";
+        element.dataset.chaptechFilledAt = String(Date.now());
+        element.dataset.chaptechUserModified = "false";
+      }
+      trackElementChanges(element);
     }
 
-    if (inputType === "radio") {
-      const ok = handleRadioGroup(element, value);
-      if (ok) applyHighlight(element);
-      return ok;
-    }
-
-    // Input texte, number, tel, etc.
-    setNativeInputValue(element, value);
-    applyHighlight(element);
-    return true;
+    return filled;
   }
 
   // Détection de l'étape courante dans le wizard CelPros (1 à 5)
@@ -281,7 +312,7 @@
   }
 
   // Fonction principale : balayage, pré-remplissage complet de la page et injection des photos
-  async function autofillPage(interventionData, root = (typeof document !== "undefined" ? document : null)) {
+  async function autofillPage(interventionData, root = (typeof document !== "undefined" ? document : null), options = {}) {
     if (!root || !interventionData) {
       return { success: false, filledCount: 0, photosInjected: 0, error: "Racine DOM ou données d'intervention manquantes" };
     }
@@ -298,6 +329,7 @@
     const elements = Array.from(root.querySelectorAll(selector));
     const processedRadioGroups = new Set();
     const filledDetails = [];
+    const preservedDetails = [];
     const unmatchedElements = [];
 
     for (const el of elements) {
@@ -314,10 +346,23 @@
         const { definition } = match;
         const val = definition.valueExtractor(interventionData);
 
+        // Si le champ a été modifié manuellement par l'utilisateur, ne pas l'écraser
+        if (isElementUserModified(el) && !options.forceOverwrite) {
+          preservedDetails.push({
+            key: definition.key,
+            label: definition.label,
+            category: definition.category,
+            currentValue: el.type === "checkbox" ? el.checked : el.value,
+            ftValue: val,
+            elementId: el.id || el.name || "(sans id)",
+          });
+          continue;
+        }
+
         // RÈGLE ABSOLUE : Si la valeur n'est pas renseignée (vide, null, undefined, false),
         // NE PAS remplir le champ sur CelPros (le laisser intact/vide).
         if (val !== undefined && val !== null && val !== "" && val !== false) {
-          const filled = fillElement(el, val, definition);
+          const filled = fillElement(el, val, definition, options);
           if (filled) {
             filledDetails.push({
               key: definition.key,
@@ -340,7 +385,7 @@
     }
 
     // 2. Injection automatique des photos correspondantes
-    let photoReport = { totalSlotsFound: 0, injectedCount: 0, details: [] };
+    let photoReport = { totalSlotsFound: 0, injectedCount: 0, missingCount: 0, details: [] };
     const pf = PhotoFiller || (typeof globalThis !== "undefined" && globalThis.PhotoFiller) || (typeof window !== "undefined" && window.PhotoFiller);
     if (pf && typeof pf.fillPhotosOnPage === "function") {
       try {
@@ -356,8 +401,12 @@
       totalScanned: elements.length,
       filledCount: filledDetails.length,
       filledDetails,
+      preservedCount: preservedDetails.length,
+      preservedDetails,
       photosInjected: photoReport.injectedCount || 0,
       photoDetails: photoReport.details || [],
+      missingPhotosCount: photoReport.missingCount || 0,
+      missingPhotos: photoReport.missingPhotos || [],
       totalPhotoSlotsFound: photoReport.totalSlotsFound || 0,
       unmatchedElements,
     };

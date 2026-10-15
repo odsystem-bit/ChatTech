@@ -28,6 +28,7 @@
       this.isAutofilling = false;
       this.observer = null;
       this.autoFillTimeout = null;
+      this.pollingInterval = null;
     }
 
     init() {
@@ -37,9 +38,11 @@
       }
 
       this.createDom();
+      this.attachGlobalInputTracking();
       this.loadInitialState();
       this.attachEventListeners();
       this.setupAutoPilotObserver();
+      this.setupAutoSyncPolling();
       this.updateStepDisplay();
     }
 
@@ -260,7 +263,181 @@
       return norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done" || Boolean(item.date_cloture);
     }
 
-    async fetchApi(action, method = "GET", body = null) {
+    attachGlobalInputTracking() {
+      // Capture des saisies réelles de l'utilisateur pour protéger toute modification manuelle
+      const markModified = (e) => {
+        const target = e.target;
+        if (!target) return;
+        const tag = (target.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "select" || tag === "textarea") {
+          if (!target.dataset) return;
+          // Si l'action provient d'une frappe réelle de l'utilisateur (e.isTrusted === true)
+          // ou si la valeur actuelle diffère de celle précédemment injectée par ChapTech
+          const filledVal = target.dataset.chaptechFilledValue;
+          const currentVal = target.type === "checkbox" ? String(target.checked) : String(target.value);
+          if (e.isTrusted === true) {
+            target.dataset.chaptechUserModified = "true";
+          } else if (filledVal !== undefined && currentVal !== filledVal) {
+            target.dataset.chaptechUserModified = "true";
+          }
+        }
+      };
+      if (typeof document !== "undefined" && document.addEventListener) {
+        document.addEventListener("input", markModified, true);
+        document.addEventListener("change", markModified, true);
+      }
+
+      // Écoute de la reconnexion et de la déconnexion réseau
+      if (typeof window !== "undefined" && window.addEventListener) {
+        window.addEventListener("online", () => {
+          this.handleNetworkReconnection();
+        });
+        window.addEventListener("offline", () => {
+          this.setApiStatus("error", "Hors-ligne");
+          this.showToast("⚠️ Connexion réseau interrompue. Mode hors-ligne activé.", "warning", 3000);
+        });
+      }
+    }
+
+    async handleNetworkReconnection() {
+      this.setApiStatus("loading", "Reconnexion réseau...");
+      this.showToast("🌐 Réseau rétabli. Synchronisation avec FibreTrack...", "info", 2500);
+      try {
+        await this.fetchInterventions(true);
+        if (this.selectedIntervention && this.selectedIntervention.id) {
+          await this.onInterventionChange(this.selectedIntervention.id, true);
+        }
+        this.setApiStatus("connected", "Connecté");
+      } catch (err) {
+        console.warn("[CelPros Widget] Erreur resync après reconnexion:", err);
+      }
+    }
+
+    setupAutoSyncPolling() {
+      if (this.pollingInterval) clearInterval(this.pollingInterval);
+      // Polling de 5s pour détecter les modifications en direct sur les interventions "en cours"
+      this.pollingInterval = setInterval(async () => {
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+        if (!this.selectedIntervention || !this.selectedIntervention.id) return;
+        if (this.isAutofilling) return;
+
+        try {
+          const update = await this.checkForInterventionUpdates(
+            this.selectedIntervention.id,
+            this.selectedIntervention.updated_at || this.selectedIntervention.modifie_le
+          );
+          if (update && update.hasChanged && update.item) {
+            this.showToast(
+              `⚡ Données actualisées en direct depuis le terrain (${update.item.nom_client || "Dossier"}) !`,
+              "info",
+              3000
+            );
+            this.setSelectedIntervention(update.item, false);
+            // En mode Super-Pilote, actualiser l'étape en cours sans écraser les saisies manuelles
+            if (this.autoPilotEnabled) {
+              this.handleAutofill(true);
+            }
+          }
+        } catch {
+          // Erreur silencieuse de polling
+        }
+      }, 5000);
+    }
+
+    async checkForInterventionUpdates(id, lastKnownUpdatedAt = null) {
+      if (!id) return { hasChanged: false };
+      // 1. Passage prioritaire par le service worker pour contourner CSP
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+        try {
+          const resp = await new Promise((resolve, reject) => {
+            chrome.runtime.sendMessage(
+              { action: "CHECK_FOR_UPDATES", payload: { id: String(id), lastUpdatedAt: lastKnownUpdatedAt } },
+              (res) => {
+                if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                resolve(res);
+              }
+            );
+          });
+          if (resp && resp.ok) return resp.data;
+        } catch (e) {
+          console.warn("[CelPros Widget] Échec CHECK_FOR_UPDATES via background:", e);
+        }
+      }
+
+      // 2. Fallback fetch direct (pour tests ou démo standalone)
+      try {
+        const data = await this.fetchApi("intervention_updated_at", "POST", { id: String(id) }, true);
+        const serverUpdatedAt = data?.updated_at || "";
+        const serverTime = this.parseTimestampSafely(serverUpdatedAt);
+        const localTime = this.parseTimestampSafely(lastKnownUpdatedAt);
+        const hasChanged = !lastKnownUpdatedAt || (serverTime > 0 && localTime > 0 ? serverTime > localTime : (serverUpdatedAt && serverUpdatedAt !== lastKnownUpdatedAt));
+        let freshItem = null;
+        if (hasChanged) {
+          freshItem = await this.fetchApi("intervention_get", "POST", { id: String(id) }, true);
+        }
+        return { hasChanged, updated_at: serverUpdatedAt, item: freshItem };
+      } catch (err) {
+        return { hasChanged: false, error: err.message };
+      }
+    }
+
+    async fetchApi(action, method = "GET", body = null, forceFresh = false) {
+      // 1. Délégation au background service worker pour contourner CORS & CSP sur celpros.celtiis.bj
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+        try {
+          if (action === "interventions_list_light") {
+            const resp = await new Promise((resolve, reject) => {
+              chrome.runtime.sendMessage(
+                { action: "FETCH_INTERVENTIONS", payload: { forceFresh } },
+                (res) => {
+                  if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                  resolve(res);
+                }
+              );
+            });
+            if (resp && resp.ok && resp.data) {
+              this.setApiStatus("connected", "Connecté");
+              return resp.data;
+            }
+            if (resp && resp.error) throw new Error(resp.error);
+          } else if (action === "intervention_get") {
+            const id = body?.id;
+            const resp = await new Promise((resolve, reject) => {
+              chrome.runtime.sendMessage(
+                { action: "FETCH_INTERVENTION_DETAILS", payload: { id, forceFresh } },
+                (res) => {
+                  if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                  resolve(res);
+                }
+              );
+            });
+            if (resp && resp.ok && resp.data) {
+              this.setApiStatus("connected", "Connecté");
+              return resp.data;
+            }
+            if (resp && resp.error) throw new Error(resp.error);
+          } else if (action === "intervention_updated_at") {
+            const id = body?.id;
+            const resp = await new Promise((resolve, reject) => {
+              chrome.runtime.sendMessage(
+                { action: "CHECK_FOR_UPDATES", payload: { id, lastUpdatedAt: body?.lastUpdatedAt } },
+                (res) => {
+                  if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+                  resolve(res);
+                }
+              );
+            });
+            if (resp && resp.ok && resp.data) {
+              return resp.data;
+            }
+            if (resp && resp.error) throw new Error(resp.error);
+          }
+        } catch (swErr) {
+          console.warn("[CelPros Widget] Passage background indisponible, tentative directe:", swErr.message);
+        }
+      }
+
+      // 2. Fetch direct avec cache-busting strict (_t=timestamp et no-store)
       let apiUrl = "https://fibretrack.mantota.com/api/index.php";
       let apiCode = "9999";
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
@@ -275,11 +452,15 @@
         clean = `${clean}/index.php`;
       }
       const sep = clean.includes("?") ? "&" : "?";
-      const url = `${clean}${sep}action=${encodeURIComponent(action)}`;
+      const url = `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
       const options = {
         method,
+        cache: "no-store",
         headers: {
           "Content-Type": "application/json",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0",
           ...(apiCode ? { "X-User-Code": apiCode } : {}),
         },
       };
@@ -287,8 +468,13 @@
         options.body = JSON.stringify(body);
       }
       const res = await fetch(url, options);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json();
+      if (!res.ok) {
+        this.setApiStatus("error", "Erreur réseau");
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const json = await res.json();
+      this.setApiStatus("connected", "Connecté");
+      return json;
     }
 
     async loadInitialState() {
@@ -346,14 +532,14 @@
       }
     }
 
-    async fetchInterventions() {
+    async fetchInterventions(forceFresh = false) {
       this.setApiStatus("loading", "Synchronisation...");
       const select = document.getElementById("chaptech-intervention-select");
       if (select) select.disabled = true;
 
       let list = null;
       try {
-        list = await this.fetchApi("interventions_list_light");
+        list = await this.fetchApi("interventions_list_light", "GET", null, forceFresh);
       } catch (err) {
         console.warn("[CelPros Widget] Erreur fetch direct:", err);
       }
@@ -592,7 +778,7 @@
         .replace(/'/g, "&#039;");
     }
 
-    async onInterventionChange(id) {
+    async onInterventionChange(id, forceFresh = false) {
       if (!id) {
         this.selectedIntervention = null;
         this.updateSummaryCard();
@@ -603,13 +789,26 @@
 
       let fullItem = null;
       try {
-        fullItem = await this.fetchApi("intervention_get", "POST", { id: String(id) });
+        fullItem = await this.fetchApi("intervention_get", "POST", { id: String(id) }, forceFresh);
       } catch (err) {
         console.warn("[CelPros Widget] Erreur fetch détails direct:", err);
       }
 
       if (!fullItem || !fullItem.id) {
-        fullItem = this.interventions.find((i) => String(i.id) === String(id));
+        // En mode hors-ligne, vérifier d'abord si on possède déjà l'intervention complète avec photos
+        if (this.selectedIntervention && String(this.selectedIntervention.id) === String(id) && ((this.selectedIntervention.whatsapp_photos && this.selectedIntervention.whatsapp_photos.length > 0) || (this.selectedIntervention.points_gps && this.selectedIntervention.points_gps.length > 0))) {
+          fullItem = this.selectedIntervention;
+        } else if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+          try {
+            const stored = await chrome.storage.local.get(["activeIntervention"]);
+            if (stored.activeIntervention && String(stored.activeIntervention.id) === String(id)) {
+              fullItem = stored.activeIntervention;
+            }
+          } catch {}
+        }
+        if (!fullItem || !fullItem.id) {
+          fullItem = this.interventions.find((i) => String(i.id) === String(id));
+        }
       }
 
       if (fullItem) {
@@ -785,20 +984,17 @@
         return;
       }
 
-      // Si l'intervention active est incomplète (pas de photos ou pas de points GPS), la recharger à chaud depuis l'API
-      if (!this.selectedIntervention.whatsapp_photos || !this.selectedIntervention.points_gps) {
-        this.showToast("Téléchargement des photos et détails de l'intervention...", "info", 1500);
-        try {
-          const full = await this.fetchApi("intervention_get", "POST", { id: String(this.selectedIntervention.id) });
-          if (full && full.id) {
-            this.selectedIntervention = full;
-            if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-              chrome.storage.local.set({ activeIntervention: full }).catch(() => {});
-            }
+      // Toujours s'assurer d'avoir les données et photos les plus fraîches possibles directement depuis la BDD terrain
+      try {
+        const freshItem = await this.fetchApi("intervention_get", "POST", { id: String(this.selectedIntervention.id) }, true);
+        if (freshItem && freshItem.id) {
+          this.selectedIntervention = freshItem;
+          if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+            chrome.storage.local.set({ activeIntervention: freshItem }).catch(() => {});
           }
-        } catch (e) {
-          console.warn("[CelPros Widget] Recharge avant remplissage impossible:", e);
         }
+      } catch (e) {
+        console.warn("[CelPros Widget] Recharge avant remplissage impossible:", e);
       }
 
       if (this.isAutofilling) return;
@@ -819,20 +1015,29 @@
         this.updateStepDisplay(currentStepNum);
 
         const fieldsCount = report.filledCount || 0;
+        const preservedCount = report.preservedCount || 0;
         const photosCount = report.photosInjected || 0;
+        const missingPhotosCount = report.missingPhotosCount || 0;
         const totalActions = fieldsCount + photosCount;
 
         const resultBanner = document.getElementById("chaptech-fill-result");
         if (resultBanner) {
           resultBanner.style.display = "block";
-          if (totalActions > 0) {
+          if (totalActions > 0 || preservedCount > 0) {
             resultBanner.className = "chaptech-result-banner success";
 
             let photosBadgesHtml = "";
             if (report.photoDetails && report.photoDetails.length > 0) {
-              photosBadgesHtml = `
+              photosBadgesHtml += `
                 <div class="result-photos-grid">
                   ${report.photoDetails.map((p) => `<span class="photo-chip" title="${p.fileName}">📸 ${p.label}</span>`).join("")}
+                </div>
+              `;
+            }
+            if (report.missingPhotos && report.missingPhotos.length > 0) {
+              photosBadgesHtml += `
+                <div class="result-photos-grid" style="margin-top: 4px;">
+                  ${report.missingPhotos.map((m) => `<span class="photo-chip warning" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;" title="Photo non présente dans FibreTrack">⚠️ Manquante : ${m.label}</span>`).join("")}
                 </div>
               `;
             }
@@ -841,16 +1046,18 @@
               <div class="result-head">✅ <strong>Étape ${currentStepNum}</strong> complétée ${isAuto ? '<span class="auto-pill">⚡ Super-Pilote</span>' : ""}</div>
               <div class="result-stats">
                 <span class="stat-tag fields">📝 <strong>${fieldsCount}</strong> champ(s)</span>
+                ${preservedCount > 0 ? `<span class="stat-tag" style="background:#e0f2fe;color:#0369a1;">🛡️ <strong>${preservedCount}</strong> manuel(s) préservé(s)</span>` : ""}
                 <span class="stat-tag photos">📸 <strong>${photosCount}</strong> photo(s)</span>
+                ${missingPhotosCount > 0 ? `<span class="stat-tag" style="background:#fef3c7;color:#92400e;">⚠️ <strong>${missingPhotosCount}</strong> photo(s) absente(s)</span>` : ""}
               </div>
               ${photosBadgesHtml}
               <div class="result-hint">👉 Vérifiez puis cliquez sur <strong>Suivant</strong> dans CelPros.</div>
             `;
-            this.showToast(
-              `⚡ <strong>${fieldsCount} champs</strong> et <strong>${photosCount} photos</strong> injectés pour l'Étape ${currentStepNum} !`,
-              "success",
-              4000
-            );
+            let toastMsg = `⚡ <strong>${fieldsCount} champs</strong> et <strong>${photosCount} photos</strong> injectés pour l'Étape ${currentStepNum} !`;
+            if (preservedCount > 0) {
+              toastMsg += ` (🛡️ ${preservedCount} saisie(s) manuelle(s) protégée(s))`;
+            }
+            this.showToast(toastMsg, "success", 4000);
           } else {
             resultBanner.className = "chaptech-result-banner warning";
             resultBanner.innerHTML = `⚠️ Aucun champ ou zone photo correspondante détectée sur cette page (${report.totalScanned} éléments analysés).`;
@@ -877,12 +1084,29 @@
       const container = document.getElementById("chaptech-fields-breakdown");
       if (!container) return;
 
-      if (!report || (!report.filledDetails && !report.photoDetails)) {
+      if (!report || (!report.filledDetails && !report.photoDetails && !report.preservedDetails)) {
         container.innerHTML = "<em>Aucune donnée d'inspection disponible.</em>";
         return;
       }
 
-      let html = `<div class="breakdown-summary">Éléments analysés : ${report.totalScanned || 0} | Champs : ${report.filledCount || 0} | Photos : ${report.photosInjected || 0}</div>`;
+      let html = `<div class="breakdown-summary">Éléments analysés : ${report.totalScanned || 0} | Champs : ${report.filledCount || 0} | Préservés : ${report.preservedCount || 0} | Photos : ${report.photosInjected || 0}</div>`;
+
+      // Liste des saisies manuelles protégées
+      if (report.preservedDetails && report.preservedDetails.length > 0) {
+        html += `<div class="breakdown-subtitle" style="color:#0369a1;">🛡️ Saisies manuelles protégées (${report.preservedDetails.length}) :</div>`;
+        html += `<ul class="breakdown-list">`;
+        for (const pr of report.preservedDetails) {
+          html += `
+            <li class="breakdown-item preserved" style="border-left: 3px solid #0284c7; background: #f0f9ff;">
+              <span class="badge-cat" style="background:#0284c7; color:#fff;">Manuel</span>
+              <strong>${pr.label}</strong> :
+              <span class="breakdown-val">${String(pr.currentValue).slice(0, 30)}</span>
+              <small class="breakdown-id">(saisie utilisateur préservée)</small>
+            </li>
+          `;
+        }
+        html += `</ul>`;
+      }
 
       // Liste des photos injectées
       if (report.photoDetails && report.photoDetails.length > 0) {
@@ -894,6 +1118,22 @@
               <span class="badge-cat photo">Photo</span>
               <strong>${p.label}</strong> :
               <span class="breakdown-val">${p.fileName} (${p.sizeKb} Ko)</span>
+            </li>
+          `;
+        }
+        html += `</ul>`;
+      }
+
+      // Liste des photos manquantes dans FibreTrack
+      if (report.missingPhotos && report.missingPhotos.length > 0) {
+        html += `<div class="breakdown-subtitle" style="color:#b45309;">⚠️ Photos absentes dans FibreTrack (${report.missingPhotos.length}) :</div>`;
+        html += `<ul class="breakdown-list">`;
+        for (const m of report.missingPhotos) {
+          html += `
+            <li class="breakdown-item missing-photo" style="border-left: 3px solid #f59e0b; background: #fffbeb;">
+              <span class="badge-cat" style="background:#f59e0b; color:#fff;">Absente</span>
+              <strong>${m.label}</strong> :
+              <span class="breakdown-val">Champ laissé vide (avertissement affiché)</span>
             </li>
           `;
         }
@@ -1063,8 +1303,14 @@
         }
       });
 
-      // Rafraîchir
-      document.getElementById("chaptech-btn-refresh").addEventListener("click", () => this.fetchInterventions());
+      // Rafraîchir avec contournement de cache et rechargement de l'intervention active
+      document.getElementById("chaptech-btn-refresh").addEventListener("click", async () => {
+        this.showToast("🔄 Actualisation forcée depuis FibreTrack...", "info", 1500);
+        await this.fetchInterventions(true);
+        if (this.selectedIntervention && this.selectedIntervention.id) {
+          await this.onInterventionChange(this.selectedIntervention.id, true);
+        }
+      });
 
       // Changement d'intervention via select natif
       document.getElementById("chaptech-intervention-select").addEventListener("change", (e) => {

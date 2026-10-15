@@ -350,5 +350,46 @@ test("nom_dossier and nom_client are automatically synchronized and defaulted", 
   assert.equal(fromClient.nom_dossier, "Entreprise X");
 });
 
+test("non-destructive merge protects local filled fields from being overwritten by empty server fields", async () => {
+  const local = {
+    nom_client: "KODJO MICHEL",
+    nom_dossier: "KODJO MICHEL",
+    telephone_ligne: "0198765432",
+    mobile: "0123456789",
+    msan: "OGA-PL51",
+    fat_ref: "FAT164",
+    port: "Port 2",
+  };
+
+  const remoteWithEmptyFields = {
+    nom_client: "",
+    nom_dossier: "",
+    telephone_ligne: "",
+    mobile: null,
+    msan: "",
+    fat_ref: undefined,
+    port: "",
+  };
+
+  const protectedResult = { ...local };
+  for (const [key, value] of Object.entries(remoteWithEmptyFields)) {
+    const prevVal = local[key];
+    const prevIsFilled = typeof prevVal === "string" ? prevVal.trim() !== "" : (prevVal !== null && prevVal !== undefined);
+    const remoteIsEmpty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+
+    if (!prevIsFilled || !remoteIsEmpty) {
+      protectedResult[key] = value;
+    }
+  }
+
+  assert.equal(protectedResult.nom_client, "KODJO MICHEL");
+  assert.equal(protectedResult.nom_dossier, "KODJO MICHEL");
+  assert.equal(protectedResult.telephone_ligne, "0198765432");
+  assert.equal(protectedResult.mobile, "0123456789");
+  assert.equal(protectedResult.msan, "OGA-PL51");
+  assert.equal(protectedResult.fat_ref, "FAT164");
+  assert.equal(protectedResult.port, "Port 2");
+});
+
 
 

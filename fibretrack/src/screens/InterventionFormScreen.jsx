@@ -9,6 +9,7 @@ import {
   saveIntervention,
   saveInterventionLocally,
   ensureInterventionDefaults,
+  toNormalizedTimestamp,
 } from "../models/Intervention";
 import PhotoViewerModal from "../components/PhotoViewerModal";
 import BarcodeScannerModal from "../components/BarcodeScannerModal";
@@ -87,6 +88,14 @@ export const CELPROS_PHOTO_SLOTS = [
     keywords: ["entree cable externe", "cable externe", "externe"],
   },
   {
+    key: "autre_poteau",
+    label: "Autre poteau",
+    icon: "🪵",
+    description: "Autre support ou matériel classé dans la catégorie poteau sur CelPros (sans déduction stock ni comptage de vrai poteau)",
+    keywords: ["autre poteau", "autre poto", "autre support", "materiel poteau", "poteau autre"],
+    optional: true,
+  },
+  {
     key: "fibre_fat",
     label: "Fibre au FAT",
     icon: "🧵",
@@ -123,10 +132,10 @@ export const CELPROS_PHOTO_SLOTS = [
   },
   {
     key: "ont_sn",
-    label: "Étiquette Box ONT (MAC & SN)",
+    label: "Photo numéro de série",
     icon: "🏷️",
-    description: "Étiquette constructeur avec codes-barres MAC et numéro de série",
-    keywords: ["photo ont", "etiquette ont", "box ont", "ont sn", "sn ont"],
+    description: "Photo numéro de série",
+    keywords: ["photo numero de serie", "photo numero serie", "numero de serie", "photo ont", "etiquette ont", "box ont", "ont sn", "sn ont"],
   },
   {
     key: "combine",
@@ -312,15 +321,17 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     const dirtySnapshot = new Set(dirtyFieldsRef.current);
     const revisions = new Map(dirtyRevisionsRef.current);
+    const currentData = dataRef.current;
+    if (!currentData) return;
 
     // Optimisation majeure : n'envoyer les photos lourdes que si elles ont été expressément modifiées
     const isWaPhotosDirty = dirtySnapshot.has("whatsapp_photos");
     const isGpsDirty = dirtySnapshot.has("points_gps");
 
     const payload = {
-      ...data,
-      whatsapp_photos: isWaPhotosDirty || !data.updated_at ? whatsappPhotos : [],
-      points_gps: isGpsDirty || !data.updated_at ? data.points_gps : [],
+      ...currentData,
+      whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? whatsappPhotos : [],
+      points_gps: isGpsDirty || !currentData.updated_at ? currentData.points_gps : [],
       changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
       deleted_points: [...deletedGpsPointIdsRef.current],
       deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
@@ -329,18 +340,24 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     try {
       saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(payload));
       const saved = await saveQueueRef.current;
-      for (const field of dirtySnapshot) {
-        if (dirtyRevisionsRef.current.get(field) === revisions.get(field)) dirtyFieldsRef.current.delete(field);
+      if (saved?._synced) {
+        for (const field of dirtySnapshot) {
+          if (dirtyRevisionsRef.current.get(field) === revisions.get(field)) dirtyFieldsRef.current.delete(field);
+        }
+        for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
+        for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
+        if (saved?.updated_at) {
+          setData((prev) => ({ ...prev, updated_at: saved.updated_at, modifie_le: saved.updated_at }));
+        }
+        setSaveStatus("✓ Enregistré");
+      } else {
+        setSaveStatus("✓ Sauvegardé (en attente réseau)");
       }
-      for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
-      for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
-      if (saved?.updated_at) setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
-      setSaveStatus("✓ Enregistré");
     } catch {
       // En cas de réseau instable, les données restent garanties dans le cache local
       setSaveStatus("✓ Sauvegardé (local)");
     }
-  }, [data, whatsappPhotos]);
+  }, [whatsappPhotos]);
 
   useEffect(() => {
     if (finishingRef.current || dirtyFieldsRef.current.size === 0) return;
@@ -350,12 +367,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   }, [data, whatsappPhotos, flushServerSync]);
 
-  const handleClose = useCallback(() => {
+  const handleClose = useCallback(async () => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     const latest = dataRef.current;
     if (latest) {
       saveInterventionLocally(latest);
-      flushServerSync().catch(() => {});
+      try {
+        await flushServerSync();
+      } catch {}
     }
     onClose();
   }, [flushServerSync, onClose]);
@@ -381,12 +400,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         // Vérification ultra-rapide (50 octets) : est-ce que le serveur a une date plus récente ?
         const remoteUpdated = await checkInterventionUpdatedAt(data.id);
         if (!active || !remoteUpdated) return;
-        if (data.updated_at && remoteUpdated <= data.updated_at) return; // Déjà à jour
+        const remoteTime = toNormalizedTimestamp(remoteUpdated);
+        const localTime = toNormalizedTimestamp(data.updated_at || data.modifie_le);
+        if (localTime >= remoteTime) return; // Déjà à jour
 
         const remote = await getInterventionLight(data.id);
         if (!active || !remote) return;
         setData((previous) => {
-          const next = { ...previous };
+          const next = {
+            ...previous,
+            updated_at: remote.updated_at || remoteUpdated,
+            modifie_le: remote.updated_at || remoteUpdated,
+          };
           for (const [field, value] of Object.entries(remote)) {
             if (field === "materiel_pose") {
               const material = { ...previous.materiel_pose };
@@ -394,23 +419,40 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 if (!dirtyFieldsRef.current.has(`materiel_pose.${designation}`)) material[designation] = quantity;
               }
               next.materiel_pose = material;
-            } else if (!["points_gps", "whatsapp_photos", "signature_client", "signature_technicien"].includes(field)
-              && !dirtyFieldsRef.current.has(field)) {
-              next[field] = value;
+            } else if (!["points_gps", "whatsapp_photos", "signature_client", "signature_technicien"].includes(field)) {
+              // Protéger les champs dirty ou en cours de saisie
+              const isDirty = dirtyFieldsRef.current.has(field) ||
+                ((field === "nom_client" || field === "nom_dossier" || field === "nom_client_declaration") &&
+                 (dirtyFieldsRef.current.has("nom_client") || dirtyFieldsRef.current.has("nom_dossier") || dirtyFieldsRef.current.has("nom_client_declaration")));
+
+              if (!isDirty) {
+                const prevVal = previous[field];
+                const prevIsFilled = typeof prevVal === "string" ? prevVal.trim() !== "" : (prevVal !== null && prevVal !== undefined);
+                const remoteIsEmpty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+
+                // Règle d'or : ne jamais écraser une valeur locale existante par du vide ou null distant
+                if (prevIsFilled && remoteIsEmpty) {
+                  // Garder la valeur locale
+                } else {
+                  next[field] = value;
+                }
+              }
             }
           }
-          return Object.keys(next).every((key) => next[key] === previous[key]) ? previous : next;
+          dataRef.current = next;
+          saveInterventionLocally(next);
+          return next;
         });
       } catch (error) {
         // Silencieux pour ne pas perturber l'utilisateur sur réseau mobile
       }
     };
-    const timer = setInterval(refreshRemoteFields, 8000);
+    const timer = setInterval(refreshRemoteFields, 4000);
     return () => {
       active = false;
       clearInterval(timer);
     };
-  }, [data.id, data.updated_at]);
+  }, [data.id, data.updated_at, data.modifie_le]);
 
   const [manualRefreshing, setManualRefreshing] = useState(false);
 
@@ -436,6 +478,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               merged[dirtyField] = prev[dirtyField];
             }
           }
+          for (const key of ["nom_client", "nom_dossier", "telephone_ligne", "mobile", "msan", "fat_ref", "port"]) {
+            if (prev[key] && !merged[key]) {
+              merged[key] = prev[key];
+            }
+          }
+          dataRef.current = merged;
           return merged;
         });
 
@@ -463,17 +511,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       if (document.visibilityState === "visible" && data.id && !finishingRef.current && dirtyFieldsRef.current.size === 0) {
         try {
           const remoteUpdated = await checkInterventionUpdatedAt(data.id);
-          if (remoteUpdated && (!data.updated_at || remoteUpdated > data.updated_at)) {
+          const remoteTime = toNormalizedTimestamp(remoteUpdated);
+          const localTime = toNormalizedTimestamp(data.updated_at || data.modifie_le);
+          if (remoteTime > localTime) {
             handleManualRefreshIntervention();
           }
         } catch {}
       }
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibilityChange);
     };
-  }, [data.id, data.updated_at, handleManualRefreshIntervention]);
+  }, [data.id, data.updated_at, data.modifie_le, handleManualRefreshIntervention]);
 
 
   function update(field, value) {
@@ -490,9 +542,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
     }
     if (field === "nom_client") {
-      markDirty("nom_client", "nom_dossier");
+      markDirty("nom_client", "nom_dossier", "nom_client_declaration");
     } else if (field === "nom_dossier") {
-      markDirty("nom_dossier", "nom_client");
+      markDirty("nom_dossier", "nom_client", "nom_client_declaration");
     } else {
       markDirty(
         field,
@@ -529,6 +581,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         next.nb_poteaux_implantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
         next.nb_poteaux_armes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
       }
+      dataRef.current = next;
       // Sauvegarde locale instantanée à 0ms dans le navigateur/smartphone
       saveInterventionLocally(next);
       return next;
@@ -672,9 +725,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           ? {
               slot,
               type: isPoteau ? "poteau" : slot,
-              label: isFat ? "Boîtier FAT" : isAbonne ? "Étiquette Box ONT (MAC & SN)" : `Poteau ${sousType} ${point.numero}`,
+              label: isFat ? "Boîtier FAT" : isAbonne ? "Photo numéro de série" : `Poteau ${sousType} ${point.numero}`,
               name: `${slot}.jpg`,
-              description: `${isFat ? "Boîtier FAT" : isAbonne ? "Étiquette Box ONT (MAC & SN)" : `Poteau ${sousType}`} - ${data.nom_client || "Intervention"}`,
+              description: `${isFat ? "Boîtier FAT" : isAbonne ? "Photo numéro de série" : `Poteau ${sousType}`} - ${data.nom_client || "Intervention"}`,
             }
           : {}),
         url: pendingCapture.photo,
@@ -940,7 +993,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           id: `gps_abonne_${abonnePt.numero || 1}`,
           slot: "ont_sn",
           type: "ont_sn",
-          label: "Étiquette Box ONT (MAC & SN)",
+          label: "Photo numéro de série",
           url: abonnePt.photo,
           lat: abonnePt.lat,
           lng: abonnePt.lng,
@@ -1124,7 +1177,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     // Détecter les conflits avec les valeurs existantes déjà saisies
     const conflicts = [];
-    if (nom_client && data.nom_client && data.nom_client.trim().toLowerCase() !== nom_client.trim().toLowerCase()) {
+    const isPlaceholder = (val) => !val || /^nouveau(?:lle)?\s+(?:dossier|intervention)/i.test(String(val).trim());
+    if (nom_client && data.nom_client && !isPlaceholder(data.nom_client) && data.nom_client.trim().toLowerCase() !== nom_client.trim().toLowerCase()) {
       conflicts.push({ field: "nom_client", label: "Nom du client", currentVal: data.nom_client, newVal: nom_client });
     }
     if (telephone_ligne && data.telephone_ligne && data.telephone_ligne.trim() !== telephone_ligne.trim()) {
@@ -1156,45 +1210,71 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const fieldsToMark = [];
     const appliedFields = [];
 
+    if (extracted.nom_client) {
+      fieldsToMark.push("nom_client", "nom_dossier", "nom_client_declaration");
+      appliedFields.push(`Nom : "${extracted.nom_client}"`);
+    }
+    if (extracted.telephone_ligne) {
+      fieldsToMark.push("telephone_ligne");
+      appliedFields.push(`Ligne : "${extracted.telephone_ligne}"`);
+    }
+    if (extracted.mobile) {
+      fieldsToMark.push("mobile");
+      appliedFields.push(`Tél : "${extracted.mobile}"`);
+    }
+    if (extracted.msan) {
+      fieldsToMark.push("msan");
+      appliedFields.push(`MSAN : "${extracted.msan}"`);
+    }
+    if (extracted.fat_ref) {
+      fieldsToMark.push("fat_ref");
+      appliedFields.push(`FAT : "${extracted.fat_ref}"`);
+    }
+
+    // Synchronisation immédiate des champs modifiés pour la file d'attente serveur
+    if (fieldsToMark.length > 0) {
+      markDirty(...fieldsToMark);
+    }
+
     setData((prev) => {
       const next = { ...prev, modifie_par: currentUser, modifie_le: new Date().toISOString() };
       if (extracted.nom_client) {
         next.nom_client = extracted.nom_client;
-        fieldsToMark.push("nom_client");
-        appliedFields.push(`Nom : "${extracted.nom_client}"`);
+        next.nom_dossier = extracted.nom_client;
+        if (!prev.nom_client_declaration || prev.nom_client_declaration === prev.nom_client) {
+          next.nom_client_declaration = extracted.nom_client;
+        }
       }
       if (extracted.telephone_ligne) {
         next.telephone_ligne = extracted.telephone_ligne;
-        fieldsToMark.push("telephone_ligne");
-        appliedFields.push(`Ligne : "${extracted.telephone_ligne}"`);
       }
       if (extracted.mobile) {
         next.mobile = extracted.mobile;
-        fieldsToMark.push("mobile");
-        appliedFields.push(`Tél : "${extracted.mobile}"`);
       }
       if (extracted.msan) {
         next.msan = extracted.msan;
-        fieldsToMark.push("msan");
-        appliedFields.push(`MSAN : "${extracted.msan}"`);
       }
       if (extracted.fat_ref) {
         next.fat_ref = extracted.fat_ref;
-        fieldsToMark.push("fat_ref");
-        appliedFields.push(`FAT : "${extracted.fat_ref}"`);
       }
+      dataRef.current = next;
       saveInterventionLocally(next);
       return next;
     });
-
-    if (fieldsToMark.length > 0) {
-      markDirty(...fieldsToMark);
-    }
 
     setQuickClientConflictModal(null);
     setQuickClientWarnings(warnings);
     setQuickClientStatus(`✅ Informations réparties avec succès (${appliedFields.join(", ")})`);
     setTimeout(() => setQuickClientStatus(""), 7000);
+
+    // Déclencher immédiatement l'enregistrement serveur pour propagation temps réel à toute l'équipe
+    if (fieldsToMark.length > 0) {
+      setSaveStatus("Enregistrement…");
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+      setTimeout(() => {
+        flushServerSync().catch(() => {});
+      }, 50);
+    }
   }
 
   // ===== Photos de Poteaux Géolocalisés (section dynamique Photos CelPros) =====
@@ -2135,6 +2215,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   placeholder="Ex: Entreprise Mantota ou Nom de l'abonné"
                   value={data.nom_client || data.nom_dossier || ""}
                   onChange={(v) => update("nom_client", v)}
+                  onBlur={flushServerSync}
                 />
 
                 <GeocodableField
@@ -2142,6 +2223,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   placeholder="Ex: Haie Vive, Cotonou ou Fidjrossè"
                   value={data.adresse_zone}
                   onChange={(v) => update("adresse_zone", v)}
+                  onBlur={flushServerSync}
                   onDetectGps={handleDetectZone}
                   detecting={detectingZone}
                   statusMessage={zoneStatus}
@@ -2155,6 +2237,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     placeholder="Ex: 21 30 00 00"
                     value={data.telephone_ligne}
                     onChange={(v) => update("telephone_ligne", v)}
+                    onBlur={flushServerSync}
                   />
                   <TextField
                     label="Mobile"
@@ -2162,6 +2245,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     placeholder="Ex: 97 00 00 00"
                     value={data.mobile}
                     onChange={(v) => update("mobile", v)}
+                    onBlur={flushServerSync}
                   />
                 </div>
               </div>
@@ -2183,18 +2267,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     value={data.etat}
                     options={["PON", "Cuivre", "Autre"]}
                     onChange={(v) => update("etat", v)}
+                    onBlur={flushServerSync}
                   />
                   <TextField
                     label="MSAN"
                     placeholder="Ex: OGA-12"
                     value={data.msan}
                     onChange={(v) => update("msan", v)}
+                    onBlur={flushServerSync}
                   />
                   <TextField
                     label="Référence FAT"
                     placeholder="Ex: FAT-04"
                     value={data.fat_ref}
                     onChange={(v) => update("fat_ref", v)}
+                    onBlur={flushServerSync}
                   />
                 </div>
 
@@ -2204,6 +2291,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     placeholder="Ex: 3 ou Port 3"
                     value={data.port}
                     onChange={handlePortChange}
+                    onBlur={flushServerSync}
                   />
                   <TextField
                     label="Type de câble"
@@ -2446,18 +2534,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 <div>
                   <h3>Boîte à Photos CelPros</h3>
                   <p className="photos-progress-sub">
-                    {CELPROS_PHOTO_SLOTS.filter((s) => !!getPhotoForSlot(s.key)?.url).length} sur {CELPROS_PHOTO_SLOTS.length} photos obligatoires prêtes pour l'envoi CelPros
+                    {CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length} sur {CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length} photos obligatoires prêtes pour CelPros
+                    {getPhotoForSlot("autre_poteau")?.url ? " (+ 1 Autre poteau prêt)" : ""}
                   </p>
                 </div>
                 <div className="photos-progress-percent">
-                  {Math.round((CELPROS_PHOTO_SLOTS.filter((s) => !!getPhotoForSlot(s.key)?.url).length / CELPROS_PHOTO_SLOTS.length) * 100)}%
+                  {Math.round((CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length / Math.max(1, CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length)) * 100)}%
                 </div>
               </div>
               <div className="progress-bar-track">
                 <div
                   className="progress-bar-fill"
                   style={{
-                    width: `${(CELPROS_PHOTO_SLOTS.filter((s) => !!getPhotoForSlot(s.key)?.url).length / CELPROS_PHOTO_SLOTS.length) * 100}%`
+                    width: `${(CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length / Math.max(1, CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length)) * 100}%`
                   }}
                 />
               </div>
@@ -2478,9 +2567,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       <div className="photo-slot-titles">
                         <h4>{slot.label}</h4>
                         <p>{slot.description}</p>
+                        {slot.key === "autre_poteau" && (
+                          <div style={{ marginTop: 3, fontSize: 11, color: "#0284c7", fontWeight: 600 }}>
+                            ℹ️ Ajouté sur CelPros au niveau poteau (exclu du stock & rapports)
+                          </div>
+                        )}
                       </div>
-                      <span className={`photo-slot-badge ${isTaken ? "badge-success" : "badge-pending"}`}>
-                        {isTaken ? "✓ Prête" : "En attente"}
+                      <span className={`photo-slot-badge ${isTaken ? "badge-success" : (slot.optional ? "badge-optional" : "badge-pending")}`} style={slot.optional && !isTaken ? { background: "#f1f5f9", color: "#64748b" } : {}}>
+                        {isTaken ? "✓ Prête" : (slot.optional ? "Optionnel" : "En attente")}
                       </span>
                     </div>
 

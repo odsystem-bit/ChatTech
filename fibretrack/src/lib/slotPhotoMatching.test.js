@@ -55,7 +55,7 @@ function getPhotoForSlotStrict(slotKey, whatsappPhotos = [], pointsGps = []) {
         id: `gps_abonne_${abonnePt.numero || 1}`,
         slot: "ont_sn",
         type: "ont_sn",
-        label: "Étiquette Box ONT (MAC & SN)",
+        label: "Photo numéro de série",
         url: abonnePt.photo,
         from_gps: true,
       };
@@ -173,5 +173,24 @@ test("CelPros slot isolation: direct slot match takes precedence and respects ex
   assert.equal(getPhotoForSlotStrict("scan_fat", photos, [])?.id, "2");
   assert.equal(getPhotoForSlotStrict("mesure_fat", photos, [])?.id, "3");
   assert.equal(getPhotoForSlotStrict("mesure_pto", photos, [])?.id, "4");
+  assert.equal(getPhotoForSlotStrict("cable_interne", photos, []), null);
+});
+
+test("CelPros slot isolation: 'autre_poteau' matches its dedicated slot and does not mix with standard poles", () => {
+  const photos = [
+    { id: "1", slot: "fat", type: "fat", label: "Boîtier FAT", url: "https://example.com/fat.jpg" },
+    { id: "2", slot: "poteau_1", type: "poteau_1", label: "Poteau 1", url: "https://example.com/p1.jpg" },
+    { id: "3", slot: "autre_poteau", type: "autre_poteau", label: "Autre poteau", url: "https://example.com/autre_poteau.jpg" },
+  ];
+
+  // Match direct
+  const match = getPhotoForSlotStrict("autre_poteau", photos, []);
+  assert.ok(match);
+  assert.equal(match.id, "3");
+  assert.equal(match.url, "https://example.com/autre_poteau.jpg");
+
+  // Autre poteau ne doit jamais être pris pour un autre slot
+  assert.notEqual(getPhotoForSlotStrict("fat", photos, [])?.id, "3");
+  assert.notEqual(getPhotoForSlotStrict("poteau_1", photos, [])?.id, "3");
   assert.equal(getPhotoForSlotStrict("cable_interne", photos, []), null);
 });

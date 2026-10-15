@@ -282,6 +282,16 @@ export function getStoredIntervention(id) {
   }
 }
 
+export function toNormalizedTimestamp(d) {
+  if (!d) return 0;
+  if (typeof d === "number") return d;
+  const s = String(d).trim();
+  if (!s) return 0;
+  const isoLike = s.includes("T") ? s : s.replace(" ", "T") + "Z";
+  const ms = Date.parse(isoLike);
+  return isNaN(ms) ? (Date.parse(s) || 0) : ms;
+}
+
 /**
  * Liste toutes les interventions (depuis le backend, avec cache local).
  * @returns {Promise<Intervention[]>}
@@ -312,15 +322,21 @@ export async function listInterventions() {
       serverMap.set(row.id, true);
       const existing = currentCached.find((c) => c.id === row.id);
       if (existing) {
-        const localTime = existing.updated_at || existing.modifie_le || "";
-        const serverTime = row.updated_at || row.modifie_le || "";
-        if (localTime && serverTime && localTime > serverTime) {
+        const localTime = toNormalizedTimestamp(existing.updated_at || existing.modifie_le);
+        const serverTime = toNormalizedTimestamp(row.updated_at || row.modifie_le);
+        if (localTime > serverTime && outboxIds.has(row.id)) {
           return { ...row, ...existing };
         }
         // Préserver le nom du client local si le serveur renvoie une chaîne vide
-        const fallbackClient = (!row.nom_client && existing.nom_client) ? existing.nom_client : row.nom_client;
+        const fallbackClient = (!row.nom_client && existing.nom_client) ? existing.nom_client : (row.nom_client || "");
         const fallbackDossier = (!row.nom_dossier && existing.nom_dossier) ? existing.nom_dossier : (row.nom_dossier || fallbackClient);
-        return { ...existing, ...row, nom_client: fallbackClient, nom_dossier: fallbackDossier };
+        return {
+          ...existing,
+          ...row,
+          nom_client: fallbackClient || fallbackDossier,
+          nom_dossier: fallbackDossier || fallbackClient,
+          updated_at: row.updated_at || row.modifie_le || existing.updated_at || "",
+        };
       }
       return {
         ...row,
@@ -443,17 +459,21 @@ export async function saveIntervention(intervention) {
       expected_updated_at: intervention.updated_at || "",
     });
     if (response?.updated_at) {
-      intervention = { ...intervention, updated_at: response.updated_at };
+      intervention = {
+        ...intervention,
+        updated_at: response.updated_at,
+        modifie_le: response.updated_at,
+      };
       saveInterventionLocally(intervention);
     }
     // Succès confirmé : retirer de la file d'attente hors-ligne si présent
     removeFromOutbox(intervention.id);
-    return ensureInterventionDefaults(intervention);
+    return { ...ensureInterventionDefaults(intervention), _synced: true, updated_at: response?.updated_at || intervention.updated_at };
   } catch (err) {
     console.warn("saveIntervention network sync failed, buffered into persistent outbox:", err);
     // Bufferiser dans l'outbox persistante pour synchronisation automatique dès retour réseau
     addToOutbox(intervention);
-    return ensureInterventionDefaults(intervention);
+    return { ...ensureInterventionDefaults(intervention), _synced: false, _sync_error: err?.message || "Erreur réseau" };
   }
 }
 
@@ -470,9 +490,10 @@ export async function getIntervention(id) {
       const defaultedRemote = ensureInterventionDefaults(remote);
       let finalIntv = defaultedRemote;
       if (local) {
-        const localTime = local.updated_at || local.modifie_le || "";
-        const remoteTime = defaultedRemote.updated_at || defaultedRemote.modifie_le || "";
-        if (!remoteTime || (localTime && localTime >= remoteTime)) {
+        const localTime = toNormalizedTimestamp(local.updated_at || local.modifie_le);
+        const remoteTime = toNormalizedTimestamp(defaultedRemote.updated_at || defaultedRemote.modifie_le);
+        const hasUnsyncedOutbox = getSyncOutbox().some((item) => item.id === id);
+        if (hasUnsyncedOutbox && localTime > remoteTime) {
           finalIntv = { ...defaultedRemote, ...local };
         } else {
           finalIntv = { ...defaultedRemote };

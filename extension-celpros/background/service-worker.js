@@ -38,23 +38,58 @@ async function getConfig() {
   };
 }
 
-// Construction des en-têtes d'authentification
+// Construction des en-têtes d'authentification sans cache
 function getAuthHeaders(apiCode) {
-  const headers = { "Content-Type": "application/json" };
+  const headers = {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+  };
   if (apiCode) {
     headers["X-User-Code"] = String(apiCode).trim();
   }
   return headers;
 }
 
-// Construction des URLs d'action API avec tolérance aux slashes et index.php
+// Construction des URLs d'action API avec cache-busting strict (_t=timestamp)
 function formatApiActionUrl(baseUrl, action) {
   let clean = (baseUrl || DEFAULT_CONFIG.apiUrl).trim().replace(/\/+$/, "");
   if (!clean.includes(".php") && !clean.includes("?")) {
     clean = `${clean}/index.php`;
   }
   const sep = clean.includes("?") ? "&" : "?";
-  return `${clean}${sep}action=${encodeURIComponent(action)}`;
+  return `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
+}
+
+// Diffusion sécurisée de l'intervention active vers tous les onglets CelPros/FAT/Démo
+function broadcastActiveIntervention(item, excludeTabId = null) {
+  if (!item) return;
+  const targetUrls = [
+    "*://celpros.celtiis.bj/*",
+    "*://fatautomation.celtiis.bj/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "file:///*",
+  ];
+  chrome.tabs.query({ url: targetUrls }, (tabs) => {
+    tabs.forEach((tab) => {
+      if (tab.id && tab.id !== excludeTabId) {
+        chrome.tabs.sendMessage(
+          tab.id,
+          {
+            action: "ACTIVE_INTERVENTION_UPDATED",
+            payload: item,
+          },
+          () => {
+            if (chrome.runtime.lastError) {
+              /* ignorer onglet sans content script actif */
+            }
+          }
+        );
+      }
+    });
+  });
 }
 
 // Test de connexion à l'API ChapTech
@@ -67,6 +102,7 @@ async function testConnection(customConfig = null) {
     const url = formatApiActionUrl(apiUrl, "interventions_list_light");
     const res = await fetch(url, {
       method: "GET",
+      cache: "no-store",
       headers: getAuthHeaders(apiCode),
     });
 
@@ -96,13 +132,14 @@ async function testConnection(customConfig = null) {
 }
 
 // Récupération de la liste des interventions (light) avec tri et fallback cache
-async function fetchInterventionsList() {
+async function fetchInterventionsList(forceFresh = false) {
   const config = await getConfig();
   const url = formatApiActionUrl(config.apiUrl, "interventions_list_light");
 
   try {
     const res = await fetch(url, {
       method: "GET",
+      cache: "no-store",
       headers: getAuthHeaders(config.apiCode),
     });
 
@@ -126,12 +163,21 @@ async function fetchInterventionsList() {
       if (!item) return false;
       const s = String(item.statut || "").trim().toLowerCase();
       const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-      return norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done" || Boolean(item.date_cloture);
+      return (
+        norm === "termine" ||
+        norm === "terminee" ||
+        norm === "cloture" ||
+        norm === "cloturee" ||
+        norm === "clos" ||
+        norm === "closed" ||
+        norm === "done" ||
+        Boolean(item.date_cloture)
+      );
     };
 
     const list = await res.json();
     if (Array.isArray(list)) {
-      // Trier : 'en_cours' en priorité, puis par date décroissante
+      // Trier : 'en_cours' en priorité absolue, puis par date décroissante
       list.sort((a, b) => {
         const aIsDone = isItemTermine(a);
         const bIsDone = isItemTermine(b);
@@ -150,7 +196,11 @@ async function fetchInterventionsList() {
     }
     throw new Error("Format de réponse invalide");
   } catch (err) {
-    console.warn("[CelPros Background] Erreur fetch interventions, tentative lecture cache local:", err.message);
+    if (forceFresh) {
+      console.warn("[CelPros Background] Échec fetch frais explicite, fallback cache:", err.message);
+    } else {
+      console.warn("[CelPros Background] Erreur fetch interventions, lecture cache local:", err.message);
+    }
     const stored = await chrome.storage.local.get(["cachedInterventions"]);
     if (Array.isArray(stored.cachedInterventions) && stored.cachedInterventions.length > 0) {
       console.log(`[CelPros Background] Utilisation de ${stored.cachedInterventions.length} fiches du cache local.`);
@@ -160,8 +210,8 @@ async function fetchInterventionsList() {
   }
 }
 
-// Récupération complète des détails d'une intervention
-async function fetchInterventionDetails(id) {
+// Récupération complète des détails d'une intervention avec cache-busting
+async function fetchInterventionDetails(id, forceFresh = false) {
   if (!id) throw new Error("ID d'intervention manquant");
   const config = await getConfig();
   const url = formatApiActionUrl(config.apiUrl, "intervention_get");
@@ -169,6 +219,7 @@ async function fetchInterventionDetails(id) {
   try {
     const res = await fetch(url, {
       method: "POST",
+      cache: "no-store",
       headers: getAuthHeaders(config.apiCode),
       body: JSON.stringify({ id: String(id) }),
     });
@@ -191,7 +242,9 @@ async function fetchInterventionDetails(id) {
     }
     return item;
   } catch (err) {
-    console.warn(`[CelPros Background] Erreur fetch détails pour ${id}, tentative fallback:`, err.message);
+    if (forceFresh) {
+      console.warn(`[CelPros Background] Échec fetch frais pour ${id}, tentative fallback:`, err.message);
+    }
     const stored = await chrome.storage.local.get(["activeIntervention", "cachedInterventions"]);
     if (stored.activeIntervention && String(stored.activeIntervention.id) === String(id)) {
       return stored.activeIntervention;
@@ -202,6 +255,84 @@ async function fetchInterventionDetails(id) {
     }
     throw err;
   }
+}
+
+function parseTimestampSafely(dateStr) {
+  if (!dateStr || typeof dateStr !== "string") return 0;
+  const clean = dateStr.trim().replace(/\.+$/, "").replace(" ", "T");
+  const ts = Date.parse(clean);
+  return isNaN(ts) ? 0 : ts;
+}
+
+// Téléchargement sécurisé d'un média (photo) en tâche de fond pour contourner CORS & CSP
+async function fetchMediaAsDataUrl(mediaUrl) {
+  if (!mediaUrl || typeof mediaUrl !== "string") {
+    throw new Error("URL de média invalide");
+  }
+  let url = mediaUrl.trim();
+  if (!url.startsWith("http://") && !url.startsWith("https://")) {
+    const config = await getConfig();
+    const base = config.apiUrl ? config.apiUrl.replace(/\/index\.php.*$/, "") : "https://fibretrack.mantota.com/api";
+    url = `${base.replace(/\/+$/, "")}/${url.replace(/^\/+/, "")}`;
+  }
+
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(`Échec HTTP ${res.status} lors de la récupération du média`);
+  }
+  const blob = await res.blob();
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  const base64 = typeof btoa !== "undefined" ? btoa(binary) : Buffer.from(binary, "binary").toString("base64");
+  const mimeType = blob.type || "image/jpeg";
+  return `data:${mimeType};base64,${base64}`;
+}
+
+// Vérification légère de mise à jour d'intervention en cours (Live update)
+async function checkForUpdates(id, lastKnownUpdatedAt = null) {
+  if (!id) throw new Error("ID manquant pour vérification");
+  const config = await getConfig();
+  const url = formatApiActionUrl(config.apiUrl, "intervention_updated_at");
+
+  const res = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+    headers: getAuthHeaders(config.apiCode),
+    body: JSON.stringify({ id: String(id) }),
+  });
+
+  if (!res.ok) {
+    let msg = `Erreur HTTP ${res.status}`;
+    try {
+      const j = await res.json();
+      if (j.error) msg = j.error;
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const json = await res.json();
+  const serverUpdatedAt = json?.updated_at || "";
+  const serverTime = parseTimestampSafely(serverUpdatedAt);
+  const localTime = parseTimestampSafely(lastKnownUpdatedAt);
+  const hasChanged = !lastKnownUpdatedAt || (serverTime > 0 && localTime > 0 ? serverTime > localTime : (serverUpdatedAt && serverUpdatedAt !== lastKnownUpdatedAt));
+  let freshItem = null;
+
+  if (hasChanged) {
+    freshItem = await fetchInterventionDetails(id, true);
+    await chrome.storage.local.set({ activeIntervention: freshItem });
+    broadcastActiveIntervention(freshItem);
+  }
+
+  return {
+    hasChanged,
+    updated_at: serverUpdatedAt,
+    item: freshItem,
+  };
 }
 
 // Routeur de messages inter-processus (Content Script <-> Popup <-> Background)
@@ -229,45 +360,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "FETCH_INTERVENTIONS":
-      fetchInterventionsList()
+      fetchInterventionsList(Boolean(payload?.forceFresh))
         .then((list) => sendResponse({ ok: true, data: list }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
 
     case "FETCH_INTERVENTION_DETAILS":
-      fetchInterventionDetails(payload?.id)
+      fetchInterventionDetails(payload?.id, Boolean(payload?.forceFresh))
         .then((item) => sendResponse({ ok: true, data: item }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "FETCH_MEDIA":
+      fetchMediaAsDataUrl(payload?.url)
+        .then((dataUrl) => sendResponse({ ok: true, dataUrl }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "CHECK_FOR_UPDATES":
+      checkForUpdates(payload?.id, payload?.lastUpdatedAt)
+        .then((result) => sendResponse({ ok: true, data: result }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+
+    case "BROADCAST_ACTIVE_INTERVENTION":
+      broadcastActiveIntervention(payload, sender?.tab?.id);
+      sendResponse({ ok: true });
       return true;
 
     case "SET_ACTIVE_INTERVENTION":
       chrome.storage.local
         .set({ activeIntervention: payload })
         .then(() => {
-          // Notifier les onglets ouverts sans réémettre vers l'onglet qui a initié l'action
-          const targetUrls = [
-            "*://celpros.celtiis.bj/*",
-            "*://fatautomation.celtiis.bj/*",
-            "http://localhost/*",
-            "http://127.0.0.1/*",
-            "file:///*",
-          ];
-          chrome.tabs.query({ url: targetUrls }, (tabs) => {
-            const senderTabId = sender?.tab?.id;
-            tabs.forEach((tab) => {
-              if (tab.id && tab.id !== senderTabId) {
-                chrome.tabs.sendMessage(tab.id, {
-                  action: "ACTIVE_INTERVENTION_UPDATED",
-                  payload,
-                }, () => {
-                  // Consomme systématiquement chrome.runtime.lastError pour éviter tout avertissement non intercepté
-                  if (chrome.runtime.lastError) {
-                    /* onglet sans content script actif, ignoré en toute sécurité */
-                  }
-                });
-              }
-            });
-          });
+          broadcastActiveIntervention(payload, sender?.tab?.id);
           sendResponse({ ok: true });
         })
         .catch((err) => sendResponse({ ok: false, error: err.message }));
@@ -285,3 +410,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return false;
   }
 });
+
+// Alarmes chrome pour réveil et synchronisation périodique en tâche de fond (Manifest V3)
+if (typeof chrome !== "undefined" && chrome.alarms) {
+  chrome.alarms.get("CELPROS_SYNC_ALARM", (alarm) => {
+    if (!alarm) {
+      chrome.alarms.create("CELPROS_SYNC_ALARM", { periodInMinutes: 1 });
+    }
+  });
+
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === "CELPROS_SYNC_ALARM") {
+      try {
+        const config = await getConfig();
+        if (config.autoSync && config.activeIntervention && config.activeIntervention.id) {
+          const current = config.activeIntervention;
+          await checkForUpdates(current.id, current.updated_at || current.modifie_le);
+        }
+      } catch (err) {
+        console.warn("[CelPros SW Alarm] Erreur sync périodique:", err.message);
+      }
+    }
+  });
+}

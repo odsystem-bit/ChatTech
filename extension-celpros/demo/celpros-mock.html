@@ -332,26 +332,80 @@
         </div>
       </div>
 
-      <!-- 4bis. PHOTOS & JUSTIFICATIFS TERRAIN -->
+      <!-- 4bis. PHOTOS & JUSTIFICATIFS TERRAIN (Étape 4 - Câbles, FAT, Mesures & Autres) -->
       <div class="form-section">
-        <div class="section-title">4bis. Photos &amp; Justificatifs Terrain</div>
+        <div class="section-title">4bis. Photos &amp; Justificatifs Terrain (Étape 4 Branchement &amp; Mesures)</div>
         <div class="row">
           <div class="col">
-            <label>Photo numéro de série ONT</label>
-            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 16px; text-align: center; background: #fafafa;">
-              <input type="file" name="photoOnt" accept="image/*" />
+            <label for="field_photoCableInterne">Image du câble interne</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoCableInterne" name="photoCableInterne" formcontrolname="photoCableInterne" accept="image/*" />
             </div>
           </div>
           <div class="col">
-            <label>Image FAT</label>
-            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 16px; text-align: center; background: #fafafa;">
-              <input type="file" name="photoFat" accept="image/*" />
+            <label for="field_photoCableExterne">Image du câble externe</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoCableExterne" name="photoCableExterne" formcontrolname="photoCableExterne" accept="image/*" />
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_photoFat">Boîtier FAT</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoFat" name="photoFat" formcontrolname="photoFat" accept="image/*" />
             </div>
           </div>
           <div class="col">
-            <label>Photo du contrat client</label>
-            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 16px; text-align: center; background: #fafafa;">
-              <input type="file" name="photoContrat" accept="image/*" />
+            <label for="field_photoScanFat">Scan QR Code FAT</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoScanFat" name="photoScanFat" formcontrolname="photoScanFat" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label for="field_photoFibreFat">Fibre dans le FAT</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoFibreFat" name="photoFibreFat" formcontrolname="photoFibreFat" accept="image/*" />
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_photoMesureFat">Mesure optique FAT</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoMesureFat" name="photoMesureFat" formcontrolname="photoMesureFat" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label for="field_photoMesurePto">Mesure optique PTO</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoMesurePto" name="photoMesurePto" formcontrolname="photoMesurePto" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label for="field_photoOnt">Photo numéro de série</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoOnt" name="photoOnt" formcontrolname="photoOnt" accept="image/*" />
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col">
+            <label for="field_photoDebitCable">Photo test débit câble</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoDebitCable" name="photoDebitCable" formcontrolname="photoDebitCable" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label for="field_photoDebitWifi">Photo test débit Wifi</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoDebitWifi" name="photoDebitWifi" formcontrolname="photoDebitWifi" accept="image/*" />
+            </div>
+          </div>
+          <div class="col">
+            <label for="field_photoContrat">Photo du contrat client</label>
+            <div class="upload-box" style="border: 2px dashed #cbd5e1; border-radius: 6px; padding: 14px; text-align: center; background: #fafafa;">
+              <input type="file" id="field_photoContrat" name="photoContrat" formcontrolname="photoContrat" accept="image/*" />
             </div>
           </div>
         </div>

@@ -12,6 +12,20 @@ export function getApiCode() {
     if (typeof localStorage !== "undefined") {
       const stored = localStorage.getItem(CODE_STORAGE_KEY);
       if (stored) return stored;
+      const accountRaw = localStorage.getItem(STORAGE_KEY);
+      if (accountRaw) {
+        try {
+          const parsed = JSON.parse(accountRaw);
+          if (parsed?.code) {
+            localStorage.setItem(CODE_STORAGE_KEY, String(parsed.code));
+            return String(parsed.code);
+          }
+          if (parsed?.isAdmin || parsed?.id === "admin" || parsed?.nom === "ADMIN") {
+            localStorage.setItem(CODE_STORAGE_KEY, "9999");
+            return "9999";
+          }
+        } catch {}
+      }
     }
     if (typeof sessionStorage !== "undefined") {
       const sessionStored = sessionStorage.getItem(CODE_STORAGE_KEY);
@@ -81,10 +95,11 @@ export async function validateCode(code) {
 
 export function setCurrentAccount(account) {
   if (!account) return;
-  const { code, ...accountDetails } = account;
+  const isAdmin = account.isAdmin || account.id === "admin" || account.nom === "ADMIN";
+  const code = account.code || (isAdmin ? "9999" : "");
   try {
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(accountDetails));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...account, ...(code ? { code } : {}) }));
       if (code) {
         localStorage.setItem(CODE_STORAGE_KEY, String(code));
       }
@@ -99,13 +114,18 @@ export function setCurrentAccount(account) {
 
 export function getCurrentAccount() {
   try {
-    const code = getApiCode();
-    if (!code) return null;
     if (typeof localStorage === "undefined") return null;
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const account = JSON.parse(raw);
     if (!account) return null;
+    const isAdmin = account.isAdmin || account.id === "admin" || account.nom === "ADMIN";
+    let code = getApiCode() || account.code;
+    if (!code && isAdmin) {
+      code = "9999";
+      localStorage.setItem(CODE_STORAGE_KEY, "9999");
+    }
+    if (!code) return null;
     return { ...account, code };
   } catch {
     return null;

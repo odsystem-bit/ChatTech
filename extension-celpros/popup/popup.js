@@ -78,7 +78,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       clean = `${clean}/index.php`;
     }
     const sep = clean.includes("?") ? "&" : "?";
-    return `${clean}${sep}action=${encodeURIComponent(action)}`;
+    return `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
   }
 
   function renderActiveIntervention(d) {
@@ -164,28 +164,51 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadInterventions();
 
   // 3. Charger la liste des interventions depuis l'API ou le cache local
-  async function loadInterventions() {
+  async function loadInterventions(forceFresh = false) {
     if (popupInterventionSelect) popupInterventionSelect.disabled = true;
 
-    const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
-    const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
-    const url = formatApiActionUrl(apiUrl, "interventions_list_light");
-
     let list = null;
-    try {
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiCode ? { "X-User-Code": apiCode } : {}),
-        },
-      });
 
-      if (res.ok) {
-        list = await res.json();
+    // Délégation prioritaire au service worker si disponible
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const resp = await new Promise((resolve) => {
+          chrome.runtime.sendMessage({ action: "FETCH_INTERVENTIONS", payload: { forceFresh } }, (res) => {
+            if (chrome.runtime.lastError) return resolve(null);
+            resolve(res);
+          });
+        });
+        if (resp && resp.ok && Array.isArray(resp.data)) {
+          list = resp.data;
+        }
+      } catch {}
+    }
+
+    // Fallback fetch direct avec en-têtes no-cache
+    if (!list) {
+      const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
+      const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
+      const url = formatApiActionUrl(apiUrl, "interventions_list_light");
+
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            ...(apiCode ? { "X-User-Code": apiCode } : {}),
+          },
+        });
+
+        if (res.ok) {
+          list = await res.json();
+        }
+      } catch (netErr) {
+        console.warn("[CelPros Popup] Échec fetch direct des interventions, utilisation du cache:", netErr);
       }
-    } catch (netErr) {
-      console.warn("[CelPros Popup] Échec fetch direct des interventions, utilisation du cache:", netErr);
     }
 
     if (!Array.isArray(list) || list.length === 0) {
@@ -358,30 +381,54 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  async function selectInterventionById(id) {
+  async function selectInterventionById(id, forceFresh = false) {
     if (!id) return;
     showMessage("Chargement des détails...", "success");
 
     let item = null;
-    const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
-    const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
-    const url = formatApiActionUrl(apiUrl, "intervention_get");
 
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiCode ? { "X-User-Code": apiCode } : {}),
-        },
-        body: JSON.stringify({ id: String(id) }),
-      });
+    if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+      try {
+        const resp = await new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { action: "FETCH_INTERVENTION_DETAILS", payload: { id: String(id), forceFresh } },
+            (res) => {
+              if (chrome.runtime.lastError) return resolve(null);
+              resolve(res);
+            }
+          );
+        });
+        if (resp && resp.ok && resp.data) {
+          item = resp.data;
+        }
+      } catch {}
+    }
 
-      if (res.ok) {
-        item = await res.json();
+    if (!item) {
+      const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
+      const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
+      const url = formatApiActionUrl(apiUrl, "intervention_get");
+
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          cache: "no-store",
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            ...(apiCode ? { "X-User-Code": apiCode } : {}),
+          },
+          body: JSON.stringify({ id: String(id) }),
+        });
+
+        if (res.ok) {
+          item = await res.json();
+        }
+      } catch (e) {
+        console.warn("[CelPros Popup] Erreur fetch détails:", e);
       }
-    } catch (e) {
-      console.warn("[CelPros Popup] Erreur fetch détails:", e);
     }
 
     if (!item || !item.id) {
@@ -413,9 +460,12 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Événements pour le sélecteur d'intervention du popup
   if (popupBtnRefresh) {
-    popupBtnRefresh.addEventListener("click", () => {
-      loadInterventions();
-      showMessage("Actualisation de la liste...");
+    popupBtnRefresh.addEventListener("click", async () => {
+      showMessage("Actualisation forcée...");
+      await loadInterventions(true);
+      if (activeInterventionData && activeInterventionData.id) {
+        await selectInterventionById(activeInterventionData.id, true);
+      }
     });
   }
 

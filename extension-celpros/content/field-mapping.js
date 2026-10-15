@@ -105,6 +105,667 @@
     return { ...point, lat, lng };
   }
 
+  // ----------------------------------------------------
+
+  // Helper pour extraire une description complète d'une photo de FibreTrack
+  function getPhotoDescription(p) {
+    if (!p || typeof p !== "object") return "";
+    return [
+      p.slot,
+      p.name,
+      p.nom,
+      p.title,
+      p.titre,
+      p.type,
+      p.sous_type,
+      p.label,
+      p.caption,
+      p.description,
+      p.lieu,
+      p.proprietaire,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+  }
+
+  // Helper pour récupérer l'URL ou dataURL d'une photo
+  function getPhotoSource(p) {
+    if (!p) return null;
+    if (typeof p === "string" && (p.startsWith("data:") || p.startsWith("http") || p.startsWith("uploads/"))) {
+      return p;
+    }
+    if (typeof p === "object") {
+      const src = p.url || p.photo || p.src || p.dataUrl || p.file_path || p.path;
+      if (typeof src === "string" && src.length > 10) return src;
+    }
+    return null;
+  }
+
+  // Vérifie si une photo doit être rigoureusement exclue de l'injection CelPros
+  function isExcludedFromCelpros(p) {
+    if (!p) return true;
+    if (p.additionnelle === true || p.is_additionnelle === true || p.exclude_celpros === true) return true;
+    if (p.slot === "additionnelle" || p.type === "additionnelle" || p.category === "additionnelle") return true;
+    const desc = getPhotoDescription(p);
+    if (desc.includes("additionnelle")) return true;
+    return false;
+  }
+
+  function getEligibleWhatsappPhotos(data) {
+    const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    return wa.filter((p) => !isExcludedFromCelpros(p));
+  }
+
+  // Référentiel centralisé des photographies CelPros / FibreTrack
+  // Définit précisément : Source FibreTrack, Clé ChapTech, Cible CelPros,
+  // Étape (1-5), Catégorie, Règles d'exclusion et Comportement en cas d'absence.
+  // ----------------------------------------------------
+  const CELPROS_PHOTO_SLOTS = [
+    {
+      key: "cable_interne",
+      label: "Entrée câble interne",
+      celprosLabel: "Image du câble interne",
+      step: 4,
+      category: "Câblage & Entrée",
+      ftSource: "whatsapp_photos[slot=cable_interne]",
+      attrPatterns: [
+        /^field_?(photo_?)?cable_?interne/i,
+        /^photo_?cable_?interne/i,
+        /^image_?cable_?interne/i,
+        /^cable_?interne/i,
+        /^entree_?cable_?interne/i,
+      ],
+      keywords: [
+        "image du cable interne",
+        "image entree cable interne",
+        "entree cable interne",
+        "image cable interne",
+        "cable interne",
+        "penetration cable interne",
+      ],
+      labelKeywords: [
+        "image du cable interne",
+        "image entree cable interne",
+        "entree cable interne",
+        "image cable interne",
+        "cable interne",
+        "penetration cable interne",
+      ],
+      negativeKeywords: ["externe", "fat", "mesure", "scan", "debit", "wifi", "combine", "contrat", "pto"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const match = wa.find((p) => getPhotoSource(p) && (p.slot === "cable_interne" || p.type === "cable_interne"));
+        if (match) return { src: getPhotoSource(match), name: "cable_interne.jpg", slot: "cable_interne" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(cable[-_ ]*interne|entr[eé]e[-_ ]*c[aâ]ble[-_ ]*interne)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "cable_interne.jpg", slot: "cable_interne" };
+        return null;
+      },
+    },
+    {
+      key: "cable_externe",
+      label: "Entrée câble externe",
+      celprosLabel: "Image du câble externe",
+      step: 4,
+      category: "Câblage & Entrée",
+      ftSource: "whatsapp_photos[slot=cable_externe]",
+      attrPatterns: [
+        /^field_?(photo_?)?cable_?externe/i,
+        /^photo_?cable_?externe/i,
+        /^image_?cable_?externe/i,
+        /^cable_?externe/i,
+        /^entree_?cable_?externe/i,
+      ],
+      keywords: [
+        "image du cable externe",
+        "image entree cable externe",
+        "entree cable externe",
+        "image cable externe",
+        "cable externe",
+        "facade cable externe",
+      ],
+      labelKeywords: [
+        "image du cable externe",
+        "image entree cable externe",
+        "entree cable externe",
+        "image cable externe",
+        "cable externe",
+        "facade cable externe",
+      ],
+      negativeKeywords: ["interne", "fat", "mesure", "scan", "debit", "wifi", "combine", "contrat", "pto"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const match = wa.find((p) => getPhotoSource(p) && (p.slot === "cable_externe" || p.type === "cable_externe"));
+        if (match) return { src: getPhotoSource(match), name: "cable_externe.jpg", slot: "cable_externe" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(cable[-_ ]*externe|entr[eé]e[-_ ]*c[aâ]ble[-_ ]*externe)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "cable_externe.jpg", slot: "cable_externe" };
+        return null;
+      },
+    },
+    {
+      key: "autre_poteau",
+      label: "Autre poteau",
+      celprosLabel: "Autre poteau",
+      step: 4,
+      category: "Poteaux & Appuis",
+      ftSource: "whatsapp_photos[slot=autre_poteau]",
+      attrPatterns: [
+        /^field_?(photo_?)?autre_?poteau/i,
+        /^photo_?autre_?poteau/i,
+        /^image_?autre_?poteau/i,
+        /^autre_?poteau/i,
+        /^autre_?support/i,
+      ],
+      keywords: [
+        "autre poteau",
+        "image autre poteau",
+        "photo autre poteau",
+        "autre support",
+        "materiel poteau",
+        "materiel poto",
+      ],
+      labelKeywords: [
+        "autre poteau",
+        "image autre poteau",
+        "photo autre poteau",
+        "autre support",
+        "materiel poteau",
+      ],
+      negativeKeywords: ["cable", "interne", "externe", "fat", "pto", "mesure", "debit", "wifi", "combine", "contrat"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "autre_poteau" || p.type === "autre_poteau"));
+        if (direct) return { src: getPhotoSource(direct), name: "autre_poteau.jpg", slot: "autre_poteau" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(autre[-_ ]*poteau|autre[-_ ]*support)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "autre_poteau.jpg", slot: "autre_poteau" };
+        return null;
+      },
+    },
+    {
+      key: "fat",
+      label: "Boîtier FAT",
+      celprosLabel: "Image FAT",
+      step: 4,
+      category: "Réseau FAT / PBO",
+      ftSource: "whatsapp_photos[slot=fat] / points_gps[type=FAT]",
+      attrPatterns: [
+        /^field_?(photo_?)?fat$/i,
+        /^photo_?fat$/i,
+        /^image_?fat$/i,
+        /^boitier_?fat$/i,
+      ],
+      keywords: [
+        "image boitier fat",
+        "photo boitier fat",
+        "boitier fat",
+        "image fat",
+        "photo fat",
+        "pbo",
+      ],
+      labelKeywords: [
+        "image fat",
+        "photo fat",
+        "boitier fat",
+        "image boitier fat",
+        "photo boitier fat",
+        "pbo",
+      ],
+      negativeKeywords: ["scan", "mesure", "fibre", "puissance", "photometre", "cable", "interne", "externe", "pto", "wifi", "debit"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "fat" || p.type === "fat"));
+        if (direct) return { src: getPhotoSource(direct), name: "fat.jpg", slot: "fat" };
+        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const fatPt = pts.find((p) => p && normalizeText(p.type) === "fat" && getPhotoSource(p.photo));
+        if (fatPt) return { src: getPhotoSource(fatPt.photo), name: "fat_raccordement.jpg", slot: "fat" };
+        const legacy = wa.find((p) => {
+          const src = getPhotoSource(p);
+          const title = String(p.name || p.nom || p.label || "");
+          if (!src || !title) return false;
+          return /^(fat|boitier[-_ ]*fat)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(title.trim()) &&
+            !/mesure|fibre|scan|cable|puissance/i.test(title) &&
+            !/mesure|fibre|scan|cable|puissance/i.test(p.slot || "");
+        });
+        if (legacy) return { src: getPhotoSource(legacy), name: "fat.jpg", slot: "fat" };
+        return null;
+      },
+    },
+    {
+      key: "scan_fat",
+      label: "image scan fat",
+      celprosLabel: "Image scan FAT",
+      step: 4,
+      category: "Réseau FAT / PBO",
+      ftSource: "whatsapp_photos[slot=scan_fat]",
+      attrPatterns: [
+        /^field_?(photo_?)?scan_?fat/i,
+        /^photo_?scan_?fat/i,
+        /^image_?scan_?fat/i,
+        /^scan_?fat/i,
+        /^code_?barre_?fat/i,
+      ],
+      keywords: [
+        "image scan fat",
+        "scan fat",
+        "code barre fat",
+        "code barres fat",
+        "etiquette fat",
+        "barcode fat",
+      ],
+      labelKeywords: [
+        "image scan fat",
+        "scan fat",
+        "code barre fat",
+        "code barres fat",
+        "etiquette fat",
+        "barcode fat",
+      ],
+      negativeKeywords: ["mesure", "fibre", "puissance", "photometre", "cable", "pto"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "scan_fat" || p.type === "scan_fat"));
+        if (direct) return { src: getPhotoSource(direct), name: "scan_fat.jpg", slot: "scan_fat" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(image[-_ ]*scan[-_ ]*fat|scan[-_ ]*fat|code[-_ ]*barres?[-_ ]*fat)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "scan_fat.jpg", slot: "scan_fat" };
+        return null;
+      },
+    },
+    {
+      key: "fibre_fat",
+      label: "Fibre au FAT",
+      celprosLabel: "Image fibre au FAT",
+      step: 4,
+      category: "Réseau FAT / PBO",
+      ftSource: "whatsapp_photos[slot=fibre_fat]",
+      attrPatterns: [
+        /^field_?(photo_?)?fibre_?fat/i,
+        /^photo_?fibre_?fat/i,
+        /^image_?fibre_?fat/i,
+        /^fibre_?fat/i,
+        /^fibre_?au_?fat/i,
+      ],
+      keywords: [
+        "image fibre au fat",
+        "image fibre fat",
+        "fibre au fat",
+        "fibre fat",
+        "raccordement fibre fat",
+      ],
+      labelKeywords: [
+        "image fibre au fat",
+        "image fibre fat",
+        "fibre au fat",
+        "fibre fat",
+        "raccordement fibre fat",
+      ],
+      negativeKeywords: ["scan", "mesure", "puissance", "photometre", "cable", "pto"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "fibre_fat" || p.type === "fibre_fat"));
+        if (direct) return { src: getPhotoSource(direct), name: "fibre_fat.jpg", slot: "fibre_fat" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(fibre[-_ ]*fat|fibre[-_ ]*au[-_ ]*fat)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "fibre_fat.jpg", slot: "fibre_fat" };
+        return null;
+      },
+    },
+    {
+      key: "mesure_fat",
+      label: "Mesure puissance au FAT",
+      celprosLabel: "Image mesure au FAT",
+      step: 4,
+      category: "Mesures Optiques",
+      ftSource: "whatsapp_photos[slot=mesure_fat]",
+      attrPatterns: [
+        /^field_?(photo_?)?mesure_?fat/i,
+        /^photo_?mesure_?fat/i,
+        /^image_?mesure_?fat/i,
+        /^mesure_?fat/i,
+        /^puissance_?fat/i,
+      ],
+      keywords: [
+        "image mesure au fat",
+        "image mesure fat",
+        "mesure au fat",
+        "mesure fat",
+        "photometre fat",
+        "puissance fat",
+        "valeur au fat",
+      ],
+      labelKeywords: [
+        "image mesure au fat",
+        "image mesure fat",
+        "mesure au fat",
+        "mesure fat",
+        "photometre fat",
+        "puissance fat",
+        "valeur au fat",
+      ],
+      negativeKeywords: ["pto", "scan", "cable", "wifi", "debit", "combine"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "mesure_fat" || p.type === "mesure_fat"));
+        if (direct) return { src: getPhotoSource(direct), name: "mesure_fat.jpg", slot: "mesure_fat" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(mesure[-_ ]*fat|puissance[-_ ]*fat|photometre[-_ ]*fat)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()) && !/pto/i.test(p.name || p.nom || p.label || ""));
+        if (legacy) return { src: getPhotoSource(legacy), name: "mesure_fat.jpg", slot: "mesure_fat" };
+        return null;
+      },
+    },
+    {
+      key: "mesure_pto",
+      label: "Mesure puissance au PTO",
+      celprosLabel: "Image mesure au PTO",
+      step: 4,
+      category: "Mesures Optiques",
+      ftSource: "whatsapp_photos[slot=mesure_pto]",
+      attrPatterns: [
+        /^field_?(photo_?)?mesure_?pto/i,
+        /^photo_?mesure_?pto/i,
+        /^image_?mesure_?pto/i,
+        /^mesure_?pto/i,
+        /^puissance_?pto/i,
+      ],
+      keywords: [
+        "image mesure au pto",
+        "image mesure pto",
+        "mesure au pto",
+        "mesure pto",
+        "photometre pto",
+        "puissance pto",
+        "valeur au pto",
+      ],
+      labelKeywords: [
+        "image mesure au pto",
+        "image mesure pto",
+        "mesure au pto",
+        "mesure pto",
+        "photometre pto",
+        "puissance pto",
+        "valeur au pto",
+      ],
+      negativeKeywords: ["fat", "scan", "cable", "wifi", "debit", "combine"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "mesure_pto" || p.type === "mesure_pto"));
+        if (direct) return { src: getPhotoSource(direct), name: "mesure_pto.jpg", slot: "mesure_pto" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(mesure[-_ ]*pto|puissance[-_ ]*pto|photometre[-_ ]*pto)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()) && !/fat/i.test(p.name || p.nom || p.label || ""));
+        if (legacy) return { src: getPhotoSource(legacy), name: "mesure_pto.jpg", slot: "mesure_pto" };
+        return null;
+      },
+    },
+    {
+      key: "ont_sn",
+      label: "Photo numéro de série",
+      celprosLabel: "Photo numéro de série",
+      step: 2,
+      category: "Équipements Client",
+      ftSource: "whatsapp_photos[slot=ont_sn] / points_gps[type=Abonné/ONT]",
+      attrPatterns: [
+        /^field_?(photo_?)?(ont_?sn|sn_?ont|ont|sn)$/i,
+        /^field_?(photo_?)?numero_?de_?serie/i,
+        /^field_?(photo_?)?numero_?serie/i,
+        /^photo_?numero_?de_?serie/i,
+        /^photo_?numero_?serie/i,
+        /^photo_?ont/i,
+        /^photo_?sn/i,
+        /^image_?ont/i,
+        /^etiquette_?ont/i,
+      ],
+      keywords: [
+        "photo numero de serie",
+        "photo numero serie",
+        "photo numero de serie ont",
+        "photo numero serie ont",
+        "numero de serie ont",
+        "photo sn ont",
+        "photo sn",
+        "sn ont",
+        "etiquette ont",
+        "etiquette box ont",
+        "box ont",
+        "photo ont",
+        "numero de serie",
+      ],
+      labelKeywords: [
+        "photo numero de serie",
+        "photo numero serie",
+        "photo numero de serie ont",
+        "photo numero serie ont",
+        "numero de serie ont",
+        "photo sn ont",
+        "photo sn",
+        "sn ont",
+        "etiquette ont",
+        "etiquette box ont",
+        "box ont",
+        "photo ont",
+        "numero de serie",
+      ],
+      negativeKeywords: ["fat", "pto", "mesure", "cable", "debit", "wifi", "combine", "contrat"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "ont_sn" || p.type === "ont_sn"));
+        if (direct) return { src: getPhotoSource(direct), name: "ont_sn.jpg", slot: "ont_sn" };
+        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const abonne = pts.find((p) => p && (normalizeText(p.type).includes("abonne") || normalizeText(p.type).includes("ont")) && getPhotoSource(p.photo));
+        if (abonne) return { src: getPhotoSource(abonne.photo), name: "ont_sn.jpg", slot: "ont_sn" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(ont|box|sn[-_ ]*ont|etiquette[-_ ]*ont|photo[-_ ]*numero[-_ ]*de[-_ ]*serie|numero[-_ ]*de[-_ ]*serie)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "ont_sn.jpg", slot: "ont_sn" };
+        return null;
+      },
+    },
+    {
+      key: "debit_cable",
+      label: "Test débit câble RJ45",
+      celprosLabel: "Image test débit câble",
+      step: 3,
+      category: "Tests de Services",
+      ftSource: "whatsapp_photos[slot=debit_cable]",
+      attrPatterns: [
+        /^field_?(photo_?)?debit_?cable/i,
+        /^photo_?debit_?cable/i,
+        /^image_?debit_?cable/i,
+        /^debit_?cable/i,
+        /^test_?debit_?cable/i,
+      ],
+      keywords: [
+        "image test debit cable",
+        "test debit cable",
+        "debit cable",
+        "speedtest cable",
+        "test debit rj45",
+        "debit rj45",
+        "test debit ethernet",
+      ],
+      labelKeywords: [
+        "image test debit cable",
+        "test debit cable",
+        "debit cable",
+        "speedtest cable",
+        "test debit rj45",
+        "debit rj45",
+        "test debit ethernet",
+      ],
+      negativeKeywords: ["wifi", "fat", "pto", "mesure", "combine", "contrat"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "debit_cable" || p.type === "debit_cable"));
+        if (direct) return { src: getPhotoSource(direct), name: "test_debit_cable.jpg", slot: "debit_cable" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(debit[-_ ]*cable|test[-_ ]*debit[-_ ]*cable|speedtest[-_ ]*cable)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()) && !/wifi/i.test(p.name || p.nom || p.label || ""));
+        if (legacy) return { src: getPhotoSource(legacy), name: "test_debit_cable.jpg", slot: "debit_cable" };
+        return null;
+      },
+    },
+    {
+      key: "debit_wifi",
+      label: "Test débit Wi-Fi",
+      celprosLabel: "Image test débit Wifi",
+      step: 3,
+      category: "Tests de Services",
+      ftSource: "whatsapp_photos[slot=debit_wifi]",
+      attrPatterns: [
+        /^field_?(photo_?)?debit_?wifi/i,
+        /^photo_?debit_?wifi/i,
+        /^image_?debit_?wifi/i,
+        /^debit_?wifi/i,
+        /^test_?debit_?wifi/i,
+      ],
+      keywords: [
+        "image test debit wifi",
+        "test debit wifi",
+        "debit wifi",
+        "speedtest wifi",
+        "test wifi",
+      ],
+      labelKeywords: [
+        "image test debit wifi",
+        "test debit wifi",
+        "debit wifi",
+        "speedtest wifi",
+        "test wifi",
+      ],
+      negativeKeywords: ["cable", "rj45", "ethernet", "fat", "pto", "mesure", "combine", "contrat"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "debit_wifi" || p.type === "debit_wifi"));
+        if (direct) return { src: getPhotoSource(direct), name: "test_debit_wifi.jpg", slot: "debit_wifi" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(debit[-_ ]*wifi|test[-_ ]*debit[-_ ]*wifi|speedtest[-_ ]*wifi)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()) && !/cable/i.test(p.name || p.nom || p.label || ""));
+        if (legacy) return { src: getPhotoSource(legacy), name: "test_debit_wifi.jpg", slot: "debit_wifi" };
+        return null;
+      },
+    },
+    {
+      key: "combine",
+      label: "Combiné téléphonique",
+      celprosLabel: "Image combiné",
+      step: 3,
+      category: "Tests de Services",
+      ftSource: "whatsapp_photos[slot=combine]",
+      attrPatterns: [
+        /^field_?(photo_?)?combine$/i,
+        /^photo_?combine$/i,
+        /^image_?combine$/i,
+        /^combine$/i,
+      ],
+      keywords: [
+        "image combine",
+        "photo combine",
+        "combine",
+        "telephone fixe",
+      ],
+      labelKeywords: [
+        "image combine",
+        "photo combine",
+        "combine",
+        "telephone fixe",
+      ],
+      negativeKeywords: ["fiche", "fat", "pto", "mesure", "debit", "wifi", "contrat"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "combine" || p.type === "combine"));
+        if (direct) return { src: getPhotoSource(direct), name: "combine.jpg", slot: "combine" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(combine|photo[-_ ]*combine|telephone)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()) && !/fiche/i.test(p.name || p.nom || p.label || ""));
+        if (legacy) return { src: getPhotoSource(legacy), name: "combine.jpg", slot: "combine" };
+        return null;
+      },
+    },
+    {
+      key: "fiche_combine",
+      label: "Fiche combiné",
+      celprosLabel: "Image fiche combiné",
+      step: 3,
+      category: "Tests de Services",
+      ftSource: "whatsapp_photos[slot=fiche_combine]",
+      attrPatterns: [
+        /^field_?(photo_?)?fiche_?combine/i,
+        /^photo_?fiche_?combine/i,
+        /^image_?fiche_?combine/i,
+        /^fiche_?combine/i,
+      ],
+      keywords: [
+        "image fiche combine",
+        "photo fiche combine",
+        "fiche combine",
+        "prise combine",
+        "fiche raccordement",
+      ],
+      labelKeywords: [
+        "image fiche combine",
+        "photo fiche combine",
+        "fiche combine",
+        "prise combine",
+        "fiche raccordement",
+      ],
+      negativeKeywords: ["fat", "pto", "mesure", "debit", "wifi", "contrat"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "fiche_combine" || p.type === "fiche_combine"));
+        if (direct) return { src: getPhotoSource(direct), name: "fiche_combine.jpg", slot: "fiche_combine" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(fiche[-_ ]*combine|prise[-_ ]*combine|fiche[-_ ]*raccordement)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "fiche_combine.jpg", slot: "fiche_combine" };
+        return null;
+      },
+    },
+    {
+      key: "contrat_client",
+      label: "Photo contrat client",
+      celprosLabel: "Photo du contrat client",
+      step: 5,
+      category: "Clôture & Signature",
+      ftSource: "signature_client / whatsapp_photos[slot=contrat_client]",
+      attrPatterns: [
+        /^field_?(photo_?)?contrat/i,
+        /^photo_?contrat/i,
+        /^image_?contrat/i,
+        /^contrat_?client/i,
+        /^signature_?rapport/i,
+      ],
+      keywords: [
+        "photo du contrat client",
+        "photo contrat client",
+        "photo contrat",
+        "contrat client",
+        "signature du rapport",
+        "photo fiche d'intervention signee",
+        "contrat",
+      ],
+      labelKeywords: [
+        "photo du contrat client",
+        "photo contrat client",
+        "photo contrat",
+        "contrat client",
+        "signature du rapport",
+        "photo fiche d'intervention signee",
+        "contrat",
+      ],
+      negativeKeywords: ["fat", "pto", "mesure", "debit", "wifi", "combine", "cable"],
+      onAbsent: "leave_empty_and_warn",
+      getPhoto: (data) => {
+        if (data?.signature_client && typeof data.signature_client === "string" && data.signature_client.trim().length > 100) {
+          return { src: data.signature_client, name: "signature_client.png", slot: "contrat_client" };
+        }
+        const wa = getEligibleWhatsappPhotos(data);
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "contrat_client" || p.type === "contrat_client"));
+        if (direct) return { src: getPhotoSource(direct), name: "contrat_signe.jpg", slot: "contrat_client" };
+        const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(contrat|signature|contrat[-_ ]*client)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
+        if (legacy) return { src: getPhotoSource(legacy), name: "contrat_signe.jpg", slot: "contrat_client" };
+        return null;
+      },
+    },
+  ];
+
   // Dictionnaire de correspondances pour tous les champs d'intervention
   const FIELD_DEFINITIONS = {
     // ----------------------------------------------------
@@ -112,6 +773,11 @@
     // ----------------------------------------------------
     nom_client: {
       key: "nom_client",
+      step: 1,
+      ftSource: "nom_client / nom_dossier",
+      celprosTarget: "Nom du client",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["technicien","equipe","msan","fat","pto"],
       label: "Nom du client",
       category: "Client",
       type: "text",
@@ -143,6 +809,11 @@
 
     adresse_zone: {
       key: "adresse_zone",
+      step: 1,
+      ftSource: "adresse_zone",
+      celprosTarget: "Adresse / Zone",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["msan","fat","pto"],
       label: "Adresse / Zone",
       category: "Client",
       type: "text",
@@ -173,6 +844,11 @@
 
     telephone_ligne: {
       key: "telephone_ligne",
+      step: 1,
+      ftSource: "telephone_ligne",
+      celprosTarget: "Téléphone ligne (fixe)",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["mobile","gsm","cellulaire","portable","whatsapp"],
       label: "Téléphone ligne",
       category: "Client",
       type: "text",
@@ -200,6 +876,11 @@
 
     mobile: {
       key: "mobile",
+      step: 1,
+      ftSource: "mobile",
+      celprosTarget: "Mobile / Contact",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["fixe","ligne"],
       label: "Mobile / Contact",
       category: "Client",
       type: "text",
@@ -235,6 +916,11 @@
 
     offre_souscrite: {
       key: "offre_souscrite",
+      step: 1,
+      ftSource: "offre_souscrite",
+      celprosTarget: "Offre souscrite",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Offre souscrite",
       category: "Client",
       type: "select",
@@ -266,6 +952,11 @@
     // ----------------------------------------------------
     etat: {
       key: "etat",
+      step: 4,
+      ftSource: "etat",
+      celprosTarget: "État PON",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: [],
       label: "État (PON)",
       category: "Réseau",
       type: "select",
@@ -292,6 +983,11 @@
 
     msan: {
       key: "msan",
+      step: 4,
+      ftSource: "msan",
+      celprosTarget: "MSAN / OLT",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["fat","pto","client"],
       label: "MSAN / OLT",
       category: "Réseau",
       type: "text",
@@ -319,6 +1015,11 @@
 
     fat_ref: {
       key: "fat_ref",
+      step: 4,
+      ftSource: "fat_ref",
+      celprosTarget: "Référence FAT / PBO",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["msan","pto","client"],
       label: "Référence FAT / PBO",
       category: "Réseau",
       type: "text",
@@ -351,6 +1052,11 @@
 
     port: {
       key: "port",
+      step: 4,
+      ftSource: "port",
+      celprosTarget: "Port raccordé",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["disponible","disponibles","libres"],
       label: "Port raccordé",
       category: "Réseau",
       type: "text",
@@ -382,6 +1088,11 @@
 
     ports_disponibles: {
       key: "ports_disponibles",
+      step: 4,
+      ftSource: "ports_disponibles",
+      celprosTarget: "Ports disponibles",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["raccorde"],
       label: "Ports disponibles (liste)",
       category: "Réseau",
       type: "text",
@@ -404,6 +1115,11 @@
 
     port_disponible: {
       key: "port_disponible",
+      step: 4,
+      ftSource: "port_disponible",
+      celprosTarget: "Port disponible",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["raccorde"],
       label: "Nombre de ports disponibles",
       category: "Réseau",
       type: "number",
@@ -438,6 +1154,11 @@
 
     puissance_fat_dbm: {
       key: "puissance_fat_dbm",
+      step: 4,
+      ftSource: "puissance_fat_dbm",
+      celprosTarget: "Puissance FAT (dBm)",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["pto","client","abonne","prise"],
       label: "Puissance FAT (dBm)",
       category: "Réseau",
       type: "number",
@@ -480,6 +1201,11 @@
     // ----------------------------------------------------
     type_cable: {
       key: "type_cable",
+      step: 4,
+      ftSource: "type_cable",
+      celprosTarget: "Type de câble",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Type de câble",
       category: "Câblage",
       type: "text",
@@ -506,6 +1232,11 @@
 
     depart_m: {
       key: "depart_m",
+      step: 4,
+      ftSource: "depart_m",
+      celprosTarget: "Métrage départ (m)",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["arrivee","total","lineaire"],
       label: "Départ (m)",
       category: "Câblage",
       type: "number",
@@ -543,6 +1274,11 @@
 
     arrivee_m: {
       key: "arrivee_m",
+      step: 4,
+      ftSource: "arrivee_m",
+      celprosTarget: "Métrage arrivée (m)",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["depart","total","lineaire"],
       label: "Arrivée (m)",
       category: "Câblage",
       type: "number",
@@ -575,6 +1311,11 @@
 
     lineaire_m: {
       key: "lineaire_m",
+      step: 4,
+      ftSource: "lineaire_m",
+      celprosTarget: "Linéaire total (m)",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["depart","arrivee"],
       label: "Linéaire (m)",
       category: "Câblage",
       type: "number",
@@ -616,6 +1357,11 @@
 
     nb_poteaux_traverses: {
       key: "nb_poteaux_traverses",
+      step: 4,
+      ftSource: "nb_poteaux_traverses",
+      celprosTarget: "Poteaux traversés",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["implante","arme"],
       label: "Poteaux traversés",
       category: "Câblage",
       type: "number",
@@ -647,6 +1393,11 @@
 
     nb_poteaux_implantes: {
       key: "nb_poteaux_implantes",
+      step: 4,
+      ftSource: "nb_poteaux_implantes",
+      celprosTarget: "Poteaux implantés",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["traverse","arme"],
       label: "Poteaux implantés",
       category: "Câblage",
       type: "number",
@@ -678,6 +1429,11 @@
 
     nb_poteaux_armes: {
       key: "nb_poteaux_armes",
+      step: 4,
+      ftSource: "nb_poteaux_armes",
+      celprosTarget: "Poteaux armés",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["traverse","implante"],
       label: "Poteaux armés",
       category: "Câblage",
       type: "number",
@@ -712,6 +1468,11 @@
     // ----------------------------------------------------
     puissance_pto_dbm: {
       key: "puissance_pto_dbm",
+      step: 4,
+      ftSource: "puissance_pto_dbm",
+      celprosTarget: "Puissance PTO (dBm)",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["fat","pbo"],
       label: "Puissance PTO (dBm)",
       category: "Intérieur",
       type: "number",
@@ -751,6 +1512,11 @@
 
     pto_qte: {
       key: "pto_qte",
+      step: 2,
+      ftSource: "pto_qte",
+      celprosTarget: "Quantité PTO",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Quantité PTO",
       category: "Intérieur",
       type: "number",
@@ -789,6 +1555,11 @@
 
     repeteur_wifi_qte: {
       key: "repeteur_wifi_qte",
+      step: 2,
+      ftSource: "repeteur_wifi_qte",
+      celprosTarget: "Quantité répéteur Wi-Fi",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Qté répéteur WiFi",
       category: "Intérieur",
       type: "number",
@@ -823,6 +1594,11 @@
 
     emplacement_ont: {
       key: "emplacement_ont",
+      step: 2,
+      ftSource: "emplacement_ont",
+      celprosTarget: "Emplacement ONT / Box",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Emplacement ONT / Box",
       category: "Intérieur",
       type: "text",
@@ -847,6 +1623,11 @@
 
     mac: {
       key: "mac",
+      step: 2,
+      ftSource: "mac",
+      celprosTarget: "Adresse MAC ONT",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["sn","serie"],
       label: "Adresse MAC ONT",
       category: "Intérieur",
       type: "text",
@@ -874,6 +1655,11 @@
 
     sn: {
       key: "sn",
+      step: 2,
+      ftSource: "sn / ont_sn",
+      celprosTarget: "Numéro de série ONT (SN)",
+      onAbsent: "leave_empty_and_warn",
+      negativeKeywords: ["mac"],
       label: "Numéro de série SN / ONT",
       category: "Intérieur",
       type: "text",
@@ -921,6 +1707,11 @@
     // ----------------------------------------------------
     client_confirme_emplacement: {
       key: "client_confirme_emplacement",
+      step: 5,
+      ftSource: "client_confirme_emplacement",
+      celprosTarget: "Client confirme emplacement",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Client confirme l'emplacement",
       category: "Conformité",
       type: "boolean",
@@ -940,6 +1731,11 @@
 
     remise_equipement_ok: {
       key: "remise_equipement_ok",
+      step: 5,
+      ftSource: "remise_equipement_ok",
+      celprosTarget: "Remise équipements OK",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Remise d'équipement OK",
       category: "Conformité",
       type: "boolean",
@@ -960,6 +1756,11 @@
 
     travaux_conformes: {
       key: "travaux_conformes",
+      step: 5,
+      ftSource: "travaux_conformes",
+      celprosTarget: "Travaux conformes",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Travaux conformes",
       category: "Conformité",
       type: "boolean",
@@ -981,6 +1782,11 @@
 
     emplacement_valide: {
       key: "emplacement_valide",
+      step: 5,
+      ftSource: "emplacement_valide",
+      celprosTarget: "Emplacement validé",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Emplacement validé",
       category: "Conformité",
       type: "boolean",
@@ -999,6 +1805,11 @@
 
     travail_propre: {
       key: "travail_propre",
+      step: 5,
+      ftSource: "travail_propre",
+      celprosTarget: "Travail propre",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Travail propre",
       category: "Conformité",
       type: "boolean",
@@ -1020,6 +1831,11 @@
 
     service_teste: {
       key: "service_teste",
+      step: 5,
+      ftSource: "service_teste",
+      celprosTarget: "Service testé",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Service testé",
       category: "Conformité",
       type: "boolean",
@@ -1041,6 +1857,11 @@
 
     service_fonctionne: {
       key: "service_fonctionne",
+      step: 5,
+      ftSource: "service_fonctionne",
+      celprosTarget: "Service fonctionne (Internet OK)",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Service fonctionne",
       category: "Conformité",
       type: "boolean",
@@ -1063,6 +1884,11 @@
 
     explications_donnees: {
       key: "explications_donnees",
+      step: 5,
+      ftSource: "explications_donnees",
+      celprosTarget: "Explications données",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Explications données",
       category: "Conformité",
       type: "boolean",
@@ -1082,6 +1908,11 @@
 
     recommanderait: {
       key: "recommanderait",
+      step: 5,
+      ftSource: "recommanderait",
+      celprosTarget: "Recommanderait Celtiis",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Recommanderait",
       category: "Conformité",
       type: "boolean",
@@ -1099,6 +1930,11 @@
 
     accepte_recontact: {
       key: "accepte_recontact",
+      step: 5,
+      ftSource: "accepte_recontact",
+      celprosTarget: "Accepte recontact",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Accepte recontact",
       category: "Conformité",
       type: "boolean",
@@ -1116,6 +1952,11 @@
 
     qualite: {
       key: "qualite",
+      step: 5,
+      ftSource: "qualite",
+      celprosTarget: "Qualité globale",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Qualité ressentie",
       category: "Conformité",
       type: "select",
@@ -1134,6 +1975,11 @@
 
     delais: {
       key: "delais",
+      step: 5,
+      ftSource: "delais",
+      celprosTarget: "Respect des délais",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Respect des délais",
       category: "Conformité",
       type: "select",
@@ -1151,6 +1997,11 @@
 
     professionnalisme: {
       key: "professionnalisme",
+      step: 5,
+      ftSource: "professionnalisme",
+      celprosTarget: "Professionnalisme équipe",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Professionnalisme",
       category: "Conformité",
       type: "select",
@@ -1168,6 +2019,11 @@
 
     nom_client_declaration: {
       key: "nom_client_declaration",
+      step: 5,
+      ftSource: "nom_client_declaration",
+      celprosTarget: "Nom déclarant client",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Nom déclarant",
       category: "Conformité",
       type: "text",
@@ -1188,6 +2044,11 @@
 
     remarque_libre: {
       key: "remarque_libre",
+      step: 5,
+      ftSource: "remarque_libre",
+      celprosTarget: "Remarques libres",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Remarques / Observations",
       category: "Conformité",
       type: "text",
@@ -1218,6 +2079,11 @@
     // ----------------------------------------------------
     date: {
       key: "date",
+      step: 1,
+      ftSource: "date",
+      celprosTarget: "Date d'intervention",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Date d'intervention",
       category: "Général",
       type: "text",
@@ -1241,6 +2107,11 @@
 
     nom_technicien: {
       key: "nom_technicien",
+      step: 1,
+      ftSource: "nom_technicien",
+      celprosTarget: "Nom du technicien",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["client","abonne"],
       label: "Nom du technicien",
       category: "Général",
       type: "text",
@@ -1265,6 +2136,11 @@
 
     nom_equipe: {
       key: "nom_equipe",
+      step: 1,
+      ftSource: "nom_equipe",
+      celprosTarget: "Nom de l'équipe",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["client","abonne"],
       label: "Nom de l'équipe",
       category: "Général",
       type: "text",
@@ -1292,6 +2168,11 @@
     // ----------------------------------------------------
     latitude: {
       key: "latitude",
+      step: 2,
+      ftSource: "points_gps[type=Abonné].lat",
+      celprosTarget: "Latitude GPS",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["longitude","lng"],
       label: "Latitude GPS",
       category: "GPS",
       type: "number",
@@ -1314,6 +2195,11 @@
 
     longitude: {
       key: "longitude",
+      step: 2,
+      ftSource: "points_gps[type=Abonné].lng",
+      celprosTarget: "Longitude GPS",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["latitude","lat"],
       label: "Longitude GPS",
       category: "GPS",
       type: "number",
@@ -1340,6 +2226,11 @@
 
     gps_coordinates: {
       key: "gps_coordinates",
+      step: 2,
+      ftSource: "points_gps[type=Abonné]",
+      celprosTarget: "Coordonnées GPS",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Coordonnées GPS complètes",
       category: "GPS",
       type: "text",
@@ -1367,6 +2258,11 @@
     // ----------------------------------------------------
     interlocuteur: {
       key: "interlocuteur",
+      step: 1,
+      ftSource: "nom_client",
+      celprosTarget: "Interlocuteur",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Interlocuteur",
       category: "Client",
       type: "radio",
@@ -1377,6 +2273,11 @@
 
     configurations_type: {
       key: "configurations_type",
+      step: 1,
+      ftSource: "offre_souscrite",
+      celprosTarget: "Configurations",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Configurations Type",
       category: "Client",
       type: "radio",
@@ -1390,6 +2291,11 @@
     // ----------------------------------------------------
     gps_fat: {
       key: "gps_fat",
+      step: 2,
+      ftSource: "points_gps[type=FAT]",
+      celprosTarget: "GPS FAT",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "GPS FAT",
       category: "Accessoires",
       type: "text",
@@ -1403,6 +2309,11 @@
 
     rue: {
       key: "rue",
+      step: 2,
+      ftSource: "adresse_zone",
+      celprosTarget: "Nom de rue",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Rue",
       category: "Accessoires",
       type: "number",
@@ -1413,6 +2324,11 @@
 
     pince: {
       key: "pince",
+      step: 2,
+      ftSource: "materiel_pose.pince",
+      celprosTarget: "Nombre de pinces",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Pince",
       category: "Accessoires",
       type: "number",
@@ -1423,6 +2339,11 @@
 
     crochets: {
       key: "crochets",
+      step: 2,
+      ftSource: "materiel_pose.crochets",
+      celprosTarget: "Nombre de crochets",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Crochets",
       category: "Accessoires",
       type: "number",
@@ -1433,6 +2354,11 @@
 
     suspension: {
       key: "suspension",
+      step: 2,
+      ftSource: "materiel_pose.suspension",
+      celprosTarget: "Nombre de suspensions",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Suspension",
       category: "Accessoires",
       type: "number",
@@ -1443,6 +2369,11 @@
 
     piton: {
       key: "piton",
+      step: 2,
+      ftSource: "materiel_pose.piton",
+      celprosTarget: "Nombre de pitons",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Piton",
       category: "Accessoires",
       type: "number",
@@ -1469,6 +2400,11 @@
 
     cheville: {
       key: "cheville",
+      step: 2,
+      ftSource: "materiel_pose.cheville",
+      celprosTarget: "Nombre de chevilles",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Cheville",
       category: "Accessoires",
       type: "number",
@@ -1492,6 +2428,11 @@
 
     jarretiere: {
       key: "jarretiere",
+      step: 2,
+      ftSource: "materiel_pose.jarretiere",
+      celprosTarget: "Nombre de jarretières",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Jarretière optique",
       category: "Accessoires",
       type: "number",
@@ -1515,6 +2456,11 @@
 
     ont_livre: {
       key: "ont_livre",
+      step: 2,
+      ftSource: "materiel_pose.ont",
+      celprosTarget: "ONT livré",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "ONT livré",
       category: "Accessoires",
       type: "number",
@@ -1544,6 +2490,11 @@
 
     cpc_cable: {
       key: "cpc_cable",
+      step: 2,
+      ftSource: "materiel_pose.cpc_cable",
+      celprosTarget: "CPC Câble",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Câble CPC / Drop",
       category: "Accessoires",
       type: "number",
@@ -1572,6 +2523,11 @@
 
     connecteur: {
       key: "connecteur",
+      step: 2,
+      ftSource: "materiel_pose.connecteur",
+      celprosTarget: "Connecteur",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Connecteur",
       category: "Accessoires",
       type: "number",
@@ -1582,6 +2538,11 @@
 
     rp1: {
       key: "rp1",
+      step: 2,
+      ftSource: "materiel_pose.rp1",
+      celprosTarget: "RP1",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "RP1",
       category: "Accessoires",
       type: "number",
@@ -1592,6 +2553,11 @@
 
     poteaux_utilises: {
       key: "poteaux_utilises",
+      step: 2,
+      ftSource: "materiel_pose.poteaux / points_gps",
+      celprosTarget: "Poteaux utilisés",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Poteaux utilisés (total)",
       category: "Accessoires",
       type: "number",
@@ -1646,6 +2612,11 @@
 
     poteaux_sbee_utilises: {
       key: "poteaux_sbee_utilises",
+      step: 2,
+      ftSource: "materiel_pose.poteau_sbee / points_gps",
+      celprosTarget: "Poteaux SBEE utilisés",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["petit","jean"],
       label: "Nombre de poteaux SBEE utilisés",
       category: "Accessoires",
       type: "number",
@@ -1656,6 +2627,11 @@
 
     poteaux_petit_jean_utilises: {
       key: "poteaux_petit_jean_utilises",
+      step: 2,
+      ftSource: "materiel_pose.poteau_petit_jean / points_gps",
+      celprosTarget: "Poteaux Petit Jean utilisés",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["sbee"],
       label: "Nombre de poteaux Petit Jean utilisés",
       category: "Accessoires",
       type: "number",
@@ -1666,6 +2642,11 @@
 
     traverse_13t: {
       key: "traverse_13t",
+      step: 2,
+      ftSource: "materiel_pose.traverse_13t",
+      celprosTarget: "Traverse 13T",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Traverse 13T",
       category: "Accessoires",
       type: "number",
@@ -1676,6 +2657,11 @@
 
     traverse_15t: {
       key: "traverse_15t",
+      step: 2,
+      ftSource: "materiel_pose.traverse_15t",
+      celprosTarget: "Traverse 15T",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Traverse 15T",
       category: "Accessoires",
       type: "number",
@@ -1686,6 +2672,11 @@
 
     semelle: {
       key: "semelle",
+      step: 2,
+      ftSource: "materiel_pose.semelle",
+      celprosTarget: "Semelle",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Semelle",
       category: "Accessoires",
       type: "number",
@@ -1696,6 +2687,11 @@
 
     boulons: {
       key: "boulons",
+      step: 2,
+      ftSource: "materiel_pose.boulons",
+      celprosTarget: "Boulons",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Boulons",
       category: "Accessoires",
       type: "number",
@@ -1706,6 +2702,11 @@
 
     agrafe: {
       key: "agrafe",
+      step: 2,
+      ftSource: "materiel_pose.agrafe",
+      celprosTarget: "Agrafes",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Agrafe",
       category: "Accessoires",
       type: "number",
@@ -1719,6 +2720,11 @@
     // ----------------------------------------------------
     test_appel_sortant: {
       key: "test_appel_sortant",
+      step: 3,
+      ftSource: "service_teste",
+      celprosTarget: "Appel sortant",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["entrant"],
       label: "Appel sortant - Envoi numéro",
       category: "Tests",
       type: "boolean",
@@ -1729,6 +2735,11 @@
 
     test_appel_entrant: {
       key: "test_appel_entrant",
+      step: 3,
+      ftSource: "service_teste",
+      celprosTarget: "Appel entrant",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["sortant"],
       label: "Appel entrant - Affichage numéro",
       category: "Tests",
       type: "boolean",
@@ -1739,6 +2750,11 @@
 
     debit_montant: {
       key: "debit_montant",
+      step: 3,
+      ftSource: "materiel_pose.debit_up",
+      celprosTarget: "Débit montant",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["descendant"],
       label: "Débit montant",
       category: "Tests",
       type: "number",
@@ -1749,6 +2765,11 @@
 
     debit_descendant: {
       key: "debit_descendant",
+      step: 3,
+      ftSource: "materiel_pose.debit_down",
+      celprosTarget: "Débit descendant",
+      onAbsent: "leave_empty",
+      negativeKeywords: ["montant"],
       label: "Débit descendant",
       category: "Tests",
       type: "number",
@@ -1759,6 +2780,11 @@
 
     debit_ping: {
       key: "debit_ping",
+      step: 3,
+      ftSource: "materiel_pose.ping",
+      celprosTarget: "Ping latence",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Ping",
       category: "Tests",
       type: "number",
@@ -1772,6 +2798,11 @@
     // ----------------------------------------------------
     etiquetage: {
       key: "etiquetage",
+      step: 4,
+      ftSource: "travaux_conformes",
+      celprosTarget: "Étiquetage câble et FAT",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Étiquetage",
       category: "Branchement",
       type: "boolean",
@@ -1782,6 +2813,11 @@
 
     nettoyage: {
       key: "nettoyage",
+      step: 4,
+      ftSource: "travail_propre",
+      celprosTarget: "Nettoyage chantier",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Nettoyage",
       category: "Branchement",
       type: "boolean",
@@ -1792,6 +2828,11 @@
 
     depose: {
       key: "depose",
+      step: 4,
+      ftSource: "travaux_conformes",
+      celprosTarget: "Dépose anciens matériels",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Dépose",
       category: "Branchement",
       type: "boolean",
@@ -1802,6 +2843,11 @@
 
     colliers_serres: {
       key: "colliers_serres",
+      step: 4,
+      ftSource: "travaux_conformes",
+      celprosTarget: "Colliers bien serrés",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Colliers serrés",
       category: "Branchement",
       type: "boolean",
@@ -1812,6 +2858,11 @@
 
     fat_normalise: {
       key: "fat_normalise",
+      step: 4,
+      ftSource: "travaux_conformes",
+      celprosTarget: "FAT normalisé",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "FAT normalisé",
       category: "Branchement",
       type: "boolean",
@@ -1822,6 +2873,11 @@
 
     tutorat: {
       key: "tutorat",
+      step: 4,
+      ftSource: "travaux_conformes",
+      celprosTarget: "Tutorat client réalisé",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Tutorat",
       category: "Branchement",
       type: "boolean",
@@ -1832,6 +2888,11 @@
 
     plaque: {
       key: "plaque",
+      step: 4,
+      ftSource: "fat_ref",
+      celprosTarget: "Plaque FAT",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Plaque",
       category: "Réseau",
       type: "text",
@@ -1842,6 +2903,11 @@
 
     service_internet: {
       key: "service_internet",
+      step: 3,
+      ftSource: "service_fonctionne",
+      celprosTarget: "Service Internet fonctionnel",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Internet",
       category: "Services",
       type: "boolean",
@@ -1852,6 +2918,11 @@
 
     service_voip: {
       key: "service_voip",
+      step: 3,
+      ftSource: "service_fonctionne",
+      celprosTarget: "Service Téléphonie / VoIP fonctionnel",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "VOIP",
       category: "Services",
       type: "boolean",
@@ -1865,6 +2936,11 @@
     // ----------------------------------------------------
     confirme_signature_rapport: {
       key: "confirme_signature_rapport",
+      step: 5,
+      ftSource: "signature_client",
+      celprosTarget: "Confirmation signature rapport",
+      onAbsent: "leave_empty",
+      negativeKeywords: [],
       label: "Je confirme la signature du rapport",
       category: "Signature",
       type: "boolean",
@@ -1872,6 +2948,35 @@
       labelKeywords: ["je confirme la signature du rapport", "confirme signature", "signature du rapport"],
       valueExtractor: (data) => (data?.confirme_signature_rapport ? true : (data?.signature_client ? true : null)),
     },
+  };
+
+  // Compatibilité et helpers pour itération et accès par tableau / recherche
+  for (const def of Object.values(FIELD_DEFINITIONS)) {
+    if (!def.extractor && def.valueExtractor) {
+      def.extractor = def.valueExtractor;
+    }
+  }
+
+  Object.defineProperty(FIELD_DEFINITIONS, "find", {
+    value: function (predicate) {
+      return Object.values(this).find(predicate);
+    },
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+
+  Object.defineProperty(FIELD_DEFINITIONS, "filter", {
+    value: function (predicate) {
+      return Object.values(this).filter(predicate);
+    },
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+
+  FIELD_DEFINITIONS[Symbol.iterator] = function* () {
+    yield* Object.values(this);
   };
 
   // Inspection des attributs d'un élément HTML
@@ -1903,11 +3008,18 @@
     return candidates;
   }
 
-  // Détection du texte de libellé associé à l'élément
+  // Détection du texte de libellé associé à l'élément (compatible HTML5, Bootstrap, JHipster et Angular Material)
   function getElementLabelText(element) {
     if (!element) return "";
     let texts = [];
     const doc = element.ownerDocument || (typeof document !== "undefined" ? document : null);
+
+    // 0. Propriété standard HTML5 element.labels (NodeList de tous les <label> associés)
+    if (element.labels && element.labels.length > 0) {
+      for (const l of element.labels) {
+        if (l && l.textContent) texts.push(l.textContent);
+      }
+    }
 
     // 1. Balise <label for="elementId">
     if (element.id && doc) {
@@ -1916,6 +3028,19 @@
         const explicitLabel = doc.querySelector(`label[for="${escapedId}"]`);
         if (explicitLabel) texts.push(explicitLabel.textContent || "");
       } catch {}
+    }
+
+    // 1bis. Attributs aria-labelledby / aria-describedby
+    if (element.getAttribute && doc) {
+      const ariaLabelledBy = element.getAttribute("aria-labelledby") || element.getAttribute("aria-describedby");
+      if (ariaLabelledBy) {
+        for (const idPart of ariaLabelledBy.trim().split(/\s+/)) {
+          try {
+            const lEl = doc.getElementById(idPart);
+            if (lEl && lEl.textContent) texts.push(lEl.textContent);
+          } catch {}
+        }
+      }
     }
 
     // 2. Parent <label> enveloppant
@@ -1929,26 +3054,38 @@
       if (legend) texts.push(legend.textContent || "");
     }
 
-    // 4. Frère précédent (previousElementSibling) qui est un label ou un span
+    // 4. Frère précédent (previousElementSibling) qui est un label, mat-label ou span
     if (element.previousElementSibling) {
       const tag = element.previousElementSibling.tagName?.toLowerCase();
-      if (tag === "label" || tag === "span" || tag === "strong" || tag === "p") {
+      if (tag === "label" || tag === "mat-label" || tag === "span" || tag === "strong" || tag === "p") {
         texts.push(element.previousElementSibling.textContent || "");
       }
     }
 
-    // 5. Conteneur de champ (ex: .form-group, .field, .mb-3, .form-field)
+    // 4bis. Frère précédent du parent direct (pour structures encapsulées type div.input-group)
+    if (element.parentElement && element.parentElement.previousElementSibling) {
+      const pTag = element.parentElement.previousElementSibling.tagName?.toLowerCase();
+      if (pTag === "label" || pTag === "mat-label" || pTag === "span" || pTag === "strong" || pTag === "h4" || pTag === "h5") {
+        texts.push(element.parentElement.previousElementSibling.textContent || "");
+      }
+    }
+
+    // 5. Conteneur de champ (ex: mat-form-field, .form-group, .field, .mb-3, .col, .row)
     if (element.closest) {
-      const group = element.closest(".form-group, .form-field, .mb-3, .col, [class*='field'], [class*='group']");
+      const group = element.closest(
+        "mat-form-field, [class*='mat-form-field'], [class*='mat-mdc-form-field'], .form-group, .form-field, .mb-3, .col, .row, [class*='field'], [class*='group']"
+      );
       if (group) {
-        const groupLabel = group.querySelector("legend, label, .form-label, span.title, dt");
+        const groupLabel = group.querySelector(
+          "mat-label, legend, label, .form-label, [class*='floating-label'], [class*='form-field-label'], [class*='label'], span.title, dt"
+        );
         if (groupLabel && groupLabel !== element && groupLabel !== parentLabel) {
           texts.push(groupLabel.textContent || "");
         }
       }
     }
 
-    // 6. Placeholder ou title
+    // 6. Placeholder ou title ou aria-label
     if (element.placeholder) texts.push(element.placeholder);
     if (element.title) texts.push(element.title);
     const ariaLabel = element.getAttribute ? element.getAttribute("aria-label") : null;
@@ -1965,11 +3102,21 @@
     const attributes = getElementAttributeCandidates(element);
     const labelText = getElementLabelText(element);
     const normalizedLabel = normalizeText(labelText);
+    const normAttrs = attributes.map((a) => normalizeText(a));
 
     let bestMatch = null;
     let highestScore = 0;
 
     for (const [, def] of Object.entries(FIELD_DEFINITIONS)) {
+      // Disqualification par mots-clés négatifs
+      if (def.negativeKeywords && def.negativeKeywords.length > 0) {
+        const isDisqualified = def.negativeKeywords.some((neg) => {
+          const normNeg = normalizeText(neg);
+          return normNeg && (normalizedLabel.includes(normNeg) || normAttrs.some((a) => a.includes(normNeg)));
+        });
+        if (isDisqualified) continue;
+      }
+
       let score = 0;
 
       // Correspondance par motif d'attributs (ID, Name, formControlName)
@@ -2057,6 +3204,7 @@
   // Exportation publique
   return {
     FIELD_DEFINITIONS,
+    CELPROS_PHOTO_SLOTS,
     normalizeText,
     getElementAttributeCandidates,
     getElementLabelText,
@@ -2066,5 +3214,9 @@
     getMaterielQuantity,
     countSbeePoles,
     countPetitJeanPoles,
+    getPhotoSource,
+    getPhotoDescription,
+    isExcludedFromCelpros,
+    getEligibleWhatsappPhotos,
   };
 });

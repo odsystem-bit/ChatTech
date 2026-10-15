@@ -440,7 +440,10 @@ try {
       break;
 
     case 'interventions_list_light':
-      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe, nom_client, nom_dossier, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
+      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe,
+        COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
+        COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
+        adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
       echo json_encode($stmt->fetchAll());
       break;
 
@@ -450,7 +453,9 @@ try {
       // les photos (base64 dans points_gps/whatsapp_photos = plusieurs Mo par
       // intervention, la liste pesait >100 Mo et ne chargeait plus sur mobile).
       $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe,
-        nom_client, nom_dossier, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
+        COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
+        COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
+        adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
         ports_disponibles, port_disponible, type_cable, depart_m, arrivee_m, lineaire_m, puissance_fat_dbm,
         puissance_pto_dbm, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         materiel_pose, points_gps, ont_sn, pto_qte, repeteur_wifi_qte, emplacement_ont,
@@ -484,7 +489,9 @@ try {
       // de toute facon ecrasees par '' ci-dessous, inutile de les transferer depuis
       // MySQL (LONGTEXT, potentiellement plusieurs dizaines de Ko chacune).
       $stmt = db()->prepare('SELECT id, date, statut, nom_technicien, nom_equipe,
-        nom_client, nom_dossier, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
+        COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
+        COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
+        adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
         ports_disponibles, port_disponible, type_cable, depart_m, arrivee_m, lineaire_m, puissance_fat_dbm,
           puissance_pto_dbm, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         materiel_pose, points_gps, ont_sn, pto_qte, repeteur_wifi_qte, emplacement_ont,
@@ -494,7 +501,8 @@ try {
         recommanderait, accepte_recontact, qualite, delais, professionnalisme,
         nom_client_declaration, remarque_libre, whatsapp_photos, modifie_par, modifie_le AS updated_at
         FROM interventions WHERE id = ?');
-      $stmt->execute([$input['id']]);
+      $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
+      $stmt->execute([$id]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $mp = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
@@ -515,16 +523,18 @@ try {
       // Relevé léger pour le live refresh mobile : une seule colonne,
       // aucune donnée base64. L'APK compare puis appelle intervention_get_light
       // seulement si la valeur a changé.
+      $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       $stmt = db()->prepare('SELECT modifie_le AS updated_at FROM interventions WHERE id = ?');
-      $stmt->execute([$input['id']]);
+      $stmt->execute([$id]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       echo json_encode(['updated_at' => $r['updated_at'] ?? '']);
       break;
 
     case 'intervention_get_photos':
+      $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       $stmt = db()->prepare('SELECT points_gps, whatsapp_photos, signature_client, signature_technicien FROM interventions WHERE id = ?');
-      $stmt->execute([$input['id']]);
+      $stmt->execute([$id]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true) ?? [];
@@ -533,8 +543,9 @@ try {
       break;
 
     case 'intervention_get':
+      $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ?');
-      $stmt->execute([$input['id']]);
+      $stmt->execute([$id]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $mp = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
@@ -859,9 +870,17 @@ try {
       $shouldReconcileStock = $finalStatus === 'termine'
         && ($shouldDeductStock || ($existing && (int)($existing['materiel_deduit'] ?? 0) === 1 && $materialPatch));
 
+      $serverNow = date('Y-m-d H:i:s');
       try {
         if ($patchMode) {
-          $patchColumns = array_values(array_filter($fields, fn($field) => $field !== 'id' && in_array($field, $changedFields, true) && array_key_exists($field, $d)));
+          if (in_array('nom_dossier', $changedFields, true) && !in_array('nom_client', $changedFields, true)) {
+            $changedFields[] = 'nom_client';
+            if (empty($d['nom_client'])) $d['nom_client'] = $d['nom_dossier'];
+          } elseif (in_array('nom_client', $changedFields, true) && !in_array('nom_dossier', $changedFields, true)) {
+            $changedFields[] = 'nom_dossier';
+            if (empty($d['nom_dossier'])) $d['nom_dossier'] = $d['nom_client'];
+          }
+          $patchColumns = array_values(array_filter($fields, fn($field) => !in_array($field, ['id', 'modifie_le'], true) && in_array($field, $changedFields, true) && array_key_exists($field, $d)));
           $patchAssignments = array_map(fn($field) => "$field = :$field", $patchColumns);
           if ($materialPatch) $patchAssignments[] = 'materiel_pose = :materiel_pose';
           if (in_array('points_gps', $changedFields, true)) {
@@ -872,29 +891,28 @@ try {
           }
           if (in_array('whatsapp_photos', $changedFields, true)) $patchAssignments[] = 'whatsapp_photos = :whatsapp_photos';
           if ($shouldDeductStock) $patchAssignments[] = 'materiel_deduit = 1';
-          if ($patchAssignments) {
-            $patchAssignments[] = 'modifie_par = :modifie_par';
-            $patchAssignments[] = 'modifie_le = :modifie_le';
-            $stmt = $pdo->prepare('UPDATE interventions SET ' . implode(', ', array_unique($patchAssignments)) . ' WHERE id = :id');
-            foreach ($patchColumns as $field) {
-              $value = $d[$field];
-              if (is_bool($value)) $value = $value ? 1 : 0;
-              $stmt->bindValue(':' . $field, $value);
-            }
-            if ($materialPatch) $stmt->bindValue(':materiel_pose', json_encode(empty($incomingMat) ? (object)[] : $incomingMat));
-            if (in_array('points_gps', $changedFields, true)) {
-              $stmt->bindValue(':points_gps', json_encode($incomingGps));
-              $stmt->bindValue(':nb_poteaux_implantes_calc', (int)$d['nb_poteaux_implantes']);
-              $stmt->bindValue(':nb_poteaux_armes_calc', (int)$d['nb_poteaux_armes']);
-              $stmt->bindValue(':nb_poteaux_traverses_calc', (int)$d['nb_poteaux_traverses']);
-            }
-            if (in_array('whatsapp_photos', $changedFields, true)) $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
-            $stmt->bindValue(':modifie_par', $d['modifie_par'] ?? '');
-            $stmt->bindValue(':modifie_le', $d['modifie_le'] ?? date('Y-m-d H:i:s'));
-            $stmt->bindValue(':id', $d['id']);
-            $stmt->execute();
+          $patchAssignments[] = 'modifie_par = :modifie_par';
+          $patchAssignments[] = 'modifie_le = :modifie_le';
+          $stmt = $pdo->prepare('UPDATE interventions SET ' . implode(', ', array_unique($patchAssignments)) . ' WHERE id = :id');
+          foreach ($patchColumns as $field) {
+            $value = $d[$field];
+            if (is_bool($value)) $value = $value ? 1 : 0;
+            $stmt->bindValue(':' . $field, $value);
           }
+          if ($materialPatch) $stmt->bindValue(':materiel_pose', json_encode(empty($incomingMat) ? (object)[] : $incomingMat));
+          if (in_array('points_gps', $changedFields, true)) {
+            $stmt->bindValue(':points_gps', json_encode($incomingGps));
+            $stmt->bindValue(':nb_poteaux_implantes_calc', (int)$d['nb_poteaux_implantes']);
+            $stmt->bindValue(':nb_poteaux_armes_calc', (int)$d['nb_poteaux_armes']);
+            $stmt->bindValue(':nb_poteaux_traverses_calc', (int)$d['nb_poteaux_traverses']);
+          }
+          if (in_array('whatsapp_photos', $changedFields, true)) $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
+          $stmt->bindValue(':modifie_par', $d['modifie_par'] ?? '');
+          $stmt->bindValue(':modifie_le', $serverNow);
+          $stmt->bindValue(':id', $d['id']);
+          $stmt->execute();
         } else {
+          $d['modifie_le'] = $serverNow;
           $stmt = $pdo->prepare("INSERT INTO interventions SET " .
             implode(', ', array_map(fn($f) => "$f = :$f", $fields)) .
             ", materiel_pose = :materiel_pose, points_gps = :points_gps, whatsapp_photos = :whatsapp_photos" .
