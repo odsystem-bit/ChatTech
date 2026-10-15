@@ -1,7 +1,8 @@
 {
-  "version": "2.9.8",
-  "buildTime": "2026-10-15T00:35:00Z",
+  "version": "2.9.9",
+  "buildTime": "2026-10-15T01:10:00Z",
   "features": [
+    "Résolution définitive page blanche : optimisation découpage des bundles (code-splitting < 300 Ko)",
     "Rapport hebdomadaire Excel : correction complète des feuilles Poteaux Implantés et Poteaux Armés avec coordonnées GPS conformes",
     "Calcul et synchronisation automatique des poteaux implantés et armés en base de données et dans les exports Excel",
     "Sélecteur de semaine d'export hebdomadaire dans l'inventaire matériel",
