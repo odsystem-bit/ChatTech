@@ -1,13 +1,16 @@
 import { useState, useCallback, useEffect } from "react";
 import { generateWhatsAppReport } from "../lib/whatsapp";
-import { ensureInterventionDefaults, getIntervention, saveInterventionLocally } from "../models/Intervention";
+import { ensureInterventionDefaults, getIntervention, saveInterventionLocally, saveIntervention } from "../models/Intervention";
 import {
   generateInterventionPdf,
   generateSummaryReportPdf,
   previewInterventionPdf,
   previewSummaryReportPdf,
   shareInterventionPdf,
+  generateSatisfactionPdf,
+  previewSatisfactionPdf,
 } from "../lib/pdf";
+import FicheSatisfactionDocument from "../components/FicheSatisfactionDocument";
 
 export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [data, setData] = useState(ensureInterventionDefaults(intervention));
@@ -40,6 +43,8 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [pdfStatus, setPdfStatus] = useState("");
   const [reportStatus, setReportStatus] = useState("");
   const [shareStatus, setShareStatus] = useState("");
+  const [satStatus, setSatStatus] = useState("");
+  const [showSatModal, setShowSatModal] = useState(false);
   const [realises, setRealises] = useState("");
   const [recus, setRecus] = useState("");
   const [loadingAction, setLoadingAction] = useState(null);
@@ -49,6 +54,44 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     recus: recus !== "" ? Number(recus) : 0,
   };
   const report = generateWhatsAppReport(data, compteurJour);
+
+  async function handleDownloadSatisfaction() {
+    if (loadingAction) return;
+    setLoadingAction("downloadSat");
+    setSatStatus("Génération de la fiche de satisfaction…");
+    try {
+      await generateSatisfactionPdf(data);
+      setSatStatus("Fiche téléchargée.");
+    } catch (err) {
+      setSatStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
+  async function handlePreviewSatisfaction() {
+    if (loadingAction) return;
+    setLoadingAction("previewSat");
+    setSatStatus("Ouverture de la fiche de satisfaction…");
+    try {
+      await previewSatisfactionPdf(data);
+      setSatStatus("");
+    } catch (err) {
+      setSatStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
+  async function handleSaveSatisfactionChanges(updated) {
+    setData(updated);
+    saveInterventionLocally(updated);
+    try {
+      await saveIntervention(updated);
+      setSatStatus("✓ Modifications et signatures enregistrées.");
+    } catch (err) {
+      console.warn("Could not save to remote:", err);
+      setSatStatus("✓ Enregistré en local.");
+    }
+  }
 
   async function handleCopy() {
     await navigator.clipboard.writeText(report);
@@ -174,6 +217,48 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       </div>
       {reportStatus && <p className="gps-status">{reportStatus}</p>}
 
+      {/* Module Fiche de Satisfaction Client (ENR-02) */}
+      <div style={{ marginTop: 14, padding: 14, background: "#f8fafc", borderRadius: 12, border: "1px solid #cbd5e1" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 24, lineHeight: 1 }}>✍️</span>
+          <div>
+            <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+              Fiche d'Évaluation de la Satisfaction Client (ENR-02)
+            </h4>
+            <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#64748b" }}>
+              Document officiel Premium Company Bénin pré-rempli avec signature numérique.
+            </p>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+          <button
+            type="button"
+            className="btn-primary"
+            style={{ background: "#2563eb", borderColor: "#2563eb", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}
+            onClick={() => setShowSatModal(true)}
+          >
+            📋 Ouvrir la fiche & Signer
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handlePreviewSatisfaction}
+            disabled={loadingAction === "previewSat"}
+          >
+            {loadingAction === "previewSat" ? "Chargement…" : "👁️ Aperçu PDF Officiel"}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={handleDownloadSatisfaction}
+            disabled={loadingAction === "downloadSat"}
+          >
+            {loadingAction === "downloadSat" ? "Chargement…" : "⬇ Télécharger PDF"}
+          </button>
+        </div>
+        {satStatus && <p className="gps-status" style={{ marginTop: 8 }}>{satStatus}</p>}
+      </div>
+
       <button type="button" className="btn-secondary btn-large" onClick={handleShare} disabled={loadingAction === "share"} style={{ marginTop: 12 }}>
         {loadingAction === "share" ? "Chargement…" : "💬 Partager sur WhatsApp"}
       </button>
@@ -225,6 +310,36 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       <button type="button" className="btn-secondary btn-large" onClick={() => onEdit(intervention)} style={{ marginTop: 12 }}>
         ✏ Modifier cette intervention
       </button>
+
+      {/* Modal Fiche de Satisfaction Interactive & Signable */}
+      {showSatModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.75)",
+            zIndex: 9990,
+            overflowY: "auto",
+            padding: "20px 10px",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+          }}
+          onClick={() => setShowSatModal(false)}
+        >
+          <div
+            style={{ maxWidth: 860, width: "100%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <FicheSatisfactionDocument
+              intervention={data}
+              onChange={handleSaveSatisfactionChanges}
+              onSave={handleSaveSatisfactionChanges}
+              onClose={() => setShowSatModal(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

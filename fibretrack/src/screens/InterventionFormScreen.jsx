@@ -45,13 +45,14 @@ import {
   IconPole,
   IconAlertTriangle,
 } from "../components/Icons";
+import FicheSatisfactionDocument from "../components/FicheSatisfactionDocument";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
   { id: "photos", label: "📸 Photos CelPros" },
   { id: "gps", label: "📍 Poteaux & GPS" },
+  { id: "satisfaction", label: "✍️ Satisfaction Client" },
   { id: "mise_en_service", label: "⚙️ Mise en service", hidden: true },
-  { id: "satisfaction", label: "✍️ Satisfaction", hidden: true },
 ];
 
 export const CELPROS_PHOTO_SLOTS = [
@@ -3163,32 +3164,37 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         )}
 
         {activeTab === "satisfaction" && (
-          <section>
-            <CheckField label="Travaux conformes" checked={data.travaux_conformes} onChange={(v) => update("travaux_conformes", v)} />
-            <CheckField label="Emplacement validé" checked={data.emplacement_valide} onChange={(v) => update("emplacement_valide", v)} />
-            <CheckField label="Travail propre" checked={data.travail_propre} onChange={(v) => update("travail_propre", v)} />
-            <CheckField label="Service testé" checked={data.service_teste} onChange={(v) => update("service_teste", v)} />
-            <CheckField label="Service fonctionne" checked={data.service_fonctionne} onChange={(v) => update("service_fonctionne", v)} />
-            <CheckField label="Explications données" checked={data.explications_donnees} onChange={(v) => update("explications_donnees", v)} />
-            <CheckField label="Recommanderait" checked={data.recommanderait} onChange={(v) => update("recommanderait", v)} />
-            <CheckField label="Accepte recontact" checked={data.accepte_recontact} onChange={(v) => update("accepte_recontact", v)} />
-
-            <SelectField label="Qualité" value={data.qualite} options={NIVEAUX} onChange={(v) => update("qualite", v)} />
-            <SelectField label="Délais" value={data.delais} options={NIVEAUX} onChange={(v) => update("delais", v)} />
-            <SelectField label="Professionnalisme" value={data.professionnalisme} options={NIVEAUX} onChange={(v) => update("professionnalisme", v)} />
-
-            <TextField label="Nom du client (déclaration)" value={data.nom_client_declaration} onChange={(v) => update("nom_client_declaration", v)} />
-            <TextField label="Remarque libre" value={data.remarque_libre} onChange={(v) => update("remarque_libre", v)} />
-
-            <SignaturePad
-              label="Signature du client"
-              value={data.signature_client}
-              onChange={(dataUrl) => update("signature_client", dataUrl)}
-            />
-            <SignaturePad
-              label="Signature du technicien"
-              value={data.signature_technicien}
-              onChange={(dataUrl) => update("signature_technicien", dataUrl)}
+          <section className="form-satisfaction-section" style={{ padding: "4px 0" }}>
+            <FicheSatisfactionDocument
+              intervention={data}
+              onChange={(updated) => {
+                setData((prev) => ({
+                  ...prev,
+                  ...updated,
+                  modifie_par: currentUser,
+                  modifie_le: new Date().toISOString(),
+                }));
+                markDirty(
+                  "travaux_conformes",
+                  "emplacement_valide",
+                  "travail_propre",
+                  "service_teste",
+                  "service_fonctionne",
+                  "explications_donnees",
+                  "recommanderait",
+                  "accepte_recontact",
+                  "qualite",
+                  "delais",
+                  "professionnalisme",
+                  "type_intervention_satisfaction",
+                  "remarque_aucune",
+                  "remarque_libre",
+                  "signature_client",
+                  "signature_technicien",
+                  "nom_client_declaration"
+                );
+              }}
+              onSave={() => flushServerSync()}
             />
           </section>
         )}

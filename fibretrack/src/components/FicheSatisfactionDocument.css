@@ -1,0 +1,525 @@
+/* ==========================================================================
+   Fiche d'Évaluation de la Satisfaction du Client (ENR-02)
+   Reproduction fidèle du document officiel Premium Company Bénin
+   ========================================================================== */
+
+.fiche-sat-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 12px 0 24px;
+}
+
+/* --- Barre d'outils supérieure --- */
+.fiche-sat-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  background: #ffffff;
+  padding: 12px 18px;
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  margin-bottom: 16px;
+  max-width: 820px;
+  width: 100%;
+  border: 1px solid #e2e8f0;
+}
+
+.fiche-sat-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+/* --- Conteneur feuille A4 --- */
+.fiche-sat-page {
+  background: #ffffff;
+  color: #111827;
+  width: 100%;
+  max-width: 820px;
+  min-height: 1100px;
+  padding: 32px 36px 40px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  box-sizing: border-box;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  font-size: 11.5px;
+  line-height: 1.35;
+  position: relative;
+}
+
+/* --- En-tête officiel --- */
+.fiche-sat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.fiche-sat-meta {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #1f2937;
+}
+
+.fiche-sat-meta .meta-enr {
+  font-weight: 700;
+  font-style: italic;
+  font-size: 11.5px;
+}
+
+.fiche-sat-meta .meta-ver {
+  font-style: italic;
+}
+
+.fiche-sat-logo img {
+  height: 48px;
+  max-width: 130px;
+  object-fit: contain;
+}
+
+/* --- Titre du document --- */
+.fiche-sat-title-block {
+  text-align: center;
+  margin: 14px 0 14px;
+}
+
+.fiche-sat-title {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  margin: 0 0 6px;
+  color: #000000;
+}
+
+.fiche-sat-ref {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.fiche-sat-ref .handwritten-blue {
+  margin-left: 8px;
+  font-size: 15px;
+}
+
+/* --- Titres de sections --- */
+.fiche-sat-section-title {
+  font-size: 12px;
+  font-weight: 800;
+  margin: 12px 0 4px;
+  color: #000000;
+}
+
+.fiche-sat-section-subtitle {
+  font-size: 10.5px;
+  font-style: italic;
+  margin: 0 0 4px;
+  color: #374151;
+}
+
+/* --- Tableaux officiels avec bordures noires nettes --- */
+.fiche-sat-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 8px;
+  font-size: 10.5px;
+}
+
+.fiche-sat-table th,
+.fiche-sat-table td {
+  border: 1px solid #000000;
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+
+.fiche-sat-table th {
+  background: #ffffff;
+  font-weight: 700;
+  text-align: left;
+  color: #000000;
+}
+
+.fiche-sat-table td.col-center,
+.fiche-sat-table th.col-center {
+  text-align: center;
+}
+
+/* Checkboxes interactives dans le document */
+.fiche-sat-check-cell {
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  width: 50px;
+  padding: 2px !important;
+  transition: background 0.15s ease;
+}
+
+.fiche-sat-check-cell:hover {
+  background: #f1f5f9;
+}
+
+.fiche-sat-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #000000;
+  background: #ffffff;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.fiche-sat-box.checked {
+  color: #0c2d96;
+}
+
+.fiche-sat-checkmark {
+  font-family: 'Caveat', 'Segoe Script', cursive, sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  color: #0c2d96;
+  line-height: 1;
+  display: inline-block;
+  transform: translateY(-1px);
+}
+
+/* --- Types d'intervention --- */
+.fiche-sat-type-options {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.fiche-sat-type-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* --- Style manuscrit bleu réaliste --- */
+.handwritten-blue {
+  font-family: 'Caveat', 'Segoe Script', 'Bradley Hand', cursive, sans-serif;
+  color: #0c2d96;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.handwritten-value {
+  font-family: 'Caveat', 'Segoe Script', 'Bradley Hand', cursive, sans-serif;
+  color: #0c2d96;
+  font-size: 14.5px;
+  font-weight: 600;
+  display: inline-block;
+  line-height: 1.2;
+}
+
+/* --- Section 4 : Déclaration du client --- */
+.fiche-sat-declaration {
+  margin-top: 10px;
+}
+
+.declaration-preamble {
+  font-size: 11px;
+  margin-bottom: 4px;
+  line-height: 1.5;
+}
+
+.declaration-name-line {
+  display: inline-block;
+  min-width: 260px;
+  border-bottom: 1px solid #000000;
+  padding: 0 8px;
+  text-align: center;
+  vertical-align: bottom;
+}
+
+.declaration-list {
+  margin: 4px 0 6px 0;
+  padding-left: 18px;
+  font-size: 10px;
+  line-height: 1.32;
+  color: #000000;
+}
+
+.declaration-list li {
+  margin-bottom: 2.5px;
+}
+
+/* --- Section 5 : Remarques --- */
+.fiche-sat-remarques {
+  margin-top: 8px;
+}
+
+.remarque-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 10.5px;
+}
+
+.remarque-input-line {
+  flex: 1;
+  border-bottom: 1px dashed #64748b;
+  min-height: 18px;
+  padding: 0 4px;
+}
+
+.remarque-input-line input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  font-size: 14px;
+}
+
+.remarque-confirmation {
+  font-size: 10px;
+  font-weight: 600;
+  margin: 6px 0 10px;
+  color: #000000;
+}
+
+/* --- Tableaux de signatures --- */
+.fiche-sat-signatures-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 11px;
+}
+
+.fiche-sat-signatures-table th,
+.fiche-sat-signatures-table td {
+  border: 1px solid #000000;
+  width: 50%;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+
+.fiche-sat-signatures-table th {
+  background: #ffffff;
+  font-weight: 700;
+  color: #000000;
+  padding: 5px 8px;
+}
+
+.signature-box-content {
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.signature-name-row {
+  margin-bottom: 6px;
+  font-size: 13.5px;
+}
+
+.signature-visual-area {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  background: #fafafa;
+  border: 1px dashed #cbd5e1;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.signature-visual-area:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.signature-img-rendered {
+  max-width: 100%;
+  max-height: 65px;
+  object-fit: contain;
+}
+
+.signature-prompt-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.signature-prompt-btn:hover {
+  text-decoration: underline;
+}
+
+.signature-action-overlay {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  justify-content: flex-end;
+}
+
+.signature-modify-btn {
+  background: none;
+  border: none;
+  color: #2563eb;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  text-decoration: underline;
+}
+
+/* --- Modal tactile de signature --- */
+.sig-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: 16px;
+  backdrop-filter: blur(2px);
+}
+
+.sig-modal-card {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+  max-width: 540px;
+  width: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sig-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.sig-modal-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.sig-modal-canvas-wrap {
+  background: #ffffff;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+}
+
+.sig-modal-canvas {
+  width: 100%;
+  height: 220px;
+  border: 2px dashed #94a3b8;
+  border-radius: 8px;
+  background: #ffffff;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+.sig-modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   Styles d'Impression (@media print)
+   Garantit une page A4 parfaite sans éléments parasites
+   ========================================================================== */
+@media print {
+  body {
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Cache l'UI de l'application et la barre d'outils */
+  .fiche-sat-toolbar,
+  .sig-modal-backdrop,
+  .signature-prompt-btn,
+  .signature-action-overlay,
+  .app-home header,
+  .form-header,
+  .form-footer,
+  .tabs,
+  button {
+    display: none !important;
+  }
+
+  .fiche-sat-wrapper {
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+  }
+
+  .fiche-sat-page {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 10mm 14mm !important;
+    min-height: auto !important;
+    font-size: 10.5pt !important;
+  }
+
+  .fiche-sat-table th,
+  .fiche-sat-table td,
+  .fiche-sat-signatures-table th,
+  .fiche-sat-signatures-table td {
+    border: 1px solid #000000 !important;
+  }
+
+  .signature-visual-area {
+    border: none !important;
+    background: transparent !important;
+  }
+
+  .remarque-input-line {
+    border-bottom: 1px solid #000000 !important;
+  }
+
+  .remarque-input-line input {
+    font-size: 13pt !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+}

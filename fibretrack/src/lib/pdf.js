@@ -96,3 +96,23 @@ export async function shareInterventionPdf(intervention) {
   window.location.href = url;
   return "downloaded";
 }
+
+export async function generateSatisfactionPdf(intervention) {
+  const url = getPdfUrl("pdf_satisfaction", intervention.id);
+  if (isInWebView()) {
+    window.AndroidBridge.downloadUrl(url, `satisfaction_${intervention.nom_client || intervention.id}.pdf`);
+    return;
+  }
+  window.location.href = url;
+}
+
+export async function previewSatisfactionPdf(intervention) {
+  const url = getPdfUrl("pdf_satisfaction_view", intervention.id);
+  if (isInWebView()) {
+    window.AndroidBridge.openUrl(url);
+    return null;
+  }
+  window.open(url, "_blank");
+  return null;
+}
+

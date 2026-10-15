@@ -1,3 +1,25 @@
+/* ===== Handwritten Font (Caveat) for official documents ===== */
+@font-face {
+  font-family: 'Caveat';
+  src: url('/fonts/Caveat-Regular.ttf') format('truetype');
+  font-weight: 400 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Caveat';
+  src: url('/fonts/Caveat-Bold.ttf') format('truetype');
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+.handwritten-blue {
+  font-family: 'Caveat', 'Segoe Script', 'Bradley Hand', cursive, sans-serif;
+  color: #0c2d96;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
 /* ===== Transitions ===== */
 .slide-in {
   animation: slideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);

@@ -1,11 +1,12 @@
 {
-  "version": "2.9.9",
-  "buildTime": "2026-10-15T01:10:00Z",
+  "version": "3.0.0",
+  "buildTime": "2026-10-15T01:50:00Z",
   "features": [
-    "Résolution définitive page blanche : optimisation découpage des bundles (code-splitting < 300 Ko)",
-    "Rapport hebdomadaire Excel : correction complète des feuilles Poteaux Implantés et Poteaux Armés avec coordonnées GPS conformes",
-    "Calcul et synchronisation automatique des poteaux implantés et armés en base de données et dans les exports Excel",
-    "Sélecteur de semaine d'export hebdomadaire dans l'inventaire matériel",
-    "Remplacement des emojis par des icônes vectorielles SVG professionnelles d'entreprise télécom"
+    "Nouveau module officiel : Fiche d'Évaluation de la Satisfaction du Client (ENR-02) Premium Company Bénin",
+    "Reproduction visuelle conforme à 100% du document officiel avec typographie manuscrite bleue (Caveat)",
+    "Pré-remplissage automatique des informations client et de mission",
+    "Module de double signature numérique tactile haute définition (Client et Technicien)",
+    "Exportation PDF officiel serveur et impression A4 instantanée via navigateur",
+    "Accès direct dans le formulaire d'intervention (onglet Satisfaction Client) et sur la page de rapport"
   ]
 }
