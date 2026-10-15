@@ -221,8 +221,13 @@ $input = $input ?? [];
 
 function normalizeInterventionTypes(array &$r): void {
   $r['nom_technicien'] = (string)($r['nom_technicien'] ?? '');
-  $r['nom_equipe'] = (string)($r['nom_equipe'] ?? 'TELECOM BTP Services');
   $r['nom_client'] = (string)($r['nom_client'] ?? '');
+  $r['nom_dossier'] = (string)($r['nom_dossier'] ?? $r['nom_client'] ?? '');
+  if ($r['nom_dossier'] !== '' && $r['nom_client'] === '') {
+    $r['nom_client'] = $r['nom_dossier'];
+  } elseif ($r['nom_client'] !== '' && $r['nom_dossier'] === '') {
+    $r['nom_dossier'] = $r['nom_client'];
+  }
   $r['adresse_zone'] = (string)($r['adresse_zone'] ?? '');
   $r['telephone_ligne'] = (string)($r['telephone_ligne'] ?? '');
   $r['mobile'] = (string)($r['mobile'] ?? '');
@@ -429,8 +434,13 @@ try {
     return;
   }
   switch ($action) {
+    case 'deleted_interventions_list':
+      $stmt = db()->query('SELECT id FROM deleted_interventions WHERE deleted_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)');
+      echo json_encode($stmt->fetchAll(PDO::FETCH_COLUMN));
+      break;
+
     case 'interventions_list_light':
-      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe, nom_client, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
+      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe, nom_client, nom_dossier, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
       echo json_encode($stmt->fetchAll());
       break;
 
@@ -440,7 +450,7 @@ try {
       // les photos (base64 dans points_gps/whatsapp_photos = plusieurs Mo par
       // intervention, la liste pesait >100 Mo et ne chargeait plus sur mobile).
       $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe,
-        nom_client, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
+        nom_client, nom_dossier, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
         ports_disponibles, port_disponible, type_cable, depart_m, arrivee_m, lineaire_m, puissance_fat_dbm,
         puissance_pto_dbm, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         materiel_pose, points_gps, ont_sn, pto_qte, repeteur_wifi_qte, emplacement_ont,
@@ -474,7 +484,7 @@ try {
       // de toute facon ecrasees par '' ci-dessous, inutile de les transferer depuis
       // MySQL (LONGTEXT, potentiellement plusieurs dizaines de Ko chacune).
       $stmt = db()->prepare('SELECT id, date, statut, nom_technicien, nom_equipe,
-        nom_client, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
+        nom_client, nom_dossier, adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
         ports_disponibles, port_disponible, type_cable, depart_m, arrivee_m, lineaire_m, puissance_fat_dbm,
           puissance_pto_dbm, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         materiel_pose, points_gps, ont_sn, pto_qte, repeteur_wifi_qte, emplacement_ont,
@@ -570,6 +580,10 @@ try {
 
         $stmt = $pdo->prepare('DELETE FROM interventions WHERE id = ?');
         $stmt->execute([$interventionId]);
+        try {
+          $stmtDelLog = $pdo->prepare('INSERT INTO deleted_interventions (id, deleted_at) VALUES (?, NOW()) ON DUPLICATE KEY UPDATE deleted_at = NOW()');
+          $stmtDelLog->execute([$interventionId]);
+        } catch (Exception $e) {}
         $pdo->commit();
         echo json_encode(['ok' => true, 'stock_restored' => $restored]);
       } catch (Exception $e) {
@@ -610,10 +624,17 @@ try {
           if ($ts !== false) $d[$champDate] = date('Y-m-d H:i:s', $ts);
         }
       }
+      $d['nom_dossier'] = trim((string)($d['nom_dossier'] ?? ''));
+      $d['nom_client'] = trim((string)($d['nom_client'] ?? ''));
+      if ($d['nom_dossier'] !== '' && $d['nom_client'] === '') {
+        $d['nom_client'] = $d['nom_dossier'];
+      } elseif ($d['nom_client'] !== '' && $d['nom_dossier'] === '') {
+        $d['nom_dossier'] = $d['nom_client'];
+      }
       $isLight = ($d['_light'] ?? false) === true;
       $fields = [
         'id', 'date', 'statut', 'nom_technicien', 'nom_equipe',
-        'nom_client', 'adresse_zone', 'telephone_ligne', 'mobile',
+        'nom_client', 'nom_dossier', 'adresse_zone', 'telephone_ligne', 'mobile',
         'etat', 'msan', 'fat_ref', 'port', 'ports_disponibles', 'port_disponible', 'type_cable',
         'depart_m', 'arrivee_m', 'lineaire_m', 'puissance_fat_dbm', 'puissance_pto_dbm',
         'mac', 'sn', 'nb_poteaux_traverses', 'nb_poteaux_implantes', 'nb_poteaux_armes',

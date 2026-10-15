@@ -331,4 +331,24 @@ test("toLightIntervention strips heavy base64 photos and signatures for fast lis
   assert.equal(light.signature_technicien, undefined, "signature_technicien must be stripped");
 });
 
+test("nom_dossier and nom_client are automatically synchronized and defaulted", async () => {
+  const { ensureInterventionDefaults, createEmptyIntervention } = await import("./Intervention.js");
+
+  // 1. Création avec nom initial
+  const intv = createEmptyIntervention("Stanislas", "Dossier Haie Vive");
+  assert.equal(intv.nom_client, "Dossier Haie Vive");
+  assert.equal(intv.nom_dossier, "Dossier Haie Vive");
+
+  // 2. Defaulting depuis nom_dossier seul
+  const fromDossier = ensureInterventionDefaults({ nom_dossier: "Pharmacie Concorde" });
+  assert.equal(fromDossier.nom_client, "Pharmacie Concorde");
+  assert.equal(fromDossier.nom_dossier, "Pharmacie Concorde");
+
+  // 3. Defaulting depuis nom_client seul
+  const fromClient = ensureInterventionDefaults({ nom_client: "Entreprise X" });
+  assert.equal(fromClient.nom_client, "Entreprise X");
+  assert.equal(fromClient.nom_dossier, "Entreprise X");
+});
+
+
 

@@ -231,6 +231,8 @@ export function ensureInterventionDefaults(data) {
     mac: String(data.mac ?? ""),
     sn: String(data.sn ?? ""),
     ont_sn: String(data.ont_sn ?? data.sn ?? ""),
+    nom_client: String(data.nom_client || data.nom_dossier || ""),
+    nom_dossier: String(data.nom_dossier || data.nom_client || ""),
     updated_at: String(data.updated_at || data.modifie_le || ""),
     modifie_le: String(data.modifie_le || data.updated_at || ""),
     type_intervention_satisfaction: data.type_intervention_satisfaction || "Installation",
@@ -289,10 +291,24 @@ export async function listInterventions() {
 
   try {
     const rows = await apiGet("interventions_list_light");
-    const currentCached = getCached();
-    const serverMap = new Map();
+    let deletedIds = [];
+    try {
+      deletedIds = await apiGet("deleted_interventions_list", 6000);
+    } catch {}
+    const deletedSet = new Set(Array.isArray(deletedIds) ? deletedIds : []);
 
-    const merged = rows.map((row) => {
+    // Purger immédiatement les interventions supprimées du stockage local et de l'outbox
+    for (const dId of deletedSet) {
+      removeFromOutbox(dId);
+      try { localStorage.removeItem(INTV_STORAGE_PREFIX + dId); } catch {}
+    }
+
+    const currentCached = getCached().filter((c) => c?.id && !deletedSet.has(c.id));
+    const serverMap = new Map();
+    const outboxQueue = getSyncOutbox();
+    const outboxIds = new Set(outboxQueue.map((item) => item.id));
+
+    const merged = rows.filter((r) => !deletedSet.has(r.id)).map((row) => {
       serverMap.set(row.id, true);
       const existing = currentCached.find((c) => c.id === row.id);
       if (existing) {
@@ -301,15 +317,30 @@ export async function listInterventions() {
         if (localTime && serverTime && localTime > serverTime) {
           return { ...row, ...existing };
         }
-        return { ...existing, ...row };
+        // Préserver le nom du client local si le serveur renvoie une chaîne vide
+        const fallbackClient = (!row.nom_client && existing.nom_client) ? existing.nom_client : row.nom_client;
+        const fallbackDossier = (!row.nom_dossier && existing.nom_dossier) ? existing.nom_dossier : (row.nom_dossier || fallbackClient);
+        return { ...existing, ...row, nom_client: fallbackClient, nom_dossier: fallbackDossier };
       }
-      return row;
+      return {
+        ...row,
+        nom_dossier: row.nom_dossier || row.nom_client || "",
+        nom_client: row.nom_client || row.nom_dossier || "",
+      };
     });
 
-    // Sauvegarde anti-perte : préserver toutes les interventions locales non encore créées sur le serveur !
+    // Sauvegarde anti-perte STRICTE :
+    // Ne préserver que les interventions locales qui sont RÉELLEMENT en attente de synchronisation dans l'outbox (créations hors-ligne).
+    // Si une intervention en cache n'est plus sur le serveur ET n'est pas dans l'outbox, ELLE A ÉTÉ SUPPRIMÉE SUR LE SERVEUR !
+    // Elle ne doit JAMAIS être réinjectée ni ressuscitée sur les appareils.
     for (const cached of currentCached) {
       if (cached?.id && !serverMap.has(cached.id)) {
-        merged.unshift(cached);
+        if (outboxIds.has(cached.id)) {
+          merged.unshift(cached);
+        } else {
+          // Supprimée sur le serveur -> purger le cache local de l'appareil
+          try { localStorage.removeItem(INTV_STORAGE_PREFIX + cached.id); } catch {}
+        }
       }
     }
 
@@ -432,17 +463,34 @@ export async function saveIntervention(intervention) {
  * @returns {Promise<Intervention|null>}
  */
 export async function getIntervention(id) {
+  const local = getStoredIntervention(id);
   try {
     const remote = await apiPost("intervention_get", { id });
     if (remote) {
-      const defaulted = ensureInterventionDefaults(remote);
-      saveInterventionLocally(defaulted);
-      return defaulted;
+      const defaultedRemote = ensureInterventionDefaults(remote);
+      let finalIntv = defaultedRemote;
+      if (local) {
+        const localTime = local.updated_at || local.modifie_le || "";
+        const remoteTime = defaultedRemote.updated_at || defaultedRemote.modifie_le || "";
+        if (!remoteTime || (localTime && localTime >= remoteTime)) {
+          finalIntv = { ...defaultedRemote, ...local };
+        } else {
+          finalIntv = { ...defaultedRemote };
+          for (const key of ["nom_client", "nom_dossier", "telephone_ligne", "mobile", "adresse_zone", "msan", "fat_ref", "port"]) {
+            if (!finalIntv[key] && local[key]) {
+              finalIntv[key] = local[key];
+            }
+          }
+        }
+      }
+      finalIntv._fully_loaded = true;
+      saveInterventionLocally(finalIntv);
+      return finalIntv;
     }
   } catch (err) {
     console.warn("getIntervention remote fetch error:", err);
   }
-  return getStoredIntervention(id) || null;
+  return local || null;
 }
 
 export async function getInterventionLight(id) {
@@ -478,7 +526,7 @@ export async function deleteIntervention(id) {
   setCached(list);
 }
 
-export function createEmptyIntervention(technicien) {
+export function createEmptyIntervention(technicien, initialNom = "") {
   return {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
@@ -486,7 +534,8 @@ export function createEmptyIntervention(technicien) {
     nom_technicien: technicien ?? "",
     nom_equipe: "TELECOM BTP Services",
 
-    nom_client: "",
+    nom_client: initialNom,
+    nom_dossier: initialNom,
     adresse_zone: "",
     telephone_ligne: "",
     mobile: "",

@@ -350,6 +350,29 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   }, [data, whatsappPhotos, flushServerSync]);
 
+  const handleClose = useCallback(() => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    const latest = dataRef.current;
+    if (latest) {
+      saveInterventionLocally(latest);
+      flushServerSync().catch(() => {});
+    }
+    onClose();
+  }, [flushServerSync, onClose]);
+
+  useEffect(() => {
+    function handleBeforeUnload() {
+      if (dataRef.current) {
+        saveInterventionLocally(dataRef.current);
+        flushServerSync().catch(() => {});
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [flushServerSync]);
+
   useEffect(() => {
     let active = true;
     const refreshRemoteFields = async () => {
@@ -466,11 +489,17 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         }
       }
     }
-    markDirty(
-      field,
-      ...(field === "depart_m" || field === "arrivee_m" ? ["lineaire_m"] : []),
-      ...(field === "points_gps" ? ["nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes"] : [])
-    );
+    if (field === "nom_client") {
+      markDirty("nom_client", "nom_dossier");
+    } else if (field === "nom_dossier") {
+      markDirty("nom_dossier", "nom_client");
+    } else {
+      markDirty(
+        field,
+        ...(field === "depart_m" || field === "arrivee_m" ? ["lineaire_m"] : []),
+        ...(field === "points_gps" ? ["nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes"] : [])
+      );
+    }
     setData((prev) => {
       const next = {
         ...prev,
@@ -478,6 +507,17 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
       };
+      if (field === "nom_client") {
+        next.nom_dossier = value;
+        if (!prev.nom_client_declaration || prev.nom_client_declaration === prev.nom_client) {
+          next.nom_client_declaration = value;
+        }
+      } else if (field === "nom_dossier") {
+        next.nom_client = value;
+        if (!prev.nom_client_declaration || prev.nom_client_declaration === prev.nom_client) {
+          next.nom_client_declaration = value;
+        }
+      }
       if (field === "depart_m" || field === "arrivee_m") {
         const depart = field === "depart_m" ? Number(value) : Number(prev.depart_m);
         const arrivee = field === "arrivee_m" ? Number(value) : Number(prev.arrivee_m);
@@ -493,7 +533,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       saveInterventionLocally(next);
       return next;
     });
-    setSaveStatus("✓ Enregistré");
+    setSaveStatus("Enregistrement…");
   }
 
   const resolvedType = pointType === "Autre" ? customType.trim() : pointType;
@@ -1841,7 +1881,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   return (
     <div className="intervention-form">
       <header className="form-header">
-        <h2>Intervention - {data.nom_client || "Nouveau client"}</h2>
+        <h2>Intervention - {data.nom_dossier || data.nom_client || "Nouveau dossier"}</h2>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
@@ -1877,7 +1917,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               {saveStatus}
             </span>
           )}
-          <button type="button" className="btn-secondary" onClick={onClose}>
+          <button type="button" className="btn-secondary" onClick={handleClose}>
             Retour
           </button>
         </div>
@@ -2091,9 +2131,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               </div>
               <div className="form-card-body">
                 <TextField
-                  label="Nom du client"
+                  label="Nom du dossier / Client"
                   placeholder="Ex: Entreprise Mantota ou Nom de l'abonné"
-                  value={data.nom_client}
+                  value={data.nom_client || data.nom_dossier || ""}
                   onChange={(v) => update("nom_client", v)}
                 />
 

@@ -16,8 +16,8 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
   const shortId = (intervention.id || "").slice(0, 8).toUpperCase();
   const phone = intervention.mobile || intervention.telephone_ligne || "";
   const technician = (intervention.nom_technicien || "").trim();
-  const rawClient = (intervention.nom_client || "").trim();
-  const clientName = rawClient || (technician ? `Nouveau client (${technician})` : "Nouveau client");
+  const rawClient = (intervention.nom_dossier || intervention.nom_client || "").trim();
+  const clientName = rawClient || (technician ? `Nouveau dossier (${technician})` : "Nouveau dossier");
   const zone = (intervention.adresse_zone || "").trim();
   const offer = (intervention.offre_souscrite || intervention.etat || "Raccordement").trim();
 

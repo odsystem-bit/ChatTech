@@ -76,9 +76,10 @@ export function matchesInterventionSearch(intv, query) {
   const id = normalizeSearchText(intv.id);
   if (id.includes(q)) return true;
 
-  // 2. Nom du client
+  // 2. Nom du client ou dossier
   const client = normalizeSearchText(intv.nom_client);
-  if (client.includes(q)) return true;
+  const dossier = normalizeSearchText(intv.nom_dossier);
+  if (client.includes(q) || dossier.includes(q)) return true;
 
   // 3. Téléphones (fixe et mobile, recherche brute sans tirets/espaces également)
   const telFixe = normalizeSearchText(intv.telephone_ligne);

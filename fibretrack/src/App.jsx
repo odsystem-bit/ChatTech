@@ -157,11 +157,23 @@ export default function App() {
     }
   }
 
-  async function startNewIntervention() {
+  const [newDossierModalOpen, setNewDossierModalOpen] = useState(false);
+  const [newDossierName, setNewDossierName] = useState("");
+
+  async function handleCreateDossierSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const name = (newDossierName || "").trim();
+    setNewDossierModalOpen(false);
+    setNewDossierName("");
+    await startNewIntervention(name);
+  }
+
+  async function startNewIntervention(initialNom = "") {
     if (creatingNew) return;
     setCreatingNew(true);
     try {
-      const intervention = createEmptyIntervention(user?.nom || "");
+      const intervention = createEmptyIntervention(user?.nom || "", initialNom);
+      intervention._fully_loaded = true;
       // 1. Sauvegarde locale instantanée (0 ms) & ouverture immédiate
       saveInterventionLocally(intervention);
       setActiveIntervention(intervention);
@@ -186,46 +198,23 @@ export default function App() {
     const id = typeof target === "object" && target !== null ? target.id : target;
     if (!id || openingId) return;
 
-    // 1. Si nous avons l'intervention complète en cache local (avec photos ou statut complet) : ouverture instantanée 0 ms
+    // 1. Si nous avons l'intervention en cache local : ouverture instantanée 0 ms garantie
     const localFull = getStoredIntervention(id);
-    const hasFullLocalData = localFull && (
-      localFull._fully_loaded === true ||
-      (Array.isArray(localFull.whatsapp_photos) && localFull.whatsapp_photos.length > 0) ||
-      (Array.isArray(localFull.points_gps) && localFull.points_gps.length > 0)
-    );
-
-    if (hasFullLocalData) {
+    if (localFull) {
       setActiveIntervention(localFull);
       navigateTo(isInterventionTerminee(localFull) ? "report" : "form");
 
-      // Synchronisation transparente en arrière-plan
+      // Synchronisation transparente en arrière-plan sans bloquer ni écraser
       getIntervention(id)
         .then((fresh) => {
           if (!fresh) return;
-          const freshTime = fresh.updated_at || fresh.modifie_le || "";
-          const localTime = localFull.updated_at || localFull.modifie_le || "";
-          const freshPhotos = Array.isArray(fresh.whatsapp_photos) ? fresh.whatsapp_photos : [];
-          const localPhotos = Array.isArray(localFull.whatsapp_photos) ? localFull.whatsapp_photos : [];
-          const freshGps = Array.isArray(fresh.points_gps) ? fresh.points_gps : [];
-          const localGps = Array.isArray(localFull.points_gps) ? localFull.points_gps : [];
-
-          const hasPhotoDiff = freshPhotos.length !== localPhotos.length ||
-            freshPhotos.some((fp) => !localPhotos.some((lp) => (lp.id && lp.id === fp.id) || (lp.slot && lp.slot === fp.slot && lp.url === fp.url)));
-          const hasGpsDiff = freshGps.length !== localGps.length;
-          const hasTimeDiff = freshTime && localTime && freshTime !== localTime;
-          const hasStatusDiff = (fresh.statut || "") !== (localFull.statut || "");
-
-          if (hasTimeDiff || hasPhotoDiff || hasGpsDiff || hasStatusDiff) {
-            const merged = { ...localFull, ...fresh, _fully_loaded: true };
-            saveInterventionLocally(merged);
-            setActiveIntervention(merged);
-          }
+          setActiveIntervention((prev) => (prev?.id === fresh.id ? { ...prev, ...fresh, _fully_loaded: true } : prev));
         })
         .catch(() => {});
       return;
     }
 
-    // 2. Première ouverture ou cache partiel : chargement complet sécurisé depuis le serveur avec indicateur
+    // 2. Première ouverture (non encore en cache local) : chargement sécurisé depuis le serveur
     setOpeningId(id);
     try {
       const intervention = await getIntervention(id);
@@ -243,6 +232,8 @@ export default function App() {
       const listItem = typeof target === "object" && target !== null ? target : interventions.find((i) => i.id === id);
       if (listItem) {
         const initial = ensureInterventionDefaults(listItem);
+        initial._fully_loaded = true;
+        saveInterventionLocally(initial);
         setActiveIntervention(initial);
         navigateTo(isInterventionTerminee(initial) ? "report" : "form");
       } else {
@@ -439,7 +430,7 @@ export default function App() {
         </div>
 
         <div className="home-actions">
-          <button type="button" className="home-action-card" onClick={startNewIntervention} disabled={creatingNew}>
+          <button type="button" className="home-action-card" onClick={() => setNewDossierModalOpen(true)} disabled={creatingNew}>
             <div className="icon primary">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M12 5v14M5 12h14" />
@@ -447,7 +438,7 @@ export default function App() {
             </div>
             <div>
               <div className="label">{creatingNew ? "Création…" : "Nouvelle intervention"}</div>
-              <div className="sub">Créer une fiche de raccordement</div>
+              <div className="sub">Créer un nouveau dossier / raccordement</div>
             </div>
             <svg className="chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <polyline points="9 18 15 12 9 6" />
@@ -717,6 +708,65 @@ export default function App() {
             >
               Suivant →
             </button>
+          </div>
+        )}
+        {/* Modal Création Nouveau Dossier */}
+        {newDossierModalOpen && (
+          <div className="modal-overlay" style={{ zIndex: 9999 }}>
+            <div className="modal-card" style={{ maxWidth: 460, width: "90%", padding: 24, borderRadius: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ background: "#e0f2fe", color: "#0284c7", width: 42, height: 42, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+                  📁
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Nouveau Dossier / Raccordement</h3>
+                  <p style={{ margin: 0, fontSize: 13, color: "#64748b" }}>Création d'une fiche d'intervention synchronisée</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleCreateDossierSubmit}>
+                <div style={{ marginBottom: 18 }}>
+                  <label style={{ display: "block", fontSize: 14, fontWeight: 600, color: "#334155", marginBottom: 6 }}>
+                    Nom du dossier ou Nom du client
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex : Clinique Mahouna, Entreprise Mantota..."
+                    value={newDossierName}
+                    onChange={(e) => setNewDossierName(e.target.value)}
+                    autoFocus
+                    style={{
+                      width: "100%",
+                      padding: "12px 14px",
+                      borderRadius: 10,
+                      border: "1.5px solid #cbd5e1",
+                      fontSize: 15,
+                      boxSizing: "border-box"
+                    }}
+                  />
+                  <span style={{ display: "block", fontSize: 12, color: "#64748b", marginTop: 5 }}>
+                    Le nom de l'intervention et du dossier seront automatiquement liés et synchronisés.
+                  </span>
+                </div>
+
+                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => { setNewDossierModalOpen(false); setNewDossierName(""); }}
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    className="btn-primary"
+                    disabled={creatingNew}
+                  >
+                    {creatingNew ? "Création…" : "Créer le dossier"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
       </main>
