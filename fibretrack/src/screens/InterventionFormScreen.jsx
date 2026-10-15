@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import Tabs from "../components/Tabs";
 import { TextField, CheckField, SelectField, ScannableField, GeocodableField } from "../components/FormField";
-import SignaturePad from "../components/SignaturePad";
 import {
   getIntervention,
   getInterventionLight,
@@ -45,7 +44,6 @@ import {
   IconRefresh,
   IconCheckCircle,
   IconPole,
-  IconAlertTriangle,
 } from "../components/Icons";
 import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 
@@ -161,10 +159,10 @@ export const CELPROS_PHOTO_SLOTS = [
 ];
 
 const OFFRES = ["Fibre Pro", "Pro Max", "Pro Mega", "Office Max", "Office Mega"];
-const NIVEAUX = ["Très satisfait", "Satisfait", "Peu satisfait", "Insatisfait"];
+const _NIVEAUX = ["Très satisfait", "Satisfait", "Peu satisfait", "Insatisfait"];
 const TYPES_POINT = ["Poteau", "Chambre", "FAT", "Abonné", "Autre"];
 const SOUS_TYPES_POTEAU = ["Traversé", "Armé", "Implanté"];
-const PORTS_DISPONIBLES = Array.from({ length: 8 }, (_, index) => `Port ${index + 1}`);
+const _PORTS_DISPONIBLES = Array.from({ length: 8 }, (_, index) => `Port ${index + 1}`);
 const PROPRIETAIRES_SUGGERES = ["SBEE", "Petit Jean"];
 
 const MATERIEL_STANDARD = [
@@ -234,23 +232,31 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   // Synchronisation sécurisée si les photos ou points arrivent depuis un rechargement ou autre agent
   useEffect(() => {
     if (!intervention) return;
-    if (Array.isArray(intervention.whatsapp_photos) && intervention.whatsapp_photos.length > 0) {
+    if (Array.isArray(intervention.whatsapp_photos)) {
       setWhatsappPhotos((prev) => {
-        if (!prev || prev.length === 0) return intervention.whatsapp_photos;
-        const incoming = intervention.whatsapp_photos;
+        const deletedIds = deletedWhatsappPhotoIdsRef.current;
+        const incoming = intervention.whatsapp_photos.filter((p) => !p?.id || !deletedIds.has(p.id));
+        if (!prev || prev.length === 0) return incoming;
         const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-        const localUnsynced = prev.filter((p) => p?.id && !incomingIds.has(p.id));
+        const localUnsynced = prev.filter((p) => p?.id && !incomingIds.has(p.id) && !deletedIds.has(p.id));
         return [...incoming, ...localUnsynced];
       });
     }
-    if (Array.isArray(intervention.points_gps) && intervention.points_gps.length > 0) {
+    if (Array.isArray(intervention.points_gps)) {
       setData((prev) => {
+        const deletedIds = deletedGpsPointIdsRef.current;
+        const incoming = intervention.points_gps.filter((p) => {
+          const key = p?.id || p?.horodatage;
+          return !key || !deletedIds.has(key);
+        });
         if (!prev.points_gps || prev.points_gps.length === 0) {
-          return { ...prev, points_gps: intervention.points_gps };
+          return { ...prev, points_gps: incoming };
         }
-        const incoming = intervention.points_gps;
-        const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-        const localUnsynced = (prev.points_gps || []).filter((p) => p?.id && !incomingIds.has(p.id));
+        const incomingKeys = new Set(incoming.map((p) => p?.id || p?.horodatage).filter(Boolean));
+        const localUnsynced = (prev.points_gps || []).filter((p) => {
+          const key = p?.id || p?.horodatage;
+          return key && !incomingKeys.has(key) && !deletedIds.has(key);
+        });
         return { ...prev, points_gps: [...incoming, ...localUnsynced] };
       });
     }
@@ -935,7 +941,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     } finally {
       setOcrProcessing(false);
     }
-  }, []);
+  }, [update]);
 
   // ===== Gestion des Boîtes de Photos CelPros =====
 
@@ -1938,8 +1944,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       try {
         saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
         const saved = await saveQueueRef.current;
+        const completeData = saved?.updated_at ? { ...finalData, updated_at: saved.updated_at } : finalData;
         if (saved?.updated_at) {
-          finalData.updated_at = saved.updated_at;
           setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
         }
       } catch (netErr) {
@@ -1947,7 +1953,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
 
       // Afficher immédiatement l'écran de confirmation de succès dans la modale
-      setFinishSuccessData(finalData);
+      setFinishSuccessData(completeData);
     } catch (err) {
       console.error("finish error:", err);
       alert("Erreur lors de la finalisation: " + (err.message || "inconnue"));

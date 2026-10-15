@@ -340,6 +340,7 @@ try {
   if ($action === 'media_upload') {
     $user = requireAuth();
     $interventionId = trim($_POST['intervention_id'] ?? '');
+    $interventionId = preg_replace('/[^a-zA-Z0-9_-]/', '', $interventionId);
     $type = $_POST['type'] ?? '';
     if (!$interventionId || !in_array($type, ['photo', 'video', 'fiche'], true) || empty($_FILES['file']['tmp_name'])) {
       http_response_code(400);
@@ -607,22 +608,30 @@ try {
       $d = $input;
       normalizeInterventionTypes($d);
       $portDisponible = (int)($d['port_disponible'] ?? 0);
-      if ($portDisponible < 0 || $portDisponible > 8) {
+      if ($portDisponible < 0 || $portDisponible > 32) {
         http_response_code(400);
-        echo json_encode(['error' => 'Le nombre de ports disponibles doit être compris entre 0 et 8']);
+        echo json_encode(['error' => 'Le nombre de ports disponibles doit être compris entre 0 et 32']);
         break;
       }
       $portsDisponibles = trim((string)($d['ports_disponibles'] ?? ''));
       if ($portsDisponibles !== '') {
-        $ports = array_values(array_filter(array_map('trim', explode(',', $portsDisponibles))));
-        $invalidPorts = array_filter($ports, fn($port) => !preg_match('/^Port [1-8]$/', $port));
-        if ($invalidPorts || count($ports) !== count(array_unique($ports))) {
-          http_response_code(400);
-          echo json_encode(['error' => 'Les ports disponibles doivent être une liste unique de Port 1 à Port 8']);
-          break;
+        $rawPorts = array_values(array_filter(array_map('trim', explode(',', $portsDisponibles))));
+        $normalizedPorts = [];
+        foreach ($rawPorts as $rp) {
+          if (preg_match('/^(?:Port\s*)?(\d{1,2})$/i', $rp, $m)) {
+            $pNum = (int)$m[1];
+            if ($pNum >= 1 && $pNum <= 32) {
+              $normalizedPorts[] = "Port $pNum";
+            }
+          } elseif ($rp !== '') {
+            $normalizedPorts[] = $rp;
+          }
         }
-        $d['ports_disponibles'] = implode(', ', $ports);
-        $d['port_disponible'] = count($ports);
+        if (!empty($normalizedPorts)) {
+          $normalizedPorts = array_values(array_unique($normalizedPorts));
+          $d['ports_disponibles'] = implode(', ', $normalizedPorts);
+          $d['port_disponible'] = count($normalizedPorts);
+        }
       }
       // L'APK envoie des dates ISO 8601 (Instant.toString() →
       // '2026-10-09T08:25:34Z'). En mode SQL strict : INSERT rejeté
@@ -672,7 +681,7 @@ try {
       $expectedUpdatedAt = trim((string)($d['expected_updated_at'] ?? ''));
       $changedFields = isset($d['changed_fields']) && is_array($d['changed_fields']) ? array_values($d['changed_fields']) : null;
       if (!empty($d['id'])) {
-        $stmtEx = $pdo->prepare('SELECT points_gps, whatsapp_photos, signature_client, signature_technicien, materiel_pose, materiel_deduit, statut, nom_client, nom_technicien FROM interventions WHERE id = ? FOR UPDATE');
+        $stmtEx = $pdo->prepare('SELECT points_gps, whatsapp_photos, signature_client, signature_technicien, materiel_pose, materiel_deduit, statut, nom_client, nom_technicien, modifie_le FROM interventions WHERE id = ? FOR UPDATE');
         $stmtEx->execute([$d['id']]);
         $existing = $stmtEx->fetch() ?: null;
       }
@@ -842,7 +851,7 @@ try {
       unset($pt);
 
       // Recompute pole counts from points_gps to ensure DB consistency
-      if (is_array($incomingGps) && !empty($incomingGps)) {
+      if (is_array($incomingGps)) {
         $calcImp = 0;
         $calcArm = 0;
         $calcTrav = 0;
@@ -856,9 +865,15 @@ try {
             if ($isTrav) $calcTrav++;
           }
         }
-        $d['nb_poteaux_implantes'] = max((int)($d['nb_poteaux_implantes'] ?? 0), $calcImp);
-        $d['nb_poteaux_armes'] = max((int)($d['nb_poteaux_armes'] ?? 0), $calcArm);
-        $d['nb_poteaux_traverses'] = max((int)($d['nb_poteaux_traverses'] ?? 0), $calcTrav);
+        if (!$patchMode || in_array('points_gps', $changedFields, true)) {
+          $d['nb_poteaux_implantes'] = $calcImp;
+          $d['nb_poteaux_armes'] = $calcArm;
+          $d['nb_poteaux_traverses'] = $calcTrav;
+        } else {
+          $d['nb_poteaux_implantes'] = max((int)($d['nb_poteaux_implantes'] ?? 0), $calcImp);
+          $d['nb_poteaux_armes'] = max((int)($d['nb_poteaux_armes'] ?? 0), $calcArm);
+          $d['nb_poteaux_traverses'] = max((int)($d['nb_poteaux_traverses'] ?? 0), $calcTrav);
+        }
       }
 
       // --- Déduction stock : à faire seulement au premier passage à 'termine' ---
