@@ -23,14 +23,25 @@ export function getApiCode() {
   return "";
 }
 
-async function apiPost(action, body = {}, authCode) {
+function buildApiUrl(action, authCode) {
   const code = authCode || getApiCode();
-  const sep = action.includes("?") ? "&" : "?";
-  const authQuery = code ? `${sep}user_code=${encodeURIComponent(code)}` : "";
-  const res = await fetch(`${API_URL}?action=${action}${authQuery}`, {
+  const [baseAction, queryStr] = action.split("?");
+  const params = new URLSearchParams(queryStr || "");
+  params.set("action", baseAction);
+  params.set("_t", String(Date.now()));
+  if (code) {
+    params.set("user_code", code);
+  }
+  return `${API_URL}?${params.toString()}`;
+}
+
+async function apiPost(action, body = {}, authCode) {
+  const url = buildApiUrl(action, authCode);
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getApiAuthHeaders(authCode) },
     body: JSON.stringify(body),
+    cache: "no-store",
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
@@ -38,10 +49,11 @@ async function apiPost(action, body = {}, authCode) {
 }
 
 async function apiGet(action) {
-  const code = getApiCode();
-  const sep = action.includes("?") ? "&" : "?";
-  const authQuery = code ? `${sep}user_code=${encodeURIComponent(code)}` : "";
-  const res = await fetch(`${API_URL}?action=${action}${authQuery}`, { headers: getApiAuthHeaders() });
+  const url = buildApiUrl(action);
+  const res = await fetch(url, {
+    headers: getApiAuthHeaders(),
+    cache: "no-store",
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;

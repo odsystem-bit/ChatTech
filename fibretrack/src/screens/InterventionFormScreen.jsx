@@ -36,6 +36,7 @@ import {
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
 import { isInterventionTerminee } from "../lib/interventionFilters";
+import { downloadPhotoFile } from "../lib/photoDownload";
 import {
   IconFlag,
   IconHome,
@@ -846,7 +847,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   // ===== Gestion des Boîtes de Photos CelPros =====
 
   function getPhotoForSlot(slotKey) {
-    // 1. Recherche par slot ou type direct dans whatsapp_photos (en excluant les photos additionnelles / hors CelPros)
+    if (!slotKey) return null;
+
+    // 1. Recherche par slot ou type direct dans whatsapp_photos (en excluant strictement les photos additionnelles)
     const direct = whatsappPhotos.find(
       (p) =>
         p &&
@@ -859,12 +862,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     );
     if (direct) return direct;
 
-    // 2. Recherche dans les points GPS pour FAT ou Abonné (ONT)
+    // 2. Recherche STRICTE pour photos historiques ou points GPS
     if (slotKey === "fat") {
-      const fatPt = (data.points_gps || []).find((p) => p && String(p.type).toUpperCase() === "FAT" && p.photo);
+      const fatPt = (data.points_gps || []).find((p) => p && String(p.type).trim().toUpperCase() === "FAT" && p.photo);
       if (fatPt) {
         return {
           id: `gps_fat_${fatPt.numero || 1}`,
+          slot: "fat",
+          type: "fat",
+          label: "Boîtier FAT",
           url: fatPt.photo,
           lat: fatPt.lat,
           lng: fatPt.lng,
@@ -874,12 +880,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           from_gps: true,
         };
       }
+      // Photo historique nommée exactement "FAT" ou "Boitier FAT" (mais JAMAIS "Mesure FAT" ou "Fibre FAT")
+      const legacyFat = whatsappPhotos.find(
+        (p) =>
+          p &&
+          !p.additionnelle &&
+          !p.is_additionnelle &&
+          !p.exclude_celpros &&
+          p.name &&
+          /^(fat|boitier\s*fat)(\s*\d+)?$/i.test(p.name.trim())
+      );
+      if (legacyFat) return legacyFat;
     }
+
     if (slotKey === "ont_sn") {
-      const abonnePt = (data.points_gps || []).find((p) => p && (String(p.type).toUpperCase() === "ABONNÉ" || String(p.type).toUpperCase() === "ONT") && p.photo);
+      const abonnePt = (data.points_gps || []).find((p) => p && (String(p.type).trim().toUpperCase() === "ABONNÉ" || String(p.type).trim().toUpperCase() === "ONT") && p.photo);
       if (abonnePt) {
         return {
           id: `gps_abonne_${abonnePt.numero || 1}`,
+          slot: "ont_sn",
+          type: "ont_sn",
+          label: "Étiquette Box ONT (MAC & SN)",
           url: abonnePt.photo,
           lat: abonnePt.lat,
           lng: abonnePt.lng,
@@ -889,18 +910,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           from_gps: true,
         };
       }
+      // Photo historique nommée "Abonné" ou "ONT"
+      const legacyOnt = whatsappPhotos.find(
+        (p) =>
+          p &&
+          !p.additionnelle &&
+          !p.is_additionnelle &&
+          !p.exclude_celpros &&
+          p.name &&
+          /^(abonn[eé]|ont|box)(\s*\d+)?$/i.test(p.name.trim())
+      );
+      if (legacyOnt) return legacyOnt;
     }
 
-    // 3. Repli par mots-clés dans les métadonnées de la photo (en excluant les photos additionnelles / hors CelPros)
-    const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
-    if (slotDef) {
-      const match = whatsappPhotos.find((p) => {
-        if (p.additionnelle || p.is_additionnelle || p.exclude_celpros || p.slot === "additionnelle" || p.type === "additionnelle") return false;
-        const desc = `${p.name || ""} ${p.label || ""} ${p.description || ""} ${p.type || ""}`.toLowerCase();
-        return slotDef.keywords.some((kw) => desc.includes(kw));
-      });
-      if (match) return match;
-    }
+    // STRICT : Aucun repli par sous-chaîne ou mots-clés flous pour garantir l'étanchéité absolue de chaque catégorie
     return null;
   }
 
@@ -969,6 +992,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         horodatage,
         lieu,
         added: new Date().toISOString(),
+        additionnelle: false,
+        is_additionnelle: false,
+        exclude_celpros: false,
       };
 
       setWhatsappPhotos((prev) => {
@@ -995,15 +1021,39 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   function removeSlotPhoto(slotKey) {
     const existing = getPhotoForSlot(slotKey);
     if (!existing) return;
-    if (confirm(`Supprimer la photo de la case "${slotKey}" ?`)) {
+    const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
+    const slotLabel = slotDef?.label || slotKey;
+    if (confirm(`Supprimer la photo de la catégorie "${slotLabel}" ?`)) {
       markDirty("whatsapp_photos");
       if (existing.id) deletedWhatsappPhotoIdsRef.current.add(existing.id);
+
+      // Si la photo provenait d'un point GPS, nettoyer également le point GPS
+      if (existing.from_gps) {
+        setData((prev) => {
+          const nextPoints = (prev.points_gps || []).map((pt) => {
+            if (slotKey === "fat" && String(pt.type).trim().toUpperCase() === "FAT") {
+              return { ...pt, photo: "" };
+            }
+            if (slotKey === "ont_sn" && (String(pt.type).trim().toUpperCase() === "ABONNÉ" || String(pt.type).trim().toUpperCase() === "ONT")) {
+              return { ...pt, photo: "" };
+            }
+            return pt;
+          });
+          const nextData = { ...prev, points_gps: nextPoints };
+          saveInterventionLocally(nextData);
+          return nextData;
+        });
+        markDirty("points_gps");
+      }
+
       setWhatsappPhotos((prev) => {
-        const next = prev.filter((p) => p.id !== existing.id && p.slot !== slotKey && p.type !== slotKey);
+        const next = prev.filter((p) => p && p.id !== existing.id && p.slot !== slotKey && p.type !== slotKey);
         saveInterventionLocally({ ...data, whatsapp_photos: next });
         return next;
       });
       setSaveStatus("✓ Modifié");
+      setSlotActionFeedback(`Photo "${slotLabel}" supprimée.`);
+      setTimeout(() => setSlotActionFeedback(""), 3000);
     }
   }
 
@@ -1607,48 +1657,125 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       return;
     }
 
-    setWhatsappStatus("Préparation du partage…");
+    setWhatsappStatus("Préparation du partage WhatsApp…");
 
     try {
-      // WebView: use AndroidBridge for native WhatsApp sharing
+      // 1. Android WebView avec pont natif
       if (window.AndroidBridge && window.AndroidBridge.isWebView && window.AndroidBridge.isWebView()) {
         const base64Photos = [];
         for (const photo of selected) {
-          // Extract base64 from data URL
-          const base64 = photo.url.includes(",") ? photo.url.split(",")[1] : photo.url;
-          base64Photos.push(base64);
+          const rawUrl = photo.url || photo.photo || "";
+          const base64 = rawUrl.includes(",") ? rawUrl.split(",")[1] : rawUrl;
+          if (base64) base64Photos.push(base64);
         }
-        const text = `Photos intervention - ${data.nom_client || "Nouveau client"}`;
+        const text = `Photos intervention CHAPTECH - ${data.nom_client || "Nouveau client"}`;
         window.AndroidBridge.sharePhotos(JSON.stringify(base64Photos), text);
         setWhatsappStatus("Ouverture de WhatsApp…");
         return;
       }
 
-      // Browser: use Web Share API
+      // 2. Conversion sécurisée en Blob et File objects pour Web Share API
       const files = [];
-      for (const photo of selected) {
-        const blob = await fetch(photo.url).then((r) => r.blob());
-        files.push(new File([blob], `photo_${photo.id.slice(0, 8)}.jpg`, { type: "image/jpeg" }));
+      for (let i = 0; i < selected.length; i++) {
+        const photo = selected[i];
+        try {
+          const photoUrl = photo.url || photo.photo || "";
+          let blob = null;
+          if (photoUrl.startsWith("data:")) {
+            const parts = photoUrl.split(",");
+            const mime = parts[0].match(/:(.*?);/)?.[1] || "image/jpeg";
+            const b64 = parts[1];
+            const byteString = atob(b64);
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let j = 0; j < byteString.length; j++) {
+              ia[j] = byteString.charCodeAt(j);
+            }
+            blob = new Blob([ab], { type: mime });
+          } else if (photoUrl.startsWith("http")) {
+            const res = await fetch(photoUrl, { mode: "cors" });
+            if (res.ok) {
+              blob = await res.blob();
+            }
+          }
+          if (blob) {
+            const safeId = String(photo.id || `ph_${i + 1}`).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 8);
+            const slotName = photo.slot || photo.type || "photo";
+            files.push(new File([blob], `${slotName}_${safeId}.jpg`, { type: "image/jpeg" }));
+          }
+        } catch (fErr) {
+          console.warn("Échec conversion photo en fichier:", fErr);
+        }
       }
 
-      if (navigator.canShare && navigator.canShare({ files })) {
-        await navigator.share({
-          files,
-          title: "Photos CHAPTECH",
-          text: `Photos intervention - ${data.nom_client || "Nouveau client"}`,
-        });
-        setWhatsappStatus("Photos partagées !");
-      } else {
-        const text = `Photos intervention - ${data.nom_client || "Nouveau client"} (${selected.length} photo(s) à joindre manuellement)`;
-        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, "_blank");
-        setWhatsappStatus("WhatsApp ouvert. Joignez les photos manuellement depuis votre galerie.");
+      // 3. Essai Web Share API (Partage direct des fichiers vers WhatsApp sur mobile)
+      if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        try {
+          await navigator.share({
+            files,
+            title: "Photos CHAPTECH",
+            text: `Photos intervention CHAPTECH - ${data.nom_client || "Nouveau client"}`,
+          });
+          setWhatsappStatus("✓ Photos partagées avec succès !");
+          return;
+        } catch (shareErr) {
+          if (shareErr.name === "AbortError") {
+            setWhatsappStatus("");
+            return;
+          }
+          console.warn("Web Share API a échoué, repli vers les liens WhatsApp:", shareErr);
+        }
       }
+
+      // 4. Repli WhatsApp : Message complet et détaillé avec les informations et liens directs cliquables vers chaque photo
+      const clientName = data.nom_client || "Nouveau client";
+      const techName = data.nom_technicien || currentUser || "";
+      const zone = data.adresse_zone || "";
+      const dateStr = data.date ? new Date(data.date).toLocaleDateString("fr-FR") : new Date().toLocaleDateString("fr-FR");
+
+      let msg = `📸 *PHOTOS INTERVENTION CHAPTECH*\n`;
+      msg += `👤 *Client* : ${clientName}\n`;
+      if (zone) msg += `📍 *Zone* : ${zone}\n`;
+      if (techName) msg += `👷 *Technicien* : ${techName}\n`;
+      msg += `📅 *Date* : ${dateStr}\n\n`;
+      msg += `*${selected.length} Photo(s) sélectionnée(s) :*\n`;
+
+      selected.forEach((ph, idx) => {
+        const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === ph.slot);
+        const label = slotDef?.label || ph.label || ph.name || ph.slot || `Photo ${idx + 1}`;
+        const url = ph.url && ph.url.startsWith("http") ? ph.url : "";
+        msg += `${idx + 1}. *${label}*`;
+        if (url) {
+          msg += ` :\n${url}\n`;
+        } else {
+          msg += ` (enregistrée)\n`;
+        }
+      });
+
+      const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(waUrl, "_blank");
+      setWhatsappStatus("WhatsApp ouvert avec le récapitulatif complet et les liens directs des photos.");
     } catch (err) {
       if (err.name !== "AbortError") {
         setWhatsappStatus(`Erreur : ${err.message}`);
       } else {
         setWhatsappStatus("");
       }
+    }
+  }
+
+  async function downloadSelectedPhotos() {
+    const selected = whatsappPhotos.filter((p) => selectedPhotoIds.has(p.id));
+    if (selected.length === 0) return;
+    setWhatsappStatus("Téléchargement des photos sélectionnées…");
+    try {
+      for (const ph of selected) {
+        await downloadPhotoFile(ph);
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      setWhatsappStatus(`✓ ${selected.length} photo(s) téléchargée(s) sur votre appareil.`);
+    } catch (e) {
+      setWhatsappStatus(`Erreur de téléchargement : ${e.message}`);
     }
   }
 
@@ -2777,15 +2904,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    className="btn-primary btn-large"
-                    onClick={sendPhotosViaWhatsapp}
-                    disabled={selectedPhotoIds.size === 0}
-                    style={{ marginTop: 12 }}
-                  >
-                    Envoyer sur WhatsApp ({selectedPhotoIds.size})
-                  </button>
+                  <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn-primary btn-large"
+                      onClick={sendPhotosViaWhatsapp}
+                      disabled={selectedPhotoIds.size === 0}
+                      style={{ flex: 1, minWidth: 200 }}
+                    >
+                      Envoyer sur WhatsApp ({selectedPhotoIds.size})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary btn-large"
+                      onClick={downloadSelectedPhotos}
+                      disabled={selectedPhotoIds.size === 0}
+                      style={{ padding: "10px 16px" }}
+                      title="Télécharger les photos sélectionnées sur l'appareil"
+                    >
+                      ⬇ Télécharger ({selectedPhotoIds.size})
+                    </button>
+                  </div>
                 </>
               )}
             </div>
@@ -3118,15 +3257,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    className="btn-primary btn-large"
-                    onClick={sendPhotosViaWhatsapp}
-                    disabled={selectedPhotoIds.size === 0}
-                    style={{ marginTop: 12 }}
-                  >
-                    Envoyer sur WhatsApp ({selectedPhotoIds.size})
-                  </button>
+                  <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="btn-primary btn-large"
+                      onClick={sendPhotosViaWhatsapp}
+                      disabled={selectedPhotoIds.size === 0}
+                      style={{ flex: 1, minWidth: 200 }}
+                    >
+                      Envoyer sur WhatsApp ({selectedPhotoIds.size})
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary btn-large"
+                      onClick={downloadSelectedPhotos}
+                      disabled={selectedPhotoIds.size === 0}
+                      style={{ padding: "10px 16px" }}
+                      title="Télécharger les photos sélectionnées sur l'appareil"
+                    >
+                      ⬇ Télécharger ({selectedPhotoIds.size})
+                    </button>
+                  </div>
                 </>
               )}
 

@@ -1,15 +1,28 @@
-import { getApiAuthHeaders } from "../models/Account";
+import { getApiAuthHeaders, getApiCode } from "../models/Account";
 
 // Utilitaires de gestion du stock de matériel d'équipe.
 // Synchronisé avec le backend MySQL - partagé entre tous les techniciens.
 
 const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
+function buildApiUrl(action) {
+  const code = getApiCode();
+  const [baseAction, queryStr] = action.split("?");
+  const params = new URLSearchParams(queryStr || "");
+  params.set("action", baseAction);
+  params.set("_t", String(Date.now()));
+  if (code) {
+    params.set("user_code", code);
+  }
+  return `${API_URL}?${params.toString()}`;
+}
+
 async function apiPost(action, body = {}) {
-  const res = await fetch(`${API_URL}?action=${action}`, {
+  const res = await fetch(buildApiUrl(action), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
     body: JSON.stringify(body),
+    cache: "no-store",
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
@@ -17,7 +30,10 @@ async function apiPost(action, body = {}) {
 }
 
 async function apiGet(action) {
-  const res = await fetch(`${API_URL}?action=${action}`, { headers: getApiAuthHeaders() });
+  const res = await fetch(buildApiUrl(action), {
+    headers: getApiAuthHeaders(),
+    cache: "no-store",
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;

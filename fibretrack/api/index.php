@@ -203,7 +203,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 }
 
 $method = $_SERVER['REQUEST_METHOD'];
-$action = $_GET['action'] ?? '';
+$rawAction = (string)($_GET['action'] ?? '');
+$action = explode('?', $rawAction)[0];
+$action = explode('&', $action)[0];
+$action = trim($action);
 $rawBody = file_get_contents('php://input');
 $input = json_decode($rawBody, true);
 // Corps présent mais JSON indécodable (requête tronquée par une limite
@@ -283,18 +286,27 @@ function authenticatedUser() {
     }
   }
   global $input;
-  $code = trim(
-    $_SERVER['HTTP_X_USER_CODE']
-    ?? $_SERVER['REDIRECT_HTTP_X_USER_CODE']
-    ?? $headerCode
-    ?? $_GET['user_code']
-    ?? $_GET['code']
-    ?? ($_POST['user_code'] ?? '')
-    ?? ($_POST['code'] ?? '')
-    ?? ($input['user_code'] ?? '')
-    ?? ($input['code'] ?? '')
-    ?? ''
-  );
+  $candidates = [
+    $_SERVER['HTTP_X_USER_CODE'] ?? null,
+    $_SERVER['REDIRECT_HTTP_X_USER_CODE'] ?? null,
+    $headerCode,
+    $_GET['user_code'] ?? null,
+    $_GET['code'] ?? null,
+    $_POST['user_code'] ?? null,
+    $_POST['code'] ?? null,
+    $input['user_code'] ?? null,
+    $input['code'] ?? null,
+  ];
+  $code = '';
+  foreach ($candidates as $c) {
+    if ($c !== null) {
+      $val = trim((string)$c);
+      if ($val !== '') {
+        $code = $val;
+        break;
+      }
+    }
+  }
   if ($code === '9999') return $user = ['id' => 'admin', 'nom' => 'ADMIN', 'is_admin' => true];
   if ($code === '' || !preg_match('/^\d{4}$/', $code)) return null;
   $stmt = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
@@ -772,7 +784,7 @@ try {
           }
           $isAdditionnelle = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']);
           $itemKey = (!$isAdditionnelle && $slotKey !== '') ? ('slot_' . $slotKey) : ($idKey !== '' ? $idKey : uniqid());
-          $serverById[$itemKey] = array_merge($serverById[$itemKey] ?? [], $photo);
+          $serverById[$itemKey] = $photo;
         }
         $incomingWa = array_values($serverById);
       }

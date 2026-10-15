@@ -5,14 +5,24 @@ import { getApiAuthHeaders, getApiCode } from "./Account.js";
 
 const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
+function buildApiUrl(action) {
+  const code = getApiCode();
+  const [baseAction, queryStr] = action.split("?");
+  const params = new URLSearchParams(queryStr || "");
+  params.set("action", baseAction);
+  params.set("_t", String(Date.now()));
+  if (code) {
+    params.set("user_code", code);
+  }
+  return `${API_URL}?${params.toString()}`;
+}
+
 async function apiPost(action, body = {}, timeoutMs = 25000) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  const code = getApiCode();
-  const sep = action.includes("?") ? "&" : "?";
-  const authQuery = code ? `&user_code=${encodeURIComponent(code)}` : "";
+  const url = buildApiUrl(action);
   try {
-    const res = await fetch(`${API_URL}?action=${action}${authQuery}&_t=${Date.now()}`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
       body: JSON.stringify(body),
@@ -30,11 +40,9 @@ async function apiPost(action, body = {}, timeoutMs = 25000) {
 async function apiGet(action, timeoutMs = 20000) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  const code = getApiCode();
-  const sep = action.includes("?") ? "&" : "?";
-  const authQuery = code ? `&user_code=${encodeURIComponent(code)}` : "";
+  const url = buildApiUrl(action);
   try {
-    const res = await fetch(`${API_URL}?action=${action}${sep}_t=${Date.now()}${authQuery}`, {
+    const res = await fetch(url, {
       headers: getApiAuthHeaders(),
       cache: "no-store",
       ...(controller ? { signal: controller.signal } : {}),
