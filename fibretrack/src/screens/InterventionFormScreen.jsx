@@ -318,8 +318,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     const payload = {
       ...data,
-      whatsapp_photos: isWaPhotosDirty ? whatsappPhotos : [],
-      points_gps: isGpsDirty ? data.points_gps : [],
+      whatsapp_photos: isWaPhotosDirty || !data.updated_at ? whatsappPhotos : [],
+      points_gps: isGpsDirty || !data.updated_at ? data.points_gps : [],
       changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
       deleted_points: [...deletedGpsPointIdsRef.current],
       deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],

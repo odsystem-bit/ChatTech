@@ -24,7 +24,10 @@ export function getApiCode() {
 }
 
 async function apiPost(action, body = {}, authCode) {
-  const res = await fetch(`${API_URL}?action=${action}`, {
+  const code = authCode || getApiCode();
+  const sep = action.includes("?") ? "&" : "?";
+  const authQuery = code ? `${sep}user_code=${encodeURIComponent(code)}` : "";
+  const res = await fetch(`${API_URL}?action=${action}${authQuery}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getApiAuthHeaders(authCode) },
     body: JSON.stringify(body),
@@ -35,7 +38,10 @@ async function apiPost(action, body = {}, authCode) {
 }
 
 async function apiGet(action) {
-  const res = await fetch(`${API_URL}?action=${action}`, { headers: getApiAuthHeaders() });
+  const code = getApiCode();
+  const sep = action.includes("?") ? "&" : "?";
+  const authQuery = code ? `${sep}user_code=${encodeURIComponent(code)}` : "";
+  const res = await fetch(`${API_URL}?action=${action}${authQuery}`, { headers: getApiAuthHeaders() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;

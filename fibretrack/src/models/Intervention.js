@@ -1,4 +1,4 @@
-import { getApiAuthHeaders } from "./Account.js";
+import { getApiAuthHeaders, getApiCode } from "./Account.js";
 
 // Modèle de données "Intervention" - synchronisé avec le backend MySQL.
 // Toutes les interventions sont partagées entre tous les techniciens.
@@ -8,8 +8,11 @@ const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com
 async function apiPost(action, body = {}, timeoutMs = 25000) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const code = getApiCode();
+  const sep = action.includes("?") ? "&" : "?";
+  const authQuery = code ? `&user_code=${encodeURIComponent(code)}` : "";
   try {
-    const res = await fetch(`${API_URL}?action=${action}&_t=${Date.now()}`, {
+    const res = await fetch(`${API_URL}?action=${action}${authQuery}&_t=${Date.now()}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", ...getApiAuthHeaders() },
       body: JSON.stringify(body),
@@ -27,9 +30,11 @@ async function apiPost(action, body = {}, timeoutMs = 25000) {
 async function apiGet(action, timeoutMs = 20000) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const code = getApiCode();
   const sep = action.includes("?") ? "&" : "?";
+  const authQuery = code ? `&user_code=${encodeURIComponent(code)}` : "";
   try {
-    const res = await fetch(`${API_URL}?action=${action}${sep}_t=${Date.now()}`, {
+    const res = await fetch(`${API_URL}?action=${action}${sep}_t=${Date.now()}${authQuery}`, {
       headers: getApiAuthHeaders(),
       cache: "no-store",
       ...(controller ? { signal: controller.signal } : {}),
@@ -39,6 +44,90 @@ async function apiGet(action, timeoutMs = 20000) {
     return data;
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+// ===== GESTION DE LA FILE D'ATTENTE OUTBOX HORS-LIGNE =====
+const OUTBOX_KEY = "fibretrack_sync_outbox";
+const outboxListeners = new Set();
+
+export function getSyncOutbox() {
+  try {
+    return JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function notifyOutboxChange(count) {
+  for (const cb of outboxListeners) {
+    try { cb(count); } catch {}
+  }
+}
+
+export function onOutboxChange(callback) {
+  outboxListeners.add(callback);
+  return () => outboxListeners.delete(callback);
+}
+
+export function setSyncOutbox(queue) {
+  try {
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
+    notifyOutboxChange(queue.length);
+  } catch (e) {
+    console.warn("setSyncOutbox error:", e);
+  }
+}
+
+export function addToOutbox(intervention) {
+  if (!intervention?.id) return;
+  const queue = getSyncOutbox();
+  const existingIdx = queue.findIndex((item) => item.id === intervention.id);
+  const cleanIntv = ensureInterventionDefaults(intervention);
+  const item = {
+    id: intervention.id,
+    intervention: cleanIntv,
+    timestamp: Date.now(),
+    attempts: (existingIdx >= 0 ? queue[existingIdx].attempts : 0) + 1,
+  };
+  if (existingIdx >= 0) {
+    queue[existingIdx] = item;
+  } else {
+    queue.push(item);
+  }
+  setSyncOutbox(queue);
+}
+
+export function removeFromOutbox(id) {
+  const queue = getSyncOutbox().filter((item) => item.id !== id);
+  setSyncOutbox(queue);
+}
+
+let isFlushingOutbox = false;
+export async function flushSyncOutbox() {
+  if (isFlushingOutbox) return;
+  const queue = getSyncOutbox();
+  if (queue.length === 0) return;
+  isFlushingOutbox = true;
+  try {
+    for (const item of [...queue]) {
+      try {
+        const res = await apiPost("intervention_save", {
+          ...item.intervention,
+          expected_updated_at: item.intervention.updated_at || "",
+        }, 15000);
+        if (res?.updated_at) {
+          item.intervention.updated_at = res.updated_at;
+          saveInterventionLocally(item.intervention);
+        }
+        removeFromOutbox(item.id);
+      } catch (err) {
+        console.warn(`Outbox item ${item.id} sync attempt failed:`, err.message);
+        break; // Arrêt pour retry au prochain cycle si le réseau est coupé
+      }
+    }
+  } finally {
+    isFlushingOutbox = false;
   }
 }
 
@@ -188,16 +277,38 @@ export function getStoredIntervention(id) {
  * @returns {Promise<Intervention[]>}
  */
 export async function listInterventions() {
+  flushSyncOutbox().catch(() => {});
+
   try {
     const rows = await apiGet("interventions_list_light");
     const currentCached = getCached();
+    const serverMap = new Map();
+
     const merged = rows.map((row) => {
+      serverMap.set(row.id, true);
       const existing = currentCached.find((c) => c.id === row.id);
-      return existing ? { ...existing, ...row } : row;
+      if (existing) {
+        const localTime = existing.updated_at || existing.modifie_le || "";
+        const serverTime = row.updated_at || row.modifie_le || "";
+        if (localTime && serverTime && localTime > serverTime) {
+          return { ...row, ...existing };
+        }
+        return { ...existing, ...row };
+      }
+      return row;
     });
+
+    // Sauvegarde anti-perte : préserver toutes les interventions locales non encore créées sur le serveur !
+    for (const cached of currentCached) {
+      if (cached?.id && !serverMap.has(cached.id)) {
+        merged.unshift(cached);
+      }
+    }
+
     setCached(merged);
     return merged;
-  } catch {
+  } catch (err) {
+    console.warn("listInterventions offline / fallback cache:", err);
     return getCached();
   }
 }
@@ -296,11 +407,15 @@ export async function saveIntervention(intervention) {
       intervention = { ...intervention, updated_at: response.updated_at };
       saveInterventionLocally(intervention);
     }
+    // Succès confirmé : retirer de la file d'attente hors-ligne si présent
+    removeFromOutbox(intervention.id);
+    return ensureInterventionDefaults(intervention);
   } catch (err) {
-    console.warn("saveIntervention network sync warning:", err);
-    throw err;
+    console.warn("saveIntervention network sync failed, buffered into persistent outbox:", err);
+    // Bufferiser dans l'outbox persistante pour synchronisation automatique dès retour réseau
+    addToOutbox(intervention);
+    return ensureInterventionDefaults(intervention);
   }
-  return ensureInterventionDefaults(intervention);
 }
 
 /**

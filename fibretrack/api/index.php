@@ -195,7 +195,7 @@ function db() {
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-User-Code');
+header('Access-Control-Allow-Headers: Content-Type, X-User-Code, x-user-code, Authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
   http_response_code(204);
@@ -246,7 +246,29 @@ function authenticatedUser() {
   static $checked = false;
   if ($checked) return $user;
   $checked = true;
-  $code = trim($_SERVER['HTTP_X_USER_CODE'] ?? '');
+  $headerCode = '';
+  if (function_exists('apache_request_headers')) {
+    $headers = apache_request_headers();
+    foreach ($headers as $k => $v) {
+      if (strcasecmp($k, 'X-User-Code') === 0) {
+        $headerCode = trim($v);
+        break;
+      }
+    }
+  }
+  global $input;
+  $code = trim(
+    $_SERVER['HTTP_X_USER_CODE']
+    ?? $_SERVER['REDIRECT_HTTP_X_USER_CODE']
+    ?? $headerCode
+    ?? $_GET['user_code']
+    ?? $_GET['code']
+    ?? ($_POST['user_code'] ?? '')
+    ?? ($_POST['code'] ?? '')
+    ?? ($input['user_code'] ?? '')
+    ?? ($input['code'] ?? '')
+    ?? ''
+  );
   if ($code === '9999') return $user = ['id' => 'admin', 'nom' => 'ADMIN', 'is_admin' => true];
   if ($code === '' || !preg_match('/^\d{4}$/', $code)) return null;
   $stmt = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
@@ -626,6 +648,25 @@ try {
             }
           }
           unset($ph);
+        }
+      } elseif (!empty($d['id'])) {
+        $mStmt = $pdo->prepare('SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ?');
+        $mStmt->execute([$d['id']]);
+        $medias = $mStmt->fetchAll();
+        if (!empty($medias)) {
+          foreach ($medias as $m) {
+            $incomingWa[] = [
+              'id' => $m['id'],
+              'slot' => 'media_' . $m['id'],
+              'type' => $m['type'],
+              'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
+              'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
+              'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
+              'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
+              'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+              'ajoute_par' => $m['added_by'] ?? '',
+            ];
+          }
         }
       }
 

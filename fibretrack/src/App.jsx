@@ -15,6 +15,9 @@ import {
   getStoredIntervention,
   ensureInterventionDefaults,
   deleteIntervention,
+  getSyncOutbox,
+  flushSyncOutbox,
+  onOutboxChange,
 } from "./models/Intervention";
 import InstallPwaButton from "./components/InstallPwaButton";
 import InterventionCard from "./components/InterventionCard";
@@ -29,6 +32,11 @@ export default function App() {
   const [openingId, setOpeningId] = useState(null);
   const [creatingNew, setCreatingNew] = useState(false);
 
+  // Synchronisation et état hors-ligne / outbox
+  const [outboxCount, setOutboxCount] = useState(() => getSyncOutbox().length);
+  const [isOnline, setIsOnline] = useState(() => (typeof navigator !== "undefined" ? navigator.onLine : true));
+  const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
+
   // Filtres, recherche, pagination accueil
   const [activeTab, setActiveTab] = useState("en_cours"); // 'en_cours' | 'terminees'
   const [searchQuery, setSearchQuery] = useState("");
@@ -37,16 +45,49 @@ export default function App() {
   const [sortBy, setSortBy] = useState("date_desc");
   const [page, setPage] = useState(1);
 
-  async function refreshInterventions() {
-    setLoading(true);
+  async function refreshInterventions(showLoading = true) {
+    if (showLoading) setLoading(true);
     try {
       const list = await listInterventions();
       setInterventions(list);
     } catch (err) {
       console.error("refreshInterventions error:", err);
+    } finally {
+      if (showLoading) setLoading(false);
     }
-    setLoading(false);
   }
+
+  // Écoute de l'outbox et de l'état de connexion réseau
+  useEffect(() => {
+    const unsub = onOutboxChange((count) => {
+      setOutboxCount(count);
+    });
+    function handleOnline() {
+      setIsOnline(true);
+      flushSyncOutbox().then(() => refreshInterventions(false));
+    }
+    function handleOffline() {
+      setIsOnline(false);
+    }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      unsub();
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  // Polling automatique en arrière-plan toutes les 12 secondes sur l'écran d'accueil
+  // Permet à l'Admin et aux techniciens de voir instantanément les nouvelles interventions créées par les autres
+  useEffect(() => {
+    if (!user || screen !== "home") return;
+    const timer = setInterval(() => {
+      refreshInterventions(false);
+      flushSyncOutbox();
+    }, 12000);
+    return () => clearInterval(timer);
+  }, [user, screen]);
 
   useEffect(() => {
     if (user) {
@@ -57,7 +98,8 @@ export default function App() {
   useEffect(() => {
     function handleVisibility() {
       if (document.visibilityState === "visible" && user && screen === "home") {
-        refreshInterventions();
+        refreshInterventions(false);
+        flushSyncOutbox();
       }
     }
     document.addEventListener("visibilitychange", handleVisibility);
@@ -105,6 +147,16 @@ export default function App() {
     setScreen(newScreen);
   }
 
+  async function handleManualSyncOutbox() {
+    setIsSyncingOutbox(true);
+    try {
+      await flushSyncOutbox();
+      await refreshInterventions(true);
+    } finally {
+      setIsSyncingOutbox(false);
+    }
+  }
+
   async function startNewIntervention() {
     if (creatingNew) return;
     setCreatingNew(true);
@@ -116,11 +168,18 @@ export default function App() {
       navigateTo("form");
 
       // 2. Synchronisation serveur en arrière-plan sans bloquer l'écran
-      saveIntervention(intervention).catch((e) => console.warn("Background new intervention sync:", e));
+      saveIntervention(intervention)
+        .then((saved) => {
+          if (saved) {
+            setActiveIntervention((prev) => (prev?.id === saved.id ? { ...prev, updated_at: saved.updated_at } : prev));
+          }
+        })
+        .catch((e) => console.warn("Background new intervention sync:", e));
     } catch (err) {
       console.error("startNewIntervention error:", err);
+    } finally {
+      setCreatingNew(false);
     }
-    setCreatingNew(false);
   }
 
   async function openIntervention(target) {
@@ -348,6 +407,37 @@ export default function App() {
 
       <main>
         <InstallPwaButton variant="banner" />
+
+        {/* ===== BANDEAU DE STATUT DE SYNCHRONISATION ===== */}
+        <div className="sync-status-bar">
+          <div className="sync-status-left">
+            {!isOnline ? (
+              <span className="sync-pill sync-pill-offline" title="Connexion internet indisponible">
+                <span className="sync-dot offline" /> Hors-ligne (données sauvegardées en local)
+              </span>
+            ) : outboxCount > 0 ? (
+              <span className="sync-pill sync-pill-pending" title="Modifications en attente d'envoi vers le serveur">
+                <span className="sync-dot pending" /> {outboxCount} en attente de synchronisation
+              </span>
+            ) : (
+              <span className="sync-pill sync-pill-synced" title="Toutes les données sont synchronisées avec le serveur">
+                <span className="sync-dot synced" /> Synchronisé avec le serveur
+              </span>
+            )}
+          </div>
+          {outboxCount > 0 && isOnline && (
+            <button
+              type="button"
+              className="sync-now-btn"
+              onClick={handleManualSyncOutbox}
+              disabled={isSyncingOutbox}
+              title="Envoyer immédiatement les données vers le serveur"
+            >
+              {isSyncingOutbox ? "Synchronisation…" : "Synchroniser maintenant"}
+            </button>
+          )}
+        </div>
+
         <div className="home-actions">
           <button type="button" className="home-action-card" onClick={startNewIntervention} disabled={creatingNew}>
             <div className="icon primary">
