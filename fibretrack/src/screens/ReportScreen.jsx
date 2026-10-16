@@ -4,6 +4,7 @@ import { collectCelprosPhotos } from "../lib/slotPhotos";
 import { buildShareFiles, shareReportWithPhotos, openWhatsAppText } from "../lib/reportShare";
 import { CELPROS_PHOTO_SLOTS } from "./InterventionFormScreen";
 import { ensureInterventionDefaults, getIntervention, saveInterventionLocally, saveIntervention } from "../models/Intervention";
+import { downloadPhotoFile } from "../lib/photoDownload";
 import {
   generateInterventionPdf,
   generateSummaryReportPdf,
@@ -39,6 +40,58 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       (p) => p && (p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.type === "additionnelle")
     );
   }, [data?.whatsapp_photos]);
+
+  // Liste ordonnée de TOUTES les photos de l'intervention (CelPros + Poteaux + Additionnelles)
+  const allInterventionPhotos = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+
+    for (const item of photoEntries) {
+      const url = item.url || item.photo?.url || item.photo?.photo || "";
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        list.push({
+          id: String(item.photo?.id || item.key),
+          key: item.key,
+          label: item.label,
+          url,
+          lat: item.photo?.lat,
+          lng: item.photo?.lng,
+          lieu: item.photo?.lieu,
+          isAdditionnelle: false,
+        });
+      }
+    }
+
+    photosAdditionnelles.forEach((ap, idx) => {
+      const url = ap.url || ap.photo || "";
+      if (url && !seen.has(url)) {
+        seen.add(url);
+        list.push({
+          id: String(ap.id || `additionnelle_${idx + 1}`),
+          key: `additionnelle_${idx + 1}`,
+          label: ap.label || ap.name || `Photo additionnelle #${idx + 1}`,
+          url,
+          lat: ap.lat,
+          lng: ap.lng,
+          lieu: ap.lieu,
+          isAdditionnelle: true,
+        });
+      }
+    });
+
+    return list;
+  }, [photoEntries, photosAdditionnelles]);
+
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState(() => new Set());
+
+  // Par défaut, sélectionner toutes les photos
+  useEffect(() => {
+    if (allInterventionPhotos.length > 0) {
+      setSelectedPhotoIds(new Set(allInterventionPhotos.map((p) => p.id)));
+    }
+  }, [allInterventionPhotos]);
 
   const [viewingPhoto, setViewingPhoto] = useState(null);
   const [sendAddStatus, setSendAddStatus] = useState("");
@@ -127,6 +180,35 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   const globalReport = generateGlobalReport(data, compteurJour);
   const conformiteReport = generateConformiteReport(data);
   const activeReport = reportType === "conformite" ? conformiteReport : globalReport;
+
+  const selectedPhotos = useMemo(() => {
+    return allInterventionPhotos.filter((p) => selectedPhotoIds.has(p.id));
+  }, [allInterventionPhotos, selectedPhotoIds]);
+
+  const fullReportWithPhotos = useMemo(() => {
+    let msg = (activeReport || "").trim();
+    if (selectedPhotos.length > 0) {
+      msg += "\n\n━━━━━━━━━━━━━━━━━━━━\n📸 *PHOTOS DE L'INTERVENTION*\n";
+      selectedPhotos.forEach((ph, idx) => {
+        const label = ph.label || `Photo ${idx + 1}`;
+        const url = ph.url || "";
+        let coords = "";
+        if (ph.lat != null && ph.lng != null) {
+          coords = ` (GPS: ${Number(ph.lat).toFixed(5)}, ${Number(ph.lng).toFixed(5)})`;
+        }
+        msg += `\n${idx + 1}. *${label}*${coords}`;
+        if (url) {
+          const fullUrl = url.startsWith("http")
+            ? url
+            : `https://fibretrack.mantota.com${url.startsWith("/") ? "" : "/"}${url}`;
+          msg += ` :\n${fullUrl}\n`;
+        } else {
+          msg += ` : (enregistrée)\n`;
+        }
+      });
+    }
+    return msg;
+  }, [activeReport, selectedPhotos]);
 
   // --- Actions Fiche 1 : SBIN ---
   async function handleDownloadSbin() {
@@ -297,74 +379,114 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction(null);
   }
 
-  async function handleSendReportWithPhotos() {
-    if (loadingAction) return;
-    if (!shareFiles.ready) {
-      setSendStatus("Préparation des photos en cours, réessayez dans un instant…");
+  // 1. Envoi synchrone immédiat sur WhatsApp (Rapport + Liens directs photos)
+  function handleOpenWhatsAppDirect(withPhotos = true) {
+    const textToSend = withPhotos ? fullReportWithPhotos : activeReport;
+    try {
+      navigator.clipboard.writeText(textToSend);
+    } catch {
+      /* ignore */
+    }
+    const waUrl = `https://wa.me/?text=${encodeURIComponent(textToSend)}`;
+    window.open(waUrl, "_blank");
+    setSendStatus(
+      withPhotos
+        ? `✓ WhatsApp ouvert avec le rapport complet et les liens directs de ${selectedPhotos.length} photo(s).`
+        : `✓ WhatsApp ouvert avec le texte du rapport.`
+    );
+  }
+
+  // 2. Partage natif des fichiers images via Web Share API
+  async function handleSharePhotoFiles() {
+    if (selectedPhotos.length === 0) {
+      setSendStatus("Aucune photo sélectionnée.");
       return;
     }
-    setLoadingAction("sendWithPhotos");
-    const reportLabel = reportType === "conformite" ? "Rapport de Conformité" : "Rapport Global";
+    setLoadingAction("shareFiles");
     try {
-      // Copie de sécurité : WhatsApp peut tronquer une légende très longue sous les photos
       try {
         await navigator.clipboard.writeText(activeReport);
       } catch {
-        /* presse-papiers indisponible : sans impact sur le partage */
+        /* ignore */
       }
 
-      const result = await shareReportWithPhotos({
-        text: activeReport,
-        files: shareFiles.files,
-        title: `${reportLabel} - ${data.nom_client || ""}`.trim(),
-      });
-
-      const missing = shareFiles.failed.length
-        ? ` ⚠️ ${shareFiles.failed.length} photo(s) illisible(s) non jointes : ${shareFiles.failed.map((f) => f.label).join(", ")}.`
-        : "";
-
-      if (result === "shared") {
-        setSendStatus(
-          `✓ ${reportLabel} + ${shareFiles.files.length} photo(s) transmis à WhatsApp. Si le texte semble coupé sous les photos, collez-le (déjà copié).${missing}`
-        );
-      } else if (result === "cancelled") {
-        setSendStatus("");
-      } else {
-        openWhatsAppText(activeReport);
-        setSendStatus(
-          shareFiles.files.length === 0
-            ? "Aucune photo CelPros trouvée pour cette intervention : seul le texte a été envoyé vers WhatsApp."
-            : "Ce navigateur ne peut pas joindre les photos à WhatsApp (utilisez Chrome sur Android/iPhone). Texte ouvert dans WhatsApp ; photos disponibles dans la galerie du téléphone."
-        );
+      // Android WebView avec pont natif
+      if (window.AndroidBridge?.isWebView?.()) {
+        const base64Photos = [];
+        for (const p of selectedPhotos) {
+          const raw = p.url || "";
+          const b64 = raw.includes(",") ? raw.split(",")[1] : raw;
+          if (b64) base64Photos.push(b64);
+        }
+        window.AndroidBridge.sharePhotos(JSON.stringify(base64Photos), activeReport);
+        setSendStatus("✓ Ouverture de WhatsApp via l'application Android.");
+        setLoadingAction(null);
+        return;
       }
+
+      const entries = selectedPhotos.map((p, i) => ({
+        key: p.key || `ph_${i + 1}`,
+        label: p.label || `Photo ${i + 1}`,
+        url: p.url,
+      }));
+      const { files } = await buildShareFiles(entries);
+
+      if (files.length > 0 && navigator.canShare && navigator.canShare({ files })) {
+        try {
+          await navigator.share({
+            title: `Rapport - ${data.nom_client || "Intervention"}`,
+            text: activeReport,
+            files,
+          });
+          setSendStatus(`✓ ${files.length} photo(s) transmise(s) vers WhatsApp. Le rapport complet est également copié dans votre presse-papier.`);
+          setLoadingAction(null);
+          return;
+        } catch (shareErr) {
+          if (shareErr.name === "AbortError") {
+            setLoadingAction(null);
+            return;
+          }
+          console.warn("navigator.share échoué, repli vers wa.me:", shareErr);
+        }
+      }
+
+      handleOpenWhatsAppDirect(true);
+      setSendStatus(
+        "Ce navigateur ne prend pas en charge l'envoi direct de fichiers bruts. WhatsApp a été ouvert avec le rapport et les liens directs de chaque photo !"
+      );
     } catch (err) {
       setSendStatus(`Erreur : ${err.message}`);
+    } finally {
+      setLoadingAction(null);
     }
-    setLoadingAction(null);
   }
 
-  async function handleSendAdditionnellesToWhatsapp() {
-    if (loadingAction) return;
-    if (!addShareFiles.ready || addShareFiles.files.length === 0) return;
-    setLoadingAction("sendAdditionnelles");
+  // 3. Téléchargement de toutes les photos sélectionnées
+  async function handleDownloadAllPhotos() {
+    setLoadingAction("downloadPhotos");
+    let count = 0;
     try {
-      const clientName = data.nom_client || "Intervention";
-      const result = await shareReportWithPhotos({
-        text: `*Photos additionnelles* — Client : ${clientName}\nDate : ${new Date().toLocaleDateString()}`,
-        files: addShareFiles.files,
-        title: `Photos additionnelles - ${clientName}`,
-      });
-      if (result === "shared") {
-        setSendAddStatus(`✓ ${addShareFiles.files.length} photo(s) additionnelle(s) transmise(s) à WhatsApp.`);
-      } else if (result === "cancelled") {
-        setSendAddStatus("");
-      } else {
-        setSendAddStatus("Partage non pris en charge directement par ce navigateur.");
+      for (const ph of selectedPhotos) {
+        await downloadPhotoFile(ph, data.nom_client);
+        count++;
+        await new Promise((r) => setTimeout(r, 200));
       }
+      setSendStatus(`✓ ${count} photo(s) téléchargée(s) sur votre appareil.`);
     } catch (err) {
-      setSendAddStatus(`Erreur : ${err.message}`);
+      setSendStatus(`Erreur lors du téléchargement : ${err.message}`);
+    } finally {
+      setLoadingAction(null);
     }
-    setLoadingAction(null);
+  }
+
+  function handleSendReportWithPhotos() {
+    setSelectedPhotoIds(new Set(allInterventionPhotos.map((p) => p.id)));
+    setShowWhatsAppModal(true);
+  }
+
+  function handleSendAdditionnellesToWhatsapp() {
+    setSelectedPhotoIds(new Set(photosAdditionnelles.map((ap) => String(ap.id))));
+    setShowWhatsAppModal(true);
   }
 
   return (
@@ -495,12 +617,9 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
                 type="button"
                 className="btn-primary"
                 style={{ fontSize: 12, padding: "5px 12px", background: "#16a34a", borderColor: "#16a34a" }}
-                disabled={loadingAction === "sendAdditionnelles" || !addShareFiles.ready}
                 onClick={handleSendAdditionnellesToWhatsapp}
               >
-                {loadingAction === "sendAdditionnelles"
-                  ? "Ouverture…"
-                  : `📤 Envoyer ces photos (${photosAdditionnelles.length}) sur WhatsApp`}
+                📤 Envoyer ces photos ({photosAdditionnelles.length}) sur WhatsApp
               </button>
             </div>
             {sendAddStatus && <p className="gps-status" style={{ margin: "4px 0 8px" }}>{sendAddStatus}</p>}
@@ -532,7 +651,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       </div>
 
       <button type="button" className="btn-secondary btn-large" onClick={handleShare} disabled={loadingAction === "share"} style={{ marginTop: 12 }}>
-        {loadingAction === "share" ? "Chargement…" : "💬 Partager sur WhatsApp"}
+        {loadingAction === "share" ? "Chargement…" : "📄 Partager la Fiche Intervention (PDF) sur WhatsApp"}
       </button>
       {shareStatus && <p className="gps-status">{shareStatus}</p>}
 
@@ -586,28 +705,33 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       <h3>{reportType === "conformite" ? "Rapport de Conformité (texte)" : "Rapport Global WhatsApp (texte)"}</h3>
       <textarea className="whatsapp-report" readOnly value={activeReport} rows={18} />
 
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button type="button" className="btn-secondary btn-large" onClick={handleCopy}>
-          {copied ? "✓ Rapport copié !" : `Copier ${reportType === "conformite" ? "la Conformité" : "le Rapport Global"}`}
-        </button>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
         <button
           type="button"
           className="btn-primary btn-large"
           onClick={handleSendReportWithPhotos}
-          disabled={loadingAction === "sendWithPhotos"}
-          style={{ flex: "1 1 260px" }}
+          style={{ flex: "2 1 280px", background: "#16a34a", borderColor: "#16a34a", fontSize: 15, fontWeight: 700 }}
         >
-          {loadingAction === "sendWithPhotos"
-            ? "Ouverture de WhatsApp…"
-            : shareFiles.ready
-              ? `📤 Envoyer sur WhatsApp (rapport + ${shareFiles.files.length} photo${shareFiles.files.length > 1 ? "s" : ""})`
-              : "📤 Préparation des photos…"}
+          💬 Envoyer sur WhatsApp avec les photos ({allInterventionPhotos.length})
+        </button>
+        <button
+          type="button"
+          className="btn-primary btn-large"
+          onClick={() => handleOpenWhatsAppDirect(true)}
+          style={{ flex: "1 1 220px", background: "#059669", borderColor: "#059669" }}
+          title="Ouvre directement WhatsApp avec le rapport et tous les liens photos cliquables"
+        >
+          🚀 Envoi direct WhatsApp
+        </button>
+        <button type="button" className="btn-secondary btn-large" onClick={handleCopy} style={{ flex: "1 1 160px" }}>
+          {copied ? "✓ Rapport copié !" : `📋 Copier ${reportType === "conformite" ? "la Conformité" : "le Rapport"}`}
         </button>
         <button
           type="button"
           className="btn-secondary btn-large"
-          onClick={() => openWhatsAppText(activeReport)}
+          onClick={() => handleOpenWhatsAppDirect(false)}
           title="Ouvre WhatsApp avec le texte seul (sans photos)"
+          style={{ flex: "1 1 120px" }}
         >
           Texte seul
         </button>
@@ -617,6 +741,267 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       <button type="button" className="btn-secondary btn-large" onClick={() => onEdit(intervention)} style={{ marginTop: 12 }}>
         ✏ Modifier cette intervention
       </button>
+
+      {/* Modal Partage WhatsApp & Photos */}
+      {showWhatsAppModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.75)",
+            zIndex: 9995,
+            overflowY: "auto",
+            padding: "20px 10px",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "flex-start",
+          }}
+          onClick={() => setShowWhatsAppModal(false)}
+        >
+          <div
+            style={{
+              maxWidth: 680,
+              width: "100%",
+              background: "#ffffff",
+              borderRadius: 16,
+              boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
+              overflow: "hidden",
+              border: "1px solid #cbd5e1",
+              margin: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ background: "#16a34a", padding: "16px 20px", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 24 }}>💬</span>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#fff" }}>
+                    Envoi WhatsApp : Rapport & Photos
+                  </h3>
+                  <p style={{ margin: "2px 0 0", fontSize: 12, opacity: 0.9 }}>
+                    Client : <strong>{data.nom_client || "Client"}</strong> • {reportType === "conformite" ? "Rapport de Conformité" : "Rapport Global"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppModal(false)}
+                style={{
+                  background: "rgba(255,255,255,0.2)",
+                  border: "none",
+                  color: "#fff",
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  cursor: "pointer",
+                  fontSize: 16,
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Corps */}
+            <div style={{ padding: 20 }}>
+              {/* Actions principales au sommet */}
+              <div style={{ background: "#f0fdf4", border: "1.5px solid #86efac", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#166534", marginBottom: 6 }}>
+                  ⚡ Envoi Recommandé (100% Garanti sur Mobile & PC)
+                </div>
+                <p style={{ margin: "0 0 12px 0", fontSize: 12.5, color: "#1e3a8a", lineHeight: 1.4 }}>
+                  Ouvre WhatsApp avec le <strong>rapport officiel complet</strong> ET les <strong>liens directs HD</strong> de toutes les photos sélectionnées ({selectedPhotos.length} photo{selectedPhotos.length > 1 ? "s" : ""}).
+                </p>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ background: "#16a34a", borderColor: "#16a34a", fontSize: 14, padding: "10px 18px", fontWeight: 700, flex: "1 1 220px" }}
+                    onClick={() => {
+                      handleOpenWhatsAppDirect(true);
+                      setShowWhatsAppModal(false);
+                    }}
+                  >
+                    🚀 Ouvrir WhatsApp (Rapport + {selectedPhotos.length} photo{selectedPhotos.length > 1 ? "s" : ""})
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: 13, padding: "10px 14px", flex: "1 1 140px" }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(fullReportWithPhotos);
+                      setSendStatus("✓ Rapport complet et liens photos copiés dans le presse-papier !");
+                    }}
+                  >
+                    📋 Copier Tout
+                  </button>
+                </div>
+              </div>
+
+              {/* Autre option : partage natif des fichiers */}
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
+                  📱 Partage direct des Fichiers Images
+                </div>
+                <p style={{ margin: "0 0 10px 0", fontSize: 12, color: "#64748b" }}>
+                  Envoie directement les fichiers photos dans l'application WhatsApp (mobile). Le texte du rapport est automatiquement copié dans votre presse-papier pour pouvoir être collé si besoin.
+                </p>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: 13, padding: "8px 14px", flex: "1 1 180px" }}
+                    onClick={handleSharePhotoFiles}
+                    disabled={loadingAction === "shareFiles" || selectedPhotos.length === 0}
+                  >
+                    {loadingAction === "shareFiles" ? "Préparation…" : "📤 Partager les fichiers photos"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    style={{ fontSize: 13, padding: "8px 14px", flex: "1 1 160px" }}
+                    onClick={handleDownloadAllPhotos}
+                    disabled={loadingAction === "downloadPhotos" || selectedPhotos.length === 0}
+                  >
+                    {loadingAction === "downloadPhotos" ? "Téléchargement…" : "⬇ Télécharger les photos"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Sélection des photos */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+                  <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#0f172a" }}>
+                    Photos à inclure ({selectedPhotoIds.size} / {allInterventionPhotos.length})
+                  </h4>
+                  <div style={{ display: "flex", gap: 10, fontSize: 12 }}>
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", color: "#2563eb", cursor: "pointer", fontWeight: 600, padding: 0 }}
+                      onClick={() => setSelectedPhotoIds(new Set(allInterventionPhotos.map((p) => p.id)))}
+                    >
+                      Tout cocher
+                    </button>
+                    <span style={{ color: "#cbd5e1" }}>|</span>
+                    <button
+                      type="button"
+                      style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", fontWeight: 600, padding: 0 }}
+                      onClick={() => setSelectedPhotoIds(new Set())}
+                    >
+                      Tout décocher
+                    </button>
+                  </div>
+                </div>
+
+                {allInterventionPhotos.length === 0 ? (
+                  <p style={{ fontSize: 12.5, color: "#64748b", fontStyle: "italic" }}>
+                    Aucune photo enregistrée sur cette intervention.
+                  </p>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10, maxHeight: 280, overflowY: "auto", padding: 4 }}>
+                    {allInterventionPhotos.map((ph) => {
+                      const isChecked = selectedPhotoIds.has(ph.id);
+                      return (
+                        <div
+                          key={ph.id}
+                          onClick={() => {
+                            setSelectedPhotoIds((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(ph.id)) next.delete(ph.id);
+                              else next.add(ph.id);
+                              return next;
+                            });
+                          }}
+                          style={{
+                            border: isChecked ? "2px solid #16a34a" : "1px solid #cbd5e1",
+                            background: isChecked ? "#f0fdf4" : "#ffffff",
+                            borderRadius: 10,
+                            overflow: "hidden",
+                            cursor: "pointer",
+                            transition: "all 0.15s ease",
+                            display: "flex",
+                            flexDirection: "column",
+                          }}
+                        >
+                          <div style={{ position: "relative", height: 80, background: "#f1f5f9" }}>
+                            <img
+                              src={ph.url}
+                              alt={ph.label}
+                              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            />
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => {}}
+                              style={{
+                                position: "absolute",
+                                top: 6,
+                                right: 6,
+                                width: 18,
+                                height: 18,
+                                accentColor: "#16a34a",
+                                cursor: "pointer",
+                              }}
+                            />
+                            {ph.isAdditionnelle && (
+                              <span style={{ position: "absolute", bottom: 4, left: 4, background: "rgba(0,0,0,0.65)", color: "#fff", fontSize: 9.5, padding: "2px 5px", borderRadius: 4, fontWeight: 700 }}>
+                                Terrain
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ padding: "6px 8px", fontSize: 11, fontWeight: 600, color: "#334155", lineHeight: 1.25 }}>
+                            {ph.label}
+                            {ph.lat != null && <div style={{ fontSize: 9.5, color: "#64748b", marginTop: 2 }}>📍 GPS ok</div>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Aperçu rapide du message */}
+              <details style={{ marginTop: 12, background: "#f8fafc", borderRadius: 8, padding: "8px 12px", border: "1px solid #e2e8f0" }}>
+                <summary style={{ fontSize: 12, fontWeight: 700, color: "#475569", cursor: "pointer" }}>
+                  👁️ Voir l'aperçu du message qui sera transmis à WhatsApp
+                </summary>
+                <textarea
+                  readOnly
+                  rows={8}
+                  value={fullReportWithPhotos}
+                  style={{ width: "100%", marginTop: 8, fontSize: 11, fontFamily: "monospace", padding: 8, borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                />
+              </details>
+            </div>
+
+            {/* Footer */}
+            <div style={{ background: "#f1f5f9", padding: "12px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setShowWhatsAppModal(false)}
+              >
+                Fermer
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: "#16a34a", borderColor: "#16a34a", fontWeight: 700 }}
+                onClick={() => {
+                  handleOpenWhatsAppDirect(true);
+                  setShowWhatsAppModal(false);
+                }}
+              >
+                🚀 Ouvrir WhatsApp maintenant
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Fiches Officielles Interactives & Signables */}
       {showFichesModal && (
