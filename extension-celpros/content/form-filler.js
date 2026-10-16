@@ -599,9 +599,17 @@
     const latAbonne = abonnePt ? getCoordStr(abonnePt) : (d.latitude && d.longitude ? `${d.latitude},${d.longitude}` : "");
     const latFat = fatPt ? getCoordStr(fatPt) : (d.latitude_fat && d.longitude_fat ? `${d.latitude_fat},${d.longitude_fat}` : "");
 
-    const nbArmes = d.nb_poteaux_armes ?? poteauxArmes.length;
-    const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));
-    const nbImplantes = d.nb_poteaux_implantes ?? poteauxImplantes.length;
+    const uniqueTraverses = poteauxTraverses.length || (poles.length - poteauxImplantes.length);
+    const rawTraverses = Number(d.nb_poteaux_traverses ?? 0);
+    const nbTraverses = uniqueTraverses > 0 ? (rawTraverses > uniqueTraverses ? uniqueTraverses : (rawTraverses || uniqueTraverses)) : rawTraverses;
+
+    const uniqueArmes = poteauxArmes.length;
+    const rawArmes = Number(d.nb_poteaux_armes ?? 0);
+    const nbArmes = uniqueArmes > 0 ? (rawArmes > uniqueArmes ? uniqueArmes : (rawArmes || uniqueArmes)) : rawArmes;
+
+    const uniqueImplantes = poteauxImplantes.length;
+    const rawImplantes = Number(d.nb_poteaux_implantes ?? 0);
+    const nbImplantes = uniqueImplantes > 0 ? (rawImplantes > uniqueImplantes ? uniqueImplantes : (rawImplantes || uniqueImplantes)) : rawImplantes;
 
     const chefEquipe = cleanStr(d.nom_technicien || d.nom_equipe) || "Chef d'équipe";
 
