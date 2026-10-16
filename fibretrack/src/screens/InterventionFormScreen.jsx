@@ -2129,12 +2129,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       saveInterventionLocally(finalData);
       setData(finalData);
 
+      let completeData = finalData;
       // 2. Synchronisation serveur
       try {
         saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
         const saved = await saveQueueRef.current;
-        const completeData = saved?.updated_at ? { ...finalData, updated_at: saved.updated_at } : finalData;
         if (saved?.updated_at) {
+          completeData = { ...finalData, updated_at: saved.updated_at };
           setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
         }
       } catch (netErr) {
