@@ -147,3 +147,86 @@ test("Rapport de Conformité - génère la structure exacte épurée", () => {
   assert.ok(report.includes("- Poteau (Armé) 1 : 6.38693, 2.61263"));
   assert.ok(report.includes("GPS poteau Petit Jean : 6.38614, 2.6117"));
 });
+
+test("Rapports dynamiques - s'adaptent à 100% à une autre région, autre équipe, autre client et autre matériel", () => {
+  const autreIntervention = {
+    nom_technicien: "Aubin K.",
+    date: "2026-10-18",
+    nom_client: "KOUASSI BERNADETTE",
+    etat: "PON",
+    msan: "PKU-NORD",
+    fat_ref: "FAT055",
+    port: 4,
+    ports_disponibles: "Port 5, Port 6, Port 7, Port 8",
+    type_cable: "CPC",
+    depart_m: 0,
+    arrivee_m: 150,
+    lineaire_m: 150,
+    puissance_fat_dbm: -18.25,
+    puissance_pto_dbm: -18.90,
+    mac: "548998ABCDEF",
+    sn: "HWTC99887766",
+    telephone_ligne: "0121334455",
+    mobile: "0195667788",
+    materiel_pose: {
+      ont: 1,
+      pto: 1,
+      jarretiere: 1,
+      pince: 2,
+      crochets: 8,
+      piton: 2,
+      cheville: 2,
+      traverse_13t: 1,
+      cpc_150: 1,
+    },
+    points_gps: [
+      { type: "FAT", lat: 9.3512, lng: 2.6288 },
+      { type: "Abonné", lat: 9.3540, lng: 2.6295 },
+      { type: "Poteau", numero: 1, proprietaire: "SBEE", traverse: true, lat: 9.3518, lng: 2.6289 },
+      { type: "Poteau", numero: 2, proprietaire: "Petit Jean", traverse: true, lat: 9.3524, lng: 2.6291 },
+      { type: "Poteau", numero: 3, proprietaire: "Petit Jean", traverse: true, lat: 9.3531, lng: 2.6293 },
+      { type: "Poteau", numero: 1, implante: true, lat: 9.3537, lng: 2.6294 },
+    ],
+  };
+
+  // 1. Test Rapport Global
+  const global = generateGlobalReport(autreIntervention, { realises: 3, recus: 5 });
+  assert.ok(global.includes("*Chef d'Équipe : Aubin K.*"));
+  assert.ok(global.includes("*03 Réalisés / 05 Reçus*"));
+  assert.ok(global.includes("*2026-10-18*"));
+  assert.ok(global.includes("*Client: KOUASSI BERNADETTE*"));
+  assert.ok(global.includes("*Msan: PKU-NORD  FAT055*"));
+  assert.ok(global.includes("*Port:4*"));
+  assert.ok(global.includes("*Linéaire:150.0m*"));
+  assert.ok(global.includes("*Puissance FAT: -18.25 dBm*"));
+  assert.ok(global.includes("*Puissance PTO: -18.90 dBm*"));
+  assert.ok(global.includes("*MAC: 548998ABCDEF*"));
+  assert.ok(global.includes("*SN : HWTC99887766*"));
+  assert.ok(global.includes("*CPC 150: 01*"));
+  assert.ok(global.includes("*CPC 200: 00*"));
+  assert.ok(global.includes("*Pince:02*"));
+  assert.ok(global.includes("*Crochets:08*"));
+  assert.ok(global.includes("*Poteaux implanté : 01*"));
+  assert.ok(global.includes("*GPS poteaux implantés*"));
+  assert.ok(global.includes("*GPS PT1: 9.3537,2.6294*"));
+  assert.ok(global.includes("*GPS abonné: 9.354,2.6295*"));
+  assert.ok(global.includes("*GPS FAT: 9.3512,2.6288*"));
+
+  // 2. Test Rapport de Conformité
+  const conformite = generateConformiteReport(autreIntervention);
+  assert.ok(conformite.includes("Équipe : Aubin K."));
+  assert.ok(conformite.includes("18/10/2026"));
+  assert.ok(conformite.includes("Client : KOUASSI BERNADETTE"));
+  assert.ok(conformite.includes("Ligne : 0121334455"));
+  assert.ok(conformite.includes("MSAN : PKU-NORD  FAT055"));
+  assert.ok(conformite.includes("Linéaire : 150 m"));
+  assert.ok(conformite.includes("GPS FAT : 9.3512, 2.6288"));
+  assert.ok(conformite.includes("GPS abonné : 9.354, 2.6295"));
+  assert.ok(conformite.includes("Poteaux traversés : 03"));
+  assert.ok(conformite.includes("Poteau SBEE : 01") || conformite.includes("Poteaux SBEE : 01"));
+  assert.ok(conformite.includes("Poteaux Petit Jean : 02"));
+  assert.ok(conformite.includes("Poteaux implantés : 01"));
+  assert.ok(!conformite.includes("Rodolpho"));
+  assert.ok(!conformite.includes("Cotonou"));
+  assert.ok(!conformite.includes("ODOUNLAMI"));
+});

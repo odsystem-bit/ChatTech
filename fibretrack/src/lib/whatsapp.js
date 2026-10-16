@@ -2,6 +2,10 @@
 // 1. Rapport Global WhatsApp : Structure officielle complète avec puces en gras (*...*)
 // 2. Rapport de Conformité : Structure épurée conforme aux audits terrain
 
+function cleanStr(s) {
+  return s == null ? "" : String(s).trim();
+}
+
 export function fmt2(n) {
   const num = Number(n ?? 0);
   if (isNaN(num)) return "00";
@@ -128,7 +132,7 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));
   const nbImplantes = d.nb_poteaux_implantes ?? poteauxImplantes.length;
 
-  const chefEquipe = d.nom_technicien || d.nom_equipe || "Chef d'équipe";
+  const chefEquipe = cleanStr(d.nom_technicien || d.nom_equipe) || "Chef d'équipe";
 
   // Gestion des câbles CPC
   const cpcSizes = [50, 100, 150, 200, 250, 300, 350];
@@ -149,6 +153,16 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const ptoQte = mp.pto ?? d.pto_qte ?? 1;
   const jarretiereQte = mp.jarretiere ?? (d.jarretiere ? 1 : 1);
 
+  const cleanNomClient = cleanStr(d.nom_client);
+  const cleanLigne = cleanStr(d.telephone_ligne || d.numero_ligne || d.telephone_fixe);
+  const cleanMobile = cleanStr(d.mobile || d.telephone);
+  const cleanMac = cleanStr(d.mac);
+  const cleanSn = cleanStr(d.sn || d.ont_sn);
+  const cleanPort = cleanStr(d.port);
+  const cleanPortsDispo = cleanStr(d.ports_disponibles || (d.port_disponible ? `Port ${d.port_disponible}` : ""));
+  const cleanTypeCable = cleanStr(d.type_cable) || "CPC";
+  const cleanEtat = cleanStr(d.etat) || "PON";
+
   const lignes = [
     `*Chef d'Équipe : ${chefEquipe}*`,
     ``,
@@ -158,22 +172,22 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
     ``,
     `*${dateIso}*`,
     ``,
-    `*Client: ${d.nom_client || ""}*`,
+    `*Client: ${cleanNomClient}*`,
     ``,
-    `*Etat:${d.etat || "PON"}*`,
+    `*Etat:${cleanEtat}*`,
     ``,
-    `*Msan: ${msanFat}*`,
+    `*Msan: ${cleanStr(msanFat)}*`,
     ``,
-    `*Port:${d.port || ""}*`,
-    `*Ports disponibles: ${d.ports_disponibles || (d.port_disponible ? `Port ${d.port_disponible}` : "")}*`,
-    `*Type de câble : ${d.type_cable || "CPC"}*`,
+    `*Port:${cleanPort}*`,
+    `*Ports disponibles: ${cleanPortsDispo}*`,
+    `*Type de câble : ${cleanTypeCable}*`,
     `*Départ :${fmtMeter(d.depart_m, 0)}*`,
     `*Arrivée :${fmtMeter(d.arrivee_m, lin || 0)}*`,
     `*Linéaire:${fmtMeter(d.lineaire_m, lin || 0)}*`,
-    `*Puissance FAT: ${fmtPower(d.puissance_fat_dbm, "-19.00")}*`,
-    `*Puissance PTO: ${fmtPower(d.puissance_pto_dbm, "-19.00")}*`,
-    `*MAC: ${d.mac || ""}*`,
-    `*SN : ${d.sn || d.ont_sn || ""}*`,
+    `*Puissance FAT: ${fmtPower(d.puissance_fat_dbm)}*`,
+    `*Puissance PTO: ${fmtPower(d.puissance_pto_dbm)}*`,
+    `*MAC: ${cleanMac}*`,
+    `*SN : ${cleanSn}*`,
     `*Nombre de poteaux armés : ${fmt2(nbArmes)}*`,
     `*Nombre de poteaux traversés : ${fmt2(nbTraverses)}*`,
     `*Nombre de poteaux implantés: ${fmt2(nbImplantes)}*`,
@@ -188,8 +202,8 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
     `*Connecteur: ${val("connecteur")}*`,
     `*Closer: ${val("closer")}*`,
     `*Câble Fibre 1FO: ${val("cable_1fo") !== "00" ? val("cable_1fo") : val("cable_fibre_1fo")}*`,
-    `*Ligne: ${d.telephone_ligne || ""}*`,
-    `*Mobile:${d.mobile || ""}*`,
+    `*Ligne: ${cleanLigne}*`,
+    `*Mobile:${cleanMobile}*`,
     `*Traverse 13T: ${val("traverse_13t")}*`,
     `*Traverse 15T: ${val("traverse_15t")}*`,
     `*CPC 50: ${getCpcVal(50)}*`,
@@ -310,8 +324,10 @@ export function generateConformiteReport(intervention) {
   const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));
   const nbImplantes = d.nb_poteaux_implantes ?? poteauxImplantes.length;
 
-  const equipeName = d.nom_technicien || d.nom_equipe || "RODOLPHO";
+  const equipeName = cleanStr(d.nom_technicien || d.nom_equipe) || "Équipe";
   const lin = d.lineaire_m || 0;
+  const cleanNomClient = cleanStr(d.nom_client);
+  const cleanLigne = cleanStr(d.telephone_ligne || d.numero_ligne || d.telephone_fixe);
 
   const lignes = [
     `Équipe : ${equipeName}`,
@@ -320,11 +336,11 @@ export function generateConformiteReport(intervention) {
     ``,
     `RACCORDEMENT — CONFORMITÉ`,
     ``,
-    `Client : ${d.nom_client || ""}`,
+    `Client : ${cleanNomClient}`,
     ``,
-    `Ligne : ${d.telephone_ligne || ""}`,
+    `Ligne : ${cleanLigne}`,
     ``,
-    `MSAN : ${msanFat}`,
+    `MSAN : ${cleanStr(msanFat)}`,
     ``,
     `Linéaire : ${lin} m`,
     ``,
