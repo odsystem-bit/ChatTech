@@ -37,8 +37,7 @@ import {
   ALL_FAT_PORTS,
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
-import { isInterventionTerminee } from "../lib/interventionFilters";
-import { downloadPhotoFile } from "../lib/photoDownload";
+import { downloadPhotoFile, downloadAllPhotosAsZip } from "../lib/photoDownload";
 import { findPhotoForSlot } from "../lib/slotPhotos";
 import {
   IconFlag,
@@ -2182,13 +2181,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   async function downloadSelectedPhotos() {
     const selected = whatsappPhotos.filter((p) => selectedPhotoIds.has(p.id));
     if (selected.length === 0) return;
-    setWhatsappStatus("Téléchargement des photos sélectionnées…");
+    setWhatsappStatus("Préparation du dossier de photos…");
     try {
-      for (const ph of selected) {
-        await downloadPhotoFile(ph);
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      setWhatsappStatus(`✓ ${selected.length} photo(s) téléchargée(s) sur votre appareil.`);
+      const res = await downloadAllPhotosAsZip(selected, data.nom_client, {
+        interventionId: data.id,
+        onProgress: (_curr, _tot, msg) => setWhatsappStatus(msg),
+      });
+      setWhatsappStatus(`✓ Dossier '${res.folderName}' (${res.count} photos) téléchargé dans vos Téléchargements !`);
     } catch (e) {
       setWhatsappStatus(`Erreur de téléchargement : ${e.message}`);
     }
@@ -3727,9 +3726,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       onClick={downloadSelectedPhotos}
                       disabled={selectedPhotoIds.size === 0}
                       style={{ padding: "10px 16px" }}
-                      title="Télécharger les photos sélectionnées sur l'appareil"
+                      title="Télécharger les photos sélectionnées dans un dossier au nom du client dans Téléchargements"
                     >
-                      ⬇ Télécharger ({selectedPhotoIds.size})
+                      📁 Dossier photos ({selectedPhotoIds.size})
                     </button>
                   </div>
                 </>
@@ -4095,9 +4094,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       onClick={downloadSelectedPhotos}
                       disabled={selectedPhotoIds.size === 0}
                       style={{ padding: "10px 16px" }}
-                      title="Télécharger les photos sélectionnées sur l'appareil"
+                      title="Télécharger les photos sélectionnées dans un dossier au nom du client dans Téléchargements"
                     >
-                      ⬇ Télécharger ({selectedPhotoIds.size})
+                      📁 Dossier photos ({selectedPhotoIds.size})
                     </button>
                   </div>
                 </>

@@ -3,8 +3,12 @@ import { generateGlobalReport, generateConformiteReport } from "../lib/whatsapp"
 import { collectCelprosPhotos } from "../lib/slotPhotos";
 import { buildShareFiles, shareReportWithPhotos, openWhatsAppText } from "../lib/reportShare";
 import { CELPROS_PHOTO_SLOTS } from "./InterventionFormScreen";
-import { ensureInterventionDefaults, getIntervention, saveInterventionLocally, saveIntervention } from "../models/Intervention";
-import { downloadPhotoFile } from "../lib/photoDownload";
+import {
+  downloadPhotoFile,
+  downloadAllPhotosAsZip,
+  savePhotosToLocalDirectory,
+  sanitizeClientFolderName,
+} from "../lib/photoDownload";
 import {
   generateInterventionPdf,
   generateSummaryReportPdf,
@@ -23,6 +27,7 @@ import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [data, setData] = useState(ensureInterventionDefaults(intervention));
   const [refreshing, setRefreshing] = useState(false);
+  const [downloadProgressText, setDownloadProgressText] = useState("");
   const [shareFiles, setShareFiles] = useState({ files: [], failed: [], ready: false });
 
   useEffect(() => {
@@ -461,21 +466,61 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     }
   }
 
-  // 3. Téléchargement de toutes les photos sélectionnées
-  async function handleDownloadAllPhotos() {
-    setLoadingAction("downloadPhotos");
-    let count = 0;
+  // 3. Téléchargement groupé de toutes les photos dans un dossier au nom du client (ZIP)
+  async function handleDownloadAllPhotosZip(photosToDownload = null) {
+    const targetList = Array.isArray(photosToDownload) && photosToDownload.length > 0
+      ? photosToDownload
+      : (selectedPhotos.length > 0 ? selectedPhotos : allInterventionPhotos);
+
+    if (targetList.length === 0) {
+      setSendStatus("Aucune photo disponible à télécharger.");
+      return;
+    }
+
+    setLoadingAction("downloadZip");
+    setDownloadProgressText("Préparation du dossier…");
     try {
-      for (const ph of selectedPhotos) {
-        await downloadPhotoFile(ph, data.nom_client);
-        count++;
-        await new Promise((r) => setTimeout(r, 200));
-      }
-      setSendStatus(`✓ ${count} photo(s) téléchargée(s) sur votre appareil.`);
+      const res = await downloadAllPhotosAsZip(targetList, data.nom_client, {
+        reportText: activeReport,
+        interventionId: data.id,
+        onProgress: (_curr, _tot, msg) => setDownloadProgressText(msg),
+      });
+      setSendStatus(`✓ Dossier '${res.folderName}' (${res.count} photos) téléchargé dans vos Téléchargements !`);
     } catch (err) {
-      setSendStatus(`Erreur lors du téléchargement : ${err.message}`);
+      console.error("Erreur téléchargement zip:", err);
+      setSendStatus(`Erreur lors du téléchargement du dossier : ${err.message}`);
     } finally {
       setLoadingAction(null);
+      setDownloadProgressText("");
+    }
+  }
+
+  // 4. Enregistrement direct dans un sous-dossier local (Desktop Chrome / Edge)
+  async function handleSaveToLocalFolder(photosToDownload = null) {
+    const targetList = Array.isArray(photosToDownload) && photosToDownload.length > 0
+      ? photosToDownload
+      : (selectedPhotos.length > 0 ? selectedPhotos : allInterventionPhotos);
+
+    if (targetList.length === 0) {
+      setSendStatus("Aucune photo disponible à enregistrer.");
+      return;
+    }
+
+    setLoadingAction("saveFolder");
+    setDownloadProgressText("Choix du dossier…");
+    try {
+      const res = await savePhotosToLocalDirectory(targetList, data.nom_client, {
+        reportText: activeReport,
+        onProgress: (_curr, _tot, msg) => setDownloadProgressText(msg),
+      });
+      setSendStatus(`✓ Dossier '${res.folderName}' créé avec succès avec ${res.count} photo(s) !`);
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        setSendStatus(`Erreur dossier local : ${err.message}`);
+      }
+    } finally {
+      setLoadingAction(null);
+      setDownloadProgressText("");
     }
   }
 
@@ -601,9 +646,21 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
               {photoEntries.length} photo{photoEntries.length > 1 ? "s" : ""} CelPros • {photosAdditionnelles.length} photo{photosAdditionnelles.length > 1 ? "s" : ""} additionnelle{photosAdditionnelles.length > 1 ? "s" : ""}
             </p>
           </div>
-          <span style={{ fontSize: 11, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "3px 10px", borderRadius: 6, fontWeight: 700 }}>
-            ✓ Enregistrées en BDD
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "3px 10px", borderRadius: 6, fontWeight: 700 }}>
+              ✓ Enregistrées en BDD
+            </span>
+            <button
+              type="button"
+              className="btn-primary"
+              style={{ background: "#2563eb", borderColor: "#2563eb", padding: "6px 14px", fontSize: 12.5, fontWeight: 700 }}
+              onClick={() => handleDownloadAllPhotosZip(allInterventionPhotos)}
+              disabled={loadingAction === "downloadZip" || allInterventionPhotos.length === 0}
+              title="Télécharge toutes les photos regroupées dans un dossier au nom du client dans Téléchargements"
+            >
+              {loadingAction === "downloadZip" ? "⏳ Dossier en cours…" : `📁 Télécharger le dossier photos (${allInterventionPhotos.length})`}
+            </button>
+          </div>
         </div>
 
         {/* Galerie des photos additionnelles */}
@@ -713,6 +770,20 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
           style={{ flex: "2 1 280px", background: "#16a34a", borderColor: "#16a34a", fontSize: 15, fontWeight: 700 }}
         >
           💬 Envoyer sur WhatsApp avec les photos ({allInterventionPhotos.length})
+        </button>
+        <button
+          type="button"
+          className="btn-primary btn-large"
+          onClick={() => handleDownloadAllPhotosZip(allInterventionPhotos)}
+          disabled={loadingAction === "downloadZip" || allInterventionPhotos.length === 0}
+          style={{ flex: "2 1 260px", background: "#2563eb", borderColor: "#2563eb", fontSize: 15, fontWeight: 700 }}
+          title="Télécharge toutes les photos regroupées dans un dossier au nom du client dans Téléchargements"
+        >
+          {loadingAction === "downloadZip" ? (
+            <span>⏳ {downloadProgressText || "Préparation du dossier…"}</span>
+          ) : (
+            <span>📁 Télécharger toutes les photos ({allInterventionPhotos.length})</span>
+          )}
         </button>
         <button
           type="button"
@@ -842,10 +913,47 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
                 </div>
               </div>
 
+              {/* Option Téléchargement en Dossier Groupé au nom du client */}
+              <div style={{ background: "#eff6ff", border: "1.5px solid #93c5fd", borderRadius: 12, padding: 14, marginBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af", marginBottom: 6 }}>
+                  📁 Télécharger toutes les photos dans un dossier ({selectedPhotos.length})
+                </div>
+                <p style={{ margin: "0 0 10px 0", fontSize: 12, color: "#1e3a8a", lineHeight: 1.4 }}>
+                  Télécharge un dossier zippé nommé <strong>{sanitizeClientFolderName(data.nom_client)}</strong> dans vos Téléchargements, contenant toutes les photos numérotées et ordonnées ainsi que le rapport texte. Vous pourrez ensuite envoyer directement le dossier ou son contenu sur WhatsApp.
+                </p>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    style={{ background: "#2563eb", borderColor: "#2563eb", fontSize: 13, padding: "10px 16px", fontWeight: 700, flex: "2 1 220px" }}
+                    onClick={() => handleDownloadAllPhotosZip(selectedPhotos)}
+                    disabled={loadingAction === "downloadZip" || selectedPhotos.length === 0}
+                  >
+                    {loadingAction === "downloadZip" ? (
+                      <span>⏳ {downloadProgressText || "Création du dossier…"}</span>
+                    ) : (
+                      <span>📁 Télécharger le dossier photos ({selectedPhotos.length})</span>
+                    )}
+                  </button>
+                  {typeof window !== "undefined" && typeof window.showDirectoryPicker === "function" && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{ fontSize: 13, padding: "10px 14px", flex: "1 1 180px" }}
+                      onClick={() => handleSaveToLocalFolder(selectedPhotos)}
+                      disabled={loadingAction === "saveFolder" || selectedPhotos.length === 0}
+                      title="Enregistre directement dans un vrai sous-dossier sur votre PC"
+                    >
+                      {loadingAction === "saveFolder" ? "⏳ Écriture…" : "📂 Dossier local (PC)"}
+                    </button>
+                  )}
+                </div>
+              </div>
+
               {/* Autre option : partage natif des fichiers */}
               <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, marginBottom: 18 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#334155", marginBottom: 6 }}>
-                  📱 Partage direct des Fichiers Images
+                  📱 Partage direct des Fichiers Images (Mobile)
                 </div>
                 <p style={{ margin: "0 0 10px 0", fontSize: 12, color: "#64748b" }}>
                   Envoie directement les fichiers photos dans l'application WhatsApp (mobile). Le texte du rapport est automatiquement copié dans votre presse-papier pour pouvoir être collé si besoin.
@@ -859,15 +967,6 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
                     disabled={loadingAction === "shareFiles" || selectedPhotos.length === 0}
                   >
                     {loadingAction === "shareFiles" ? "Préparation…" : "📤 Partager les fichiers photos"}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    style={{ fontSize: 13, padding: "8px 14px", flex: "1 1 160px" }}
-                    onClick={handleDownloadAllPhotos}
-                    disabled={loadingAction === "downloadPhotos" || selectedPhotos.length === 0}
-                  >
-                    {loadingAction === "downloadPhotos" ? "Téléchargement…" : "⬇ Télécharger les photos"}
                   </button>
                 </div>
               </div>

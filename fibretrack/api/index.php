@@ -545,6 +545,84 @@ try {
       echo json_encode($r);
       break;
 
+    case 'download_photos_zip':
+    case 'intervention_photos_zip':
+      $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
+      if (!$id) { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
+      $stmt = db()->prepare('SELECT id, nom_client, nom_dossier, points_gps, whatsapp_photos FROM interventions WHERE id = ?');
+      $stmt->execute([$id]);
+      $r = $stmt->fetch();
+      if (!$r) { http_response_code(404); echo json_encode(['error' => 'Intervention non trouvée']); break; }
+
+      $nomClient = trim($r['nom_client'] ?: ($r['nom_dossier'] ?: 'client'));
+      $slugClient = preg_replace('/[^a-zA-Z0-9_-]/', '_', @iconv('UTF-8', 'ASCII//TRANSLIT', $nomClient) ?: $nomClient);
+      $slugClient = strtoupper(preg_replace('/_+/', '_', trim($slugClient, '_'))) ?: 'DOSSIER_CLIENT';
+
+      $zip = new ZipArchive();
+      $tmpZip = tempnam(sys_get_temp_dir(), 'ft_zip_');
+      if ($zip->open($tmpZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        http_response_code(500); echo json_encode(['error' => 'Impossible de générer l\'archive ZIP']); break;
+      }
+
+      $folderPrefix = $slugClient . '/';
+      $zip->addEmptyDir($slugClient);
+
+      // 1. Fichiers présents sur le serveur dans uploads/photos/<id>
+      $safeId = preg_replace('/[^a-zA-Z0-9_-]/', '', $id);
+      $photoDir = __DIR__ . '/uploads/photos/' . $safeId;
+      if (is_dir($photoDir)) {
+        foreach (scandir($photoDir) as $f) {
+          if ($f !== '.' && $f !== '..' && is_file($photoDir . '/' . $f)) {
+            $zip->addFile($photoDir . '/' . $f, $folderPrefix . $f);
+          }
+        }
+      }
+
+      // 2. Fichiers en base64 dans whatsapp_photos
+      $wa = json_decode($r['whatsapp_photos'] ?? '[]', true) ?? [];
+      $idx = 1;
+      foreach ($wa as $p) {
+        $url = $p['url'] ?? '';
+        if (str_starts_with($url, 'data:image')) {
+          if (preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#si', $url, $m)) {
+            $bin = base64_decode($m[2]);
+            if ($bin) {
+              $ext = ($m[1] === 'png') ? 'png' : (($m[1] === 'webp') ? 'webp' : 'jpg');
+              $rawSlot = $p['slot'] ?? ($p['name'] ?? ('photo_' . $idx));
+              $name = preg_replace('/[^a-zA-Z0-9_-]/', '_', $rawSlot) . '.' . $ext;
+              $zip->addFromString($folderPrefix . $name, $bin);
+              $idx++;
+            }
+          }
+        }
+      }
+
+      // 3. Fichiers en base64 dans points_gps
+      $gps = json_decode($r['points_gps'] ?? '[]', true) ?? [];
+      foreach ($gps as $pt) {
+        $ph = $pt['photo'] ?? '';
+        if (str_starts_with($ph, 'data:image')) {
+          if (preg_match('#^data:image/(jpeg|jpg|png|webp);base64,(.+)$#si', $ph, $m)) {
+            $bin = base64_decode($m[2]);
+            if ($bin) {
+              $ext = ($m[1] === 'png') ? 'png' : (($m[1] === 'webp') ? 'webp' : 'jpg');
+              $ptName = 'poteau_' . ($pt['numero'] ?? uniqid()) . '.' . $ext;
+              $zip->addFromString($folderPrefix . $ptName, $bin);
+            }
+          }
+        }
+      }
+
+      $zip->close();
+
+      header('Content-Type: application/zip');
+      header('Content-Disposition: attachment; filename="Photos_' . $slugClient . '.zip"');
+      header('Content-Length: ' . filesize($tmpZip));
+      header('Cache-Control: no-cache, no-store, must-revalidate');
+      readfile($tmpZip);
+      @unlink($tmpZip);
+      exit;
+
     case 'intervention_get':
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ?');
