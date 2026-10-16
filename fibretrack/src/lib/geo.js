@@ -153,7 +153,9 @@ export async function extractExifGps(input) {
     if (typeof input === "string") {
       const commaIdx = input.indexOf(",");
       const b64 = commaIdx >= 0 ? input.slice(commaIdx + 1) : input;
-      const binStr = (typeof atob !== "undefined" ? atob(b64.slice(0, 131072)) : Buffer.from(b64.slice(0, 131072), "base64").toString("binary"));
+      const binStr = (typeof atob !== "undefined"
+        ? atob(b64.slice(0, 131072))
+        : (typeof Buffer !== "undefined" ? Buffer.from(b64.slice(0, 131072), "base64").toString("binary") : ""));
       const len = binStr.length;
       const u8 = new Uint8Array(len);
       for (let i = 0; i < len; i++) {

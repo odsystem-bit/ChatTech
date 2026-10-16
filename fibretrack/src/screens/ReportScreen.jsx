@@ -4,6 +4,12 @@ import { collectCelprosPhotos } from "../lib/slotPhotos";
 import { buildShareFiles, shareReportWithPhotos, openWhatsAppText } from "../lib/reportShare";
 import { CELPROS_PHOTO_SLOTS } from "./InterventionFormScreen";
 import {
+  ensureInterventionDefaults,
+  getIntervention,
+  saveInterventionLocally,
+  saveIntervention,
+} from "../models/Intervention";
+import {
   downloadPhotoFile,
   downloadAllPhotosAsZip,
   savePhotosToLocalDirectory,

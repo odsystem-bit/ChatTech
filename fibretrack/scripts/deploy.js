@@ -40,12 +40,30 @@ conn.on('ready', () => {
       });
     }
 
+    async function getRemoteSize(remotePath) {
+      return new Promise((resolve) => {
+        sftp.stat(remotePath, (err, stats) => {
+          if (err || !stats) resolve(-1);
+          else resolve(stats.size);
+        });
+      });
+    }
+
     async function uploadFile(localPath, remotePath) {
+      const stat = fs.statSync(localPath);
+      // Skip heavy binary assets if size didn't change
+      if (/\.(png|jpg|jpeg|svg|ico|woff2?|ttf|eot)$/i.test(localPath)) {
+        const remSize = await getRemoteSize(remotePath);
+        if (remSize === stat.size) {
+          console.log(`  = Ignoré (identique): ${path.relative(distDir, localPath)}`);
+          return;
+        }
+      }
+
       return new Promise((resolve, reject) => {
         const readStream = fs.createReadStream(localPath);
         const writeStream = sftp.createWriteStream(remotePath);
         writeStream.on('close', () => {
-          const stat = fs.statSync(localPath);
           console.log(`  ✓ Uploadé: ${path.relative(distDir, localPath)} (${(stat.size / 1024).toFixed(1)} KB)`);
           resolve();
         });
@@ -115,4 +133,6 @@ conn.connect({
   port,
   username,
   privateKey,
+  keepaliveInterval: 5000,
+  readyTimeout: 30000,
 });
