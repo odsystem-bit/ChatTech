@@ -232,7 +232,7 @@
       negativeKeywords: ["cable", "interne", "externe", "fat", "pto", "mesure", "debit", "wifi", "combine", "contrat"],
       getPhoto: (data) => {
         const wa = getEligibleWhatsappPhotos(data);
-        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "autre_poteau" || p.type === "autre_poteau"));
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau"));
         if (direct) return { src: getPhotoSource(direct), name: "autre_poteau.jpg", slot: "autre_poteau" };
         const legacy = wa.find((p) => {
           if (!getPhotoSource(p) || !p.name) return false;
@@ -962,9 +962,9 @@
       const desc = getPhotoDescription(p);
       const slot = String(p.slot || "").toLowerCase();
       const type = String(p.type || "").toLowerCase();
-      if (slot === "autre_poteau" || type === "autre_poteau" || desc.includes("autre poteau") || desc.includes("poteau")) {
+      if (slot === "autre_poteau" || slot.startsWith("autre_poteau") || type === "autre_poteau" || desc.includes("autre poteau") || desc.includes("poteau")) {
         if (!polePhotos.some((existing) => existing.src === src)) {
-          polePhotos.push({ src, name: `${p.name ? normalizeText(p.name) : (slot === "autre_poteau" ? "autre_poteau" : "poteau")}.jpg` });
+          polePhotos.push({ src, name: `${p.name ? normalizeText(p.name) : (slot.startsWith("autre_poteau") ? slot : "poteau")}.jpg` });
         }
       }
     }

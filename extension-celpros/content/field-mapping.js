@@ -308,11 +308,17 @@
       onAbsent: "leave_empty_and_warn",
       getPhoto: (data) => {
         const wa = getEligibleWhatsappPhotos(data);
-        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "autre_poteau" || p.type === "autre_poteau"));
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau"));
         if (direct) return { src: getPhotoSource(direct), name: "autre_poteau.jpg", slot: "autre_poteau" };
         const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(autre[-_ ]*poteau|autre[-_ ]*support)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
         if (legacy) return { src: getPhotoSource(legacy), name: "autre_poteau.jpg", slot: "autre_poteau" };
         return null;
+      },
+      getAllPhotos: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        return wa
+          .filter((p) => getPhotoSource(p) && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau"))
+          .map((p, idx) => ({ src: getPhotoSource(p), name: `autre_poteau_${idx + 1}.jpg`, slot: "autre_poteau" }));
       },
     },
     {

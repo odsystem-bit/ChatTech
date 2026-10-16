@@ -72,3 +72,22 @@ test("safeFileName / dataUrlToBlob", async () => {
   const blob = dataUrlToBlob(IMG("hello"));
   assert.equal(await blob.text(), "img-hello");
 });
+
+test("collectCelprosPhotos: supporte plusieurs photos pour autre_poteau sans les écraser", () => {
+  const data = {
+    whatsapp_photos: [
+      { id: "a1", slot: "autre_poteau", url: IMG("autre1") },
+      { id: "a2", slot: "autre_poteau", url: IMG("autre2") },
+      { id: "a3", slot: "autre_poteau", url: IMG("autre3") },
+    ],
+  };
+  const list = collectCelprosPhotos(data, SLOTS);
+  assert.equal(list.length, 3);
+  assert.equal(list[0].key, "autre_poteau_1");
+  assert.equal(list[0].label, "Autre poteau (1)");
+  assert.equal(list[1].key, "autre_poteau_2");
+  assert.equal(list[1].label, "Autre poteau (2)");
+  assert.equal(list[2].key, "autre_poteau_3");
+  assert.equal(list[2].label, "Autre poteau (3)");
+});
+

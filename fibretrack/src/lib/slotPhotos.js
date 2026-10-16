@@ -98,6 +98,21 @@ export function collectCelprosPhotos(data, slotDefs = []) {
   };
 
   for (const slot of slotDefs) {
+    if (slot.key === "autre_poteau") {
+      const autres = whatsappPhotos.filter(
+        (p) => p && !isAdditional(p) && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
+      );
+      if (autres.length > 0) {
+        autres.forEach((p, idx) => {
+          push(
+            autres.length > 1 ? `autre_poteau_${idx + 1}` : "autre_poteau",
+            autres.length > 1 ? `Autre poteau (${idx + 1})` : "Autre poteau",
+            p
+          );
+        });
+        continue;
+      }
+    }
     const photo = findPhotoForSlot(whatsappPhotos, points, slot.key);
     if (photo) push(slot.key, slot.label, photo);
   }

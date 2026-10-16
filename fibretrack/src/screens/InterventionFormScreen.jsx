@@ -1062,8 +1062,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       deletedWhatsappPhotoIdsRef.current.delete(slotKey);
       deletedWhatsappPhotoIdsRef.current.delete(`slot_${slotKey}`);
 
-      const filtered = (whatsappPhotos || []).filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
-      const nextPhotos = [...filtered, newPhoto];
+      let nextPhotos;
+      if (slotKey === "autre_poteau") {
+        const existingAutre = (whatsappPhotos || []).filter(
+          (p) => p && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
+        );
+        newPhoto.name = `autre_poteau_${existingAutre.length + 1}.jpg`;
+        newPhoto.label = `Autre poteau (${existingAutre.length + 1})`;
+        newPhoto.description = `Autre poteau ${existingAutre.length + 1} - ${data.nom_client || "Intervention"}`;
+        nextPhotos = [...(whatsappPhotos || []), newPhoto];
+      } else {
+        const filtered = (whatsappPhotos || []).filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
+        nextPhotos = [...filtered, newPhoto];
+      }
 
       // Si c'est FAT ou ONT/Abonné, mettre également à jour et géolocaliser le point GPS
       let foundFat = false;
@@ -1205,7 +1216,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       const nextPhotos = (whatsappPhotos || []).filter((p) => {
         if (!p) return false;
         if (existing.id && p.id === existing.id) return false;
-        if (p.slot === slotKey || p.type === slotKey) return false;
+        if (p.slot === slotKey || p.type === slotKey) {
+          if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
+          return false;
+        }
+        if (slotKey === "autre_poteau" && (p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")) {
+          if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
+          return false;
+        }
         return true;
       });
 
@@ -1233,6 +1251,41 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         await flushServerSync();
       } catch (err) {
         console.warn("Erreur synchronisation suppression photo:", err);
+      }
+    }
+  }
+
+  async function removeAutrePoteauPhoto(photoId) {
+    if (!photoId) return;
+    const target = (whatsappPhotos || []).find((p) => p && p.id === photoId);
+    if (!target) return;
+    if (confirm("Supprimer définitivement cette photo d'Autre poteau ?")) {
+      markDirty("whatsapp_photos");
+      deletedWhatsappPhotoIdsRef.current.add(photoId);
+
+      const nextPhotos = (whatsappPhotos || []).filter((p) => p && p.id !== photoId);
+      const nextData = {
+        ...data,
+        whatsapp_photos: nextPhotos,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+        _fully_loaded: true,
+      };
+
+      setWhatsappPhotos(nextPhotos);
+      setData(nextData);
+      dataRef.current = nextData;
+      saveInterventionLocally(nextData);
+
+      setSaveStatus("✓ Photo supprimée");
+      setSlotActionFeedback("Photo d'Autre poteau supprimée définitivement.");
+      setTimeout(() => setSlotActionFeedback(""), 3000);
+
+      try {
+        await flushServerSync();
+      } catch (err) {
+        console.warn("Erreur suppression photo autre poteau:", err);
       }
     }
   }
@@ -2648,7 +2701,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   <h3>Boîte à Photos CelPros</h3>
                   <p className="photos-progress-sub">
                     {CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length} sur {CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length} photos obligatoires prêtes pour CelPros
-                    {getPhotoForSlot("autre_poteau")?.url ? " (+ 1 Autre poteau prêt)" : ""}
+                    {(() => {
+                      const count = (whatsappPhotos || []).filter(
+                        (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
+                      ).length;
+                      return count > 0 ? ` (+ ${count} Autre poteau)` : "";
+                    })()}
                   </p>
                 </div>
                 <div className="photos-progress-percent">
@@ -2670,87 +2728,211 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
             <div className="celpros-photos-grid">
               {CELPROS_PHOTO_SLOTS.map((slot) => {
-                const photo = getPhotoForSlot(slot.key);
-                const isTaken = !!photo?.url;
+                const isAutrePoteau = slot.key === "autre_poteau";
+                const autrePhotos = isAutrePoteau
+                  ? (whatsappPhotos || []).filter(
+                      (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
+                    )
+                  : [];
+                const photo = isAutrePoteau ? (autrePhotos[0] || null) : getPhotoForSlot(slot.key);
+                const isTaken = isAutrePoteau ? autrePhotos.length > 0 : !!photo?.url;
 
                 return (
-                  <div key={slot.key} className={`photo-slot-card ${isTaken ? "taken" : "pending"}`}>
+                  <div key={slot.key} className={`photo-slot-card ${isTaken ? "taken" : "pending"} ${isAutrePoteau ? "autre-poteau-card" : ""}`}>
                     <div className="photo-slot-header">
                       <span className="photo-slot-icon">{slot.icon}</span>
                       <div className="photo-slot-titles">
                         <h4>{slot.label}</h4>
                         <p>{slot.description}</p>
-                        {slot.key === "autre_poteau" && (
+                        {isAutrePoteau && (
                           <div style={{ marginTop: 3, fontSize: 11, color: "#0284c7", fontWeight: 600 }}>
-                            ℹ️ Ajouté sur CelPros au niveau poteau (exclu du stock & rapports)
+                            ℹ️ Multi-photos autorisé • Ajouté sur CelPros au niveau poteau (exclu du stock & rapports)
                           </div>
                         )}
                       </div>
-                      <span className={`photo-slot-badge ${isTaken ? "badge-success" : (slot.optional ? "badge-optional" : "badge-pending")}`} style={slot.optional && !isTaken ? { background: "#f1f5f9", color: "#64748b" } : {}}>
-                        {isTaken ? "✓ Prête" : (slot.optional ? "Optionnel" : "En attente")}
+                      <span
+                        className={`photo-slot-badge ${isTaken ? "badge-success" : (slot.optional ? "badge-optional" : "badge-pending")}`}
+                        style={slot.optional && !isTaken ? { background: "#f1f5f9", color: "#64748b" } : {}}
+                      >
+                        {isAutrePoteau
+                          ? (isTaken ? `✓ ${autrePhotos.length} photo${autrePhotos.length > 1 ? "s" : ""}` : "Optionnel")
+                          : (isTaken ? "✓ Prête" : (slot.optional ? "Optionnel" : "En attente"))}
                       </span>
                     </div>
 
                     {isTaken ? (
-                      <div className="photo-slot-preview-box">
-                        <div
-                          className="photo-slot-img-wrap"
-                          onClick={() => {
-                            setViewingPhoto({
-                              url: photo.url,
-                              title: slot.label,
-                              subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
-                              info: [
-                                { label: "Catégorie CelPros", val: slot.label },
-                                ...(photo.lat ? [{ label: "Coordonnées GPS", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
-                                ...(photo.precision_m ? [{ label: "Précision GPS", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
-                                ...(photo.horodatage ? [{ label: "Prise le", val: new Date(photo.horodatage).toLocaleString() }] : []),
-                                ...(photo.lieu ? [{ label: "Adresse / Lieu", val: photo.lieu }] : []),
-                                ...(slot.key === "fat" && data.fat_ref ? [{ label: "Référence FAT", val: data.fat_ref }] : []),
-                                ...(slot.key === "fat" && data.msan ? [{ label: "MSAN", val: data.msan }] : []),
-                              ],
-                            });
-                          }}
-                        >
-                          <img src={photo.url} alt={slot.label} />
-                          <span className="zoom-hint-chip">🔍 Agrandir</span>
-                        </div>
-
-                        {slot.hasOcr && (data.fat_ref || data.msan) && (
-                          <div className="fat-ocr-detected-chip">
-                            <span>⚡ FAT : <strong>{data.fat_ref || "N/A"}</strong> | MSAN : <strong>{data.msan || "N/A"}</strong></span>
+                      isAutrePoteau ? (
+                        <div className="photo-slot-preview-box autre-poteau-multi-box">
+                          <div
+                            className="autre-poteau-gallery-grid"
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(auto-fill, minmax(105px, 1fr))",
+                              gap: 8,
+                              padding: "6px 0",
+                              width: "100%",
+                            }}
+                          >
+                            {autrePhotos.map((ap, apIdx) => (
+                              <div
+                                key={ap.id || apIdx}
+                                className="autre-poteau-thumb-wrap"
+                                style={{
+                                  position: "relative",
+                                  borderRadius: 8,
+                                  overflow: "hidden",
+                                  border: "1px solid #cbd5e1",
+                                  background: "#fff",
+                                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
+                                }}
+                              >
+                                <img
+                                  src={ap.url}
+                                  alt={`Autre poteau ${apIdx + 1}`}
+                                  style={{
+                                    width: "100%",
+                                    height: 80,
+                                    objectFit: "cover",
+                                    display: "block",
+                                    cursor: "pointer",
+                                  }}
+                                  onClick={() => {
+                                    setViewingPhoto({
+                                      url: ap.url,
+                                      title: `Autre poteau #${apIdx + 1}`,
+                                      subtitle: ap.lieu || (ap.lat ? `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` : ""),
+                                      info: [
+                                        { label: "Catégorie", val: `Autre poteau #${apIdx + 1}` },
+                                        ...(ap.lat ? [{ label: "GPS", val: `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` }] : []),
+                                        ...(ap.precision_m ? [{ label: "Précision", val: `±${ap.precision_m.toFixed(1)} m` }] : []),
+                                        ...(ap.horodatage ? [{ label: "Prise le", val: new Date(ap.horodatage).toLocaleString() }] : []),
+                                        ...(ap.lieu ? [{ label: "Lieu", val: ap.lieu }] : []),
+                                      ],
+                                    });
+                                  }}
+                                />
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    padding: "3px 6px",
+                                    background: "#f8fafc",
+                                    borderTop: "1px solid #f1f5f9",
+                                    fontSize: 11,
+                                  }}
+                                >
+                                  <span style={{ fontWeight: 700, color: "#475569" }}>#{apIdx + 1}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeAutrePoteauPhoto(ap.id)}
+                                    style={{
+                                      border: "none",
+                                      background: "none",
+                                      color: "#ef4444",
+                                      fontWeight: "bold",
+                                      cursor: "pointer",
+                                      fontSize: 13,
+                                      padding: "0 2px",
+                                      lineHeight: 1,
+                                    }}
+                                    title="Supprimer cette photo"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        )}
 
-                        <div className="photo-slot-actions">
-                          {slot.hasOcr && (
+                          <div className="photo-slot-actions" style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
                             <button
                               type="button"
                               className="btn-slot-subtle"
-                              disabled={ocrProcessing}
-                              onClick={() => runFatOcrOnPhoto(photo.url)}
-                              title="Relancer l'extraction OCR"
+                              disabled={slotCapturing}
+                              onClick={() => openSlotCamera("autre_poteau")}
                             >
-                              🔍 {ocrProcessing ? "Lecture…" : "Re-scanner OCR"}
+                              📷 + Prendre photo
                             </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn-slot-subtle"
-                            disabled={slotCapturing}
-                            onClick={() => openSlotCamera(slot.key)}
-                          >
-                            🔄 Reprendre
-                          </button>
-                          <button
-                            type="button"
-                            className="btn-slot-subtle danger"
-                            onClick={() => removeSlotPhoto(slot.key)}
-                          >
-                            ✕ Retirer
-                          </button>
+                            <button
+                              type="button"
+                              className="btn-slot-subtle"
+                              disabled={slotCapturing}
+                              onClick={() => openSlotGallery("autre_poteau")}
+                            >
+                              🖼️ + Importer
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-slot-subtle danger"
+                              onClick={() => removeSlotPhoto("autre_poteau")}
+                              title="Supprimer toutes les photos d'Autre poteau"
+                            >
+                              ✕ Tout retirer ({autrePhotos.length})
+                            </button>
+                          </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="photo-slot-preview-box">
+                          <div
+                            className="photo-slot-img-wrap"
+                            onClick={() => {
+                              setViewingPhoto({
+                                url: photo.url,
+                                title: slot.label,
+                                subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
+                                info: [
+                                  { label: "Catégorie CelPros", val: slot.label },
+                                  ...(photo.lat ? [{ label: "Coordonnées GPS", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
+                                  ...(photo.precision_m ? [{ label: "Précision GPS", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
+                                  ...(photo.horodatage ? [{ label: "Prise le", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                                  ...(photo.lieu ? [{ label: "Adresse / Lieu", val: photo.lieu }] : []),
+                                  ...(slot.key === "fat" && data.fat_ref ? [{ label: "Référence FAT", val: data.fat_ref }] : []),
+                                  ...(slot.key === "fat" && data.msan ? [{ label: "MSAN", val: data.msan }] : []),
+                                ],
+                              });
+                            }}
+                          >
+                            <img src={photo.url} alt={slot.label} />
+                            <span className="zoom-hint-chip">🔍 Agrandir</span>
+                          </div>
+
+                          {slot.hasOcr && (data.fat_ref || data.msan) && (
+                            <div className="fat-ocr-detected-chip">
+                              <span>⚡ FAT : <strong>{data.fat_ref || "N/A"}</strong> | MSAN : <strong>{data.msan || "N/A"}</strong></span>
+                            </div>
+                          )}
+
+                          <div className="photo-slot-actions">
+                            {slot.hasOcr && (
+                              <button
+                                type="button"
+                                className="btn-slot-subtle"
+                                disabled={ocrProcessing}
+                                onClick={() => runFatOcrOnPhoto(photo.url)}
+                                title="Relancer l'extraction OCR"
+                              >
+                                🔍 {ocrProcessing ? "Lecture…" : "Re-scanner OCR"}
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn-slot-subtle"
+                              disabled={slotCapturing}
+                              onClick={() => openSlotCamera(slot.key)}
+                            >
+                              🔄 Reprendre
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-slot-subtle danger"
+                              onClick={() => removeSlotPhoto(slot.key)}
+                            >
+                              ✕ Retirer
+                            </button>
+                          </div>
+                        </div>
+                      )
                     ) : (
                       <div className="photo-slot-upload-box">
                         <button
