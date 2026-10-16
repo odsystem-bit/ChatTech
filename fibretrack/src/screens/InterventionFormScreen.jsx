@@ -879,6 +879,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         setZoneStatus(`✓ ${fallback}`);
         setZoneStatusType("success");
       }
+      setData((prev) => {
+        const next = { ...prev, latitude: prev.latitude || lat, longitude: prev.longitude || lng };
+        dataRef.current = next;
+        saveInterventionLocally(next);
+        return next;
+      });
     } catch (err) {
       setZoneStatus(`Erreur GPS : ${err.message || "Indisponible"}`);
       setZoneStatusType("error");
@@ -1059,22 +1065,76 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       const filtered = (whatsappPhotos || []).filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
       const nextPhotos = [...filtered, newPhoto];
 
-      // Si c'est FAT ou ONT/Abonné, mettre également à jour la photo du point GPS
+      // Si c'est FAT ou ONT/Abonné, mettre également à jour et géolocaliser le point GPS
+      let foundFat = false;
+      let foundAbonne = false;
       const nextPoints = (data.points_gps || []).map((pt) => {
         if (!pt) return pt;
         if (slotKey === "fat" && String(pt.type).trim().toUpperCase() === "FAT") {
-          return { ...pt, photo: embeddedPhoto, photo_deleted: false };
+          foundFat = true;
+          return {
+            ...pt,
+            lat,
+            lng,
+            precision_m,
+            lieu,
+            photo: embeddedPhoto,
+            photo_deleted: false,
+            horodatage,
+          };
         }
-        if (slotKey === "ont_sn" && (String(pt.type).trim().toUpperCase() === "ABONNÉ" || String(pt.type).trim().toUpperCase() === "ONT")) {
-          return { ...pt, photo: embeddedPhoto, photo_deleted: false };
+        if ((slotKey === "ont_sn" || slotKey === "cable_interne") && ["ABONNÉ", "ABONNE", "CLIENT", "ONT"].includes(String(pt.type).trim().toUpperCase())) {
+          foundAbonne = true;
+          return {
+            ...pt,
+            lat,
+            lng,
+            precision_m,
+            lieu,
+            photo: embeddedPhoto,
+            photo_deleted: false,
+            horodatage,
+          };
         }
         return pt;
       });
+
+      if (slotKey === "fat" && !foundFat) {
+        nextPoints.push({
+          id: crypto.randomUUID(),
+          type: "FAT",
+          lat,
+          lng,
+          precision_m,
+          lieu,
+          photo: embeddedPhoto,
+          photo_deleted: false,
+          horodatage,
+          ajoute_par: currentUser || "Technicien",
+        });
+      }
+
+      if ((slotKey === "ont_sn" || slotKey === "cable_interne") && !foundAbonne) {
+        nextPoints.push({
+          id: crypto.randomUUID(),
+          type: "Abonné",
+          lat,
+          lng,
+          precision_m,
+          lieu,
+          photo: embeddedPhoto,
+          photo_deleted: false,
+          horodatage,
+          ajoute_par: currentUser || "Technicien",
+        });
+      }
 
       const nextData = {
         ...data,
         whatsapp_photos: nextPhotos,
         points_gps: nextPoints,
+        ...(slotKey === "fat" ? { latitude_fat: lat, longitude_fat: lng } : {}),
+        ...(slotKey === "ont_sn" || slotKey === "cable_interne" ? { latitude: lat, longitude: lng } : {}),
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
         _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),

@@ -125,8 +125,27 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const abonnePt = pts.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()));
   const fatPt = pts.find((p) => p && String(p.type || "").toLowerCase() === "fat");
 
-  const latAbonne = abonnePt ? getGpsCoordinatesString(abonnePt) : (d.latitude && d.longitude ? `${d.latitude},${d.longitude}` : "");
-  const latFat = fatPt ? getGpsCoordinatesString(fatPt) : (d.latitude_fat && d.longitude_fat ? `${d.latitude_fat},${d.longitude_fat}` : "");
+  const waPhotos = Array.isArray(d.whatsapp_photos) ? d.whatsapp_photos : [];
+  const fatPhoto = waPhotos.find((p) => p && (p.slot === "fat" || p.type === "fat") && p.lat != null && p.lng != null);
+  const abonnePhoto = waPhotos.find((p) => p && (p.slot === "ont_sn" || p.slot === "cable_interne" || p.slot === "mesure_pto") && p.lat != null && p.lng != null);
+
+  let latAbonne = "";
+  if (abonnePt && (abonnePt.lat != null || abonnePt.latitude != null)) {
+    latAbonne = getGpsCoordinatesString(abonnePt);
+  } else if (d.latitude && d.longitude) {
+    latAbonne = `${d.latitude},${d.longitude}`;
+  } else if (abonnePhoto) {
+    latAbonne = `${abonnePhoto.lat},${abonnePhoto.lng}`;
+  }
+
+  let latFat = "";
+  if (fatPt && (fatPt.lat != null || fatPt.latitude != null)) {
+    latFat = getGpsCoordinatesString(fatPt);
+  } else if (d.latitude_fat && d.longitude_fat) {
+    latFat = `${d.latitude_fat},${d.longitude_fat}`;
+  } else if (fatPhoto) {
+    latFat = `${fatPhoto.lat},${fatPhoto.lng}`;
+  }
 
   const nbArmes = d.nb_poteaux_armes ?? poteauxArmes.length;
   const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));
@@ -317,8 +336,31 @@ export function generateConformiteReport(intervention) {
   const abonnePt = pts.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()));
   const fatPt = pts.find((p) => p && String(p.type || "").toLowerCase() === "fat");
 
-  const latAbonne = abonnePt ? `${abonnePt.lat}, ${abonnePt.lng}` : (d.latitude && d.longitude ? `${d.latitude}, ${d.longitude}` : "");
-  const latFat = fatPt ? `${fatPt.lat}, ${fatPt.lng}` : (d.latitude_fat && d.longitude_fat ? `${d.latitude_fat}, ${d.longitude_fat}` : "");
+  const waPhotos = Array.isArray(d.whatsapp_photos) ? d.whatsapp_photos : [];
+  const fatPhoto = waPhotos.find((p) => p && (p.slot === "fat" || p.type === "fat") && p.lat != null && p.lng != null);
+  const abonnePhoto = waPhotos.find((p) => p && (p.slot === "ont_sn" || p.slot === "cable_interne" || p.slot === "mesure_pto") && p.lat != null && p.lng != null);
+
+  let latAbonne = "";
+  if (abonnePt && (abonnePt.lat != null || abonnePt.latitude != null)) {
+    const lat = abonnePt.lat ?? abonnePt.latitude;
+    const lng = abonnePt.lng ?? abonnePt.longitude;
+    latAbonne = `${lat}, ${lng}`;
+  } else if (d.latitude && d.longitude) {
+    latAbonne = `${d.latitude}, ${d.longitude}`;
+  } else if (abonnePhoto) {
+    latAbonne = `${abonnePhoto.lat}, ${abonnePhoto.lng}`;
+  }
+
+  let latFat = "";
+  if (fatPt && (fatPt.lat != null || fatPt.latitude != null)) {
+    const lat = fatPt.lat ?? fatPt.latitude;
+    const lng = fatPt.lng ?? fatPt.longitude;
+    latFat = `${lat}, ${lng}`;
+  } else if (d.latitude_fat && d.longitude_fat) {
+    latFat = `${d.latitude_fat}, ${d.longitude_fat}`;
+  } else if (fatPhoto) {
+    latFat = `${fatPhoto.lat}, ${fatPhoto.lng}`;
+  }
 
   const nbArmes = d.nb_poteaux_armes ?? poteauxArmes.length;
   const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));

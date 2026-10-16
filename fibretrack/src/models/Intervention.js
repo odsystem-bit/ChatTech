@@ -197,6 +197,43 @@ export function ensureInterventionDefaults(data) {
         }
       }
     });
+
+    const hasFat = pointsGps.some((p) => p && String(p.type || "").trim().toUpperCase() === "FAT");
+    const hasAbonne = pointsGps.some((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").trim().toLowerCase()));
+
+    if (!hasFat) {
+      const fatWa = data.whatsapp_photos.find((p) => p && (p.slot === "fat" || p.type === "fat") && p.lat != null && p.lng != null);
+      if (fatWa) {
+        pointsGps.push({
+          id: fatWa.id || crypto.randomUUID(),
+          type: "FAT",
+          photo: fatWa.url || "",
+          lat: fatWa.lat,
+          lng: fatWa.lng,
+          precision_m: fatWa.precision_m ?? null,
+          horodatage: fatWa.horodatage || new Date().toISOString(),
+          lieu: fatWa.lieu || "",
+          ajoute_par: data.nom_technicien || "",
+        });
+      }
+    }
+
+    if (!hasAbonne) {
+      const abonneWa = data.whatsapp_photos.find((p) => p && (p.slot === "ont_sn" || p.slot === "cable_interne" || p.slot === "mesure_pto") && p.lat != null && p.lng != null);
+      if (abonneWa) {
+        pointsGps.push({
+          id: abonneWa.id || crypto.randomUUID(),
+          type: "Abonné",
+          photo: abonneWa.url || "",
+          lat: abonneWa.lat,
+          lng: abonneWa.lng,
+          precision_m: abonneWa.precision_m ?? null,
+          horodatage: abonneWa.horodatage || new Date().toISOString(),
+          lieu: abonneWa.lieu || "",
+          ajoute_par: data.nom_technicien || "",
+        });
+      }
+    }
   }
 
   const poleItems = pointsGps.filter((p) => p && p.type === "Poteau");
@@ -225,6 +262,10 @@ export function ensureInterventionDefaults(data) {
     nb_poteaux_implantes: computedImplantes,
     nb_poteaux_armes: computedArmes,
     pto_qte: Number(data.pto_qte ?? 0),
+    latitude_fat: data.latitude_fat ?? (pointsGps.find((p) => p && String(p.type || "").toUpperCase() === "FAT")?.lat ?? ""),
+    longitude_fat: data.longitude_fat ?? (pointsGps.find((p) => p && String(p.type || "").toUpperCase() === "FAT")?.lng ?? ""),
+    latitude: data.latitude ?? (pointsGps.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()))?.lat ?? ""),
+    longitude: data.longitude ?? (pointsGps.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()))?.lng ?? ""),
     repeteur_wifi_qte: Number(data.repeteur_wifi_qte ?? 0),
     port_disponible: Number(data.port_disponible ?? 0),
     ports_disponibles: String(data.ports_disponibles ?? ""),

@@ -228,5 +228,30 @@ test("Rapports dynamiques - s'adaptent à 100% à une autre région, autre équi
   assert.ok(conformite.includes("Poteaux implantés : 01"));
   assert.ok(!conformite.includes("Rodolpho"));
   assert.ok(!conformite.includes("Cotonou"));
-  assert.ok(!conformite.includes("ODOUNLAMI"));
+  assert(!conformite.includes("ODOUNLAMI"));
 });
+
+test("Rapport - extrait automatiquement le GPS FAT et Abonné depuis les photos CelPros si points_gps est absent", () => {
+  const interventionAvecPhotosSeules = {
+    nom_technicien: "Marius T.",
+    date: "2026-10-16",
+    nom_client: "HOUNGBO FELIX",
+    msan: "SEM-PL03",
+    fat_ref: "FAT202",
+    lineaire_m: 100,
+    points_gps: [], // aucun point GPS saisi dans l'onglet Poteaux & GPS
+    whatsapp_photos: [
+      { slot: "fat", lat: 6.36541, lng: 2.41289 },
+      { slot: "ont_sn", lat: 6.36620, lng: 2.41355 },
+    ],
+  };
+
+  const globalRep = generateGlobalReport(interventionAvecPhotosSeules);
+  assert.ok(globalRep.includes("*GPS FAT: 6.36541,2.41289*"));
+  assert.ok(globalRep.includes("*GPS abonné: 6.3662,2.41355*"));
+
+  const confRep = generateConformiteReport(interventionAvecPhotosSeules);
+  assert.ok(confRep.includes("GPS FAT : 6.36541, 2.41289"));
+  assert.ok(confRep.includes("GPS abonné : 6.3662, 2.41355"));
+});
+

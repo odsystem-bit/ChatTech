@@ -75,34 +75,65 @@
   function extractFatGpsPoint(data) {
     const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
     const fat = list.find((p) => p && normalizeText(p.type).includes("fat"));
-    if (!fat) return null;
-    const rawLat = fat.lat ?? fat.latitude;
-    const rawLng = fat.lng ?? fat.longitude;
-    if (rawLat === undefined || rawLat === null || rawLng === undefined || rawLng === null) return null;
-    const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
-    const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
-    if (isNaN(lat) || isNaN(lng)) return null;
-    return { ...fat, lat, lng };
+    if (fat) {
+      const rawLat = fat.lat ?? fat.latitude;
+      const rawLng = fat.lng ?? fat.longitude;
+      if (rawLat !== undefined && rawLat !== null && rawLng !== undefined && rawLng !== null) {
+        const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
+        const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
+        if (!isNaN(lat) && !isNaN(lng)) return { ...fat, lat, lng };
+      }
+    }
+    // Fallback 1: data.latitude_fat & longitude_fat
+    if (data?.latitude_fat != null && data?.longitude_fat != null && data.latitude_fat !== "" && data.longitude_fat !== "") {
+      const lat = typeof data.latitude_fat === "string" ? parseFloat(data.latitude_fat.replace(",", ".")) : Number(data.latitude_fat);
+      const lng = typeof data.longitude_fat === "string" ? parseFloat(data.longitude_fat.replace(",", ".")) : Number(data.longitude_fat);
+      if (!isNaN(lat) && !isNaN(lng)) return { type: "FAT", lat, lng };
+    }
+    // Fallback 2: whatsapp_photos[slot=fat]
+    const waPhotos = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    const fatWa = waPhotos.find((p) => p && (p.slot === "fat" || p.type === "fat") && p.lat != null && p.lng != null);
+    if (fatWa) {
+      const lat = typeof fatWa.lat === "string" ? parseFloat(String(fatWa.lat).replace(",", ".")) : Number(fatWa.lat);
+      const lng = typeof fatWa.lng === "string" ? parseFloat(String(fatWa.lng).replace(",", ".")) : Number(fatWa.lng);
+      if (!isNaN(lat) && !isNaN(lng)) return { type: "FAT", lat, lng };
+    }
+    return null;
   }
 
   // Extraction du point GPS de référence (Abonné en priorité, sinon le dernier point relevé)
   function extractTargetGpsPoint(data) {
     const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    if (!list.length) return null;
     const abonne = list.find((p) => {
       if (!p || !p.type) return false;
       const t = normalizeText(p.type);
       return t.includes("abonne") || t.includes("client");
     });
-    const point = abonne || list[list.length - 1] || null;
-    if (!point) return null;
-    const rawLat = point.lat ?? point.latitude ?? null;
-    const rawLng = point.lng ?? point.longitude ?? null;
-    if (rawLat === null || rawLng === null || rawLat === undefined || rawLng === undefined) return null;
-    const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
-    const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
-    if (isNaN(lat) || isNaN(lng)) return null;
-    return { ...point, lat, lng };
+    const point = abonne || (list.length > 0 ? list[list.length - 1] : null);
+    if (point) {
+      const rawLat = point.lat ?? point.latitude ?? null;
+      const rawLng = point.lng ?? point.longitude ?? null;
+      if (rawLat !== null && rawLng !== null && rawLat !== undefined && rawLng !== undefined) {
+        const lat = typeof rawLat === "string" ? parseFloat(rawLat.replace(",", ".")) : Number(rawLat);
+        const lng = typeof rawLng === "string" ? parseFloat(rawLng.replace(",", ".")) : Number(rawLng);
+        if (!isNaN(lat) && !isNaN(lng)) return { ...point, lat, lng };
+      }
+    }
+    // Fallback 1: data.latitude & data.longitude
+    if (data?.latitude != null && data?.longitude != null && data.latitude !== "" && data.longitude !== "") {
+      const lat = typeof data.latitude === "string" ? parseFloat(data.latitude.replace(",", ".")) : Number(data.latitude);
+      const lng = typeof data.longitude === "string" ? parseFloat(data.longitude.replace(",", ".")) : Number(data.longitude);
+      if (!isNaN(lat) && !isNaN(lng)) return { type: "Abonné", lat, lng };
+    }
+    // Fallback 2: whatsapp_photos[slot=ont_sn / cable_interne / mesure_pto]
+    const waPhotos = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    const abonneWa = waPhotos.find((p) => p && (p.slot === "ont_sn" || p.slot === "cable_interne" || p.slot === "mesure_pto") && p.lat != null && p.lng != null);
+    if (abonneWa) {
+      const lat = typeof abonneWa.lat === "string" ? parseFloat(String(abonneWa.lat).replace(",", ".")) : Number(abonneWa.lat);
+      const lng = typeof abonneWa.lng === "string" ? parseFloat(String(abonneWa.lng).replace(",", ".")) : Number(abonneWa.lng);
+      if (!isNaN(lat) && !isNaN(lng)) return { type: "Abonné", lat, lng };
+    }
+    return null;
   }
 
   // ----------------------------------------------------
