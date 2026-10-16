@@ -1117,7 +1117,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       });
       markDirty("whatsapp_photos");
       setSaveStatus("✓ Photo enregistrée");
-      setSlotActionFeedback(`✓ Photo "${slotLabel}" enregistrée.`);
+      setSlotActionFeedback(`✓ Photo "${slotLabel}" enregistrée et sauvegardée sur votre téléphone.`);
+
+      // Sauvegarde / téléchargement automatique immédiat sur le téléphone de l'agent
+      try {
+        downloadPhotoFile(newPhoto);
+      } catch (dlErr) {
+        console.warn("Auto-sauvegarde sur le téléphone:", dlErr);
+      }
 
       // Si c'est la photo du boîtier FAT, extraction automatique OCR de Référence FAT et MSAN !
       if (slotKey === "fat") {
@@ -1585,7 +1592,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
       setSaveStatus("✓ Poteau enregistré");
       const sourceLabel = posResult?.source === "exif" ? "EXIF photo (très haute précision)" : (lat != null ? `±${(precision_m || 10).toFixed(1)} m` : "sans GPS");
-      setSlotActionFeedback(`✅ Photo enregistrée pour le Poteau ${poleNum} (${sourceLabel})`);
+      setSlotActionFeedback(`✅ Photo enregistrée et sauvegardée sur votre téléphone pour le Poteau ${poleNum} (${sourceLabel})`);
+
+      // Sauvegarde / téléchargement automatique immédiat sur le téléphone de l'agent
+      try {
+        downloadPhotoFile(galleryPhoto);
+      } catch (dlErr) {
+        console.warn("Auto-sauvegarde sur le téléphone:", dlErr);
+      }
+
       setTimeout(() => setSlotActionFeedback(""), 5000);
     } catch (err) {
       console.error("handlePolePhotoSelected error:", err);
