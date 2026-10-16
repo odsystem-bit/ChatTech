@@ -41,6 +41,16 @@ import { isInterventionTerminee } from "../lib/interventionFilters";
 import { downloadPhotoFile, downloadAllPhotosAsZip } from "../lib/photoDownload";
 import { findPhotoForSlot } from "../lib/slotPhotos";
 import {
+  formatFileSize,
+  formatDuration,
+  compressVideo,
+} from "../lib/videoCompression";
+import {
+  uploadInterventionMedia,
+  deleteInterventionMedia,
+} from "../lib/media";
+import VideoPlayerModal from "../components/VideoPlayerModal";
+import {
   IconFlag,
   IconHome,
   IconFileText,
@@ -222,6 +232,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const waCameraInputRef = useRef(null);
   const waGalleryInputRef = useRef(null);
   const [waCapturing, setWaCapturing] = useState(false);
+
+  // Gestion du module Vidéo Terrain
+  const [videosTerrain, setVideosTerrain] = useState(() =>
+    Array.isArray(intervention?.videos_terrain) ? intervention.videos_terrain : []
+  );
+  const [videoProcessing, setVideoProcessing] = useState(false);
+  const [videoProgress, setVideoProgress] = useState({ pct: 0, msg: "" });
+  const [videoStatus, setVideoStatus] = useState("");
+  const [activeViewingVideo, setActiveViewingVideo] = useState(null);
+  const videoCameraInputRef = useRef(null);
+  const videoGalleryInputRef = useRef(null);
+
   const [saveStatus, setSaveStatus] = useState("");
   const [viewingPhoto, setViewingPhoto] = useState(null);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -296,6 +318,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           return key && !incomingKeys.has(key) && !deletedIds.has(key);
         });
         return { ...prev, points_gps: [...incoming, ...localUnsynced] };
+      });
+    }
+    if (Array.isArray(intervention.videos_terrain)) {
+      setVideosTerrain((prev) => {
+        if (!prev || prev.length === 0) return intervention.videos_terrain;
+        const incomingIds = new Set(intervention.videos_terrain.map((v) => v?.id).filter(Boolean));
+        const localUnsynced = prev.filter((v) => v && v.id && !incomingIds.has(v.id));
+        return [...intervention.videos_terrain, ...localUnsynced];
       });
     }
   }, [intervention]);
@@ -2048,6 +2078,130 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
+  // ===== Handlers du module Vidéo Terrain =====
+  const handleVideoFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setVideoProcessing(true);
+    setVideoProgress({ pct: 5, msg: "Initialisation et analyse de la vidéo..." });
+    setVideoStatus("");
+
+    try {
+      // 1. Détection GPS pour localisation de la vidéo
+      let videoGps = null;
+      try {
+        videoGps = await acquireBestPosition(3500);
+      } catch (err) {
+        console.warn("GPS pour vidéo indisponible:", err);
+      }
+      const lat = videoGps?.lat ?? data.latitude ?? null;
+      const lng = videoGps?.lng ?? data.longitude ?? null;
+      const precisionM = videoGps?.accuracy ?? null;
+
+      // 2. Compression vidéo intelligente
+      setVideoProgress({ pct: 15, msg: "Compression de la vidéo (720p optimisé)…" });
+      const compResult = await compressVideo(file, {
+        maxDimension: 720,
+        targetBitrate: 850_000,
+        fps: 24,
+        onProgress: (pct, msg) => {
+          setVideoProgress({ pct: Math.min(88, pct), msg });
+        },
+      });
+
+      // 3. Téléversement sur le serveur
+      setVideoProgress({ pct: 90, msg: "Enregistrement sécurisé sur le serveur…" });
+      let uploadedMedia = null;
+      try {
+        uploadedMedia = await uploadInterventionMedia({
+          interventionId: data.id,
+          type: "video",
+          file: compResult.blob,
+          latitude: lat,
+          longitude: lng,
+          precisionM,
+          capturedAt: new Date().toISOString(),
+          thumbnailBase64: compResult.thumbnailDataUrl,
+          duration: compResult.duration,
+          label: `Vidéo terrain #${videosTerrain.length + 1}`,
+        });
+      } catch (uploadErr) {
+        console.warn("Upload vidéo échoué (mode hors-ligne ou réseau faible):", uploadErr);
+      }
+
+      // 4. Construction de l'objet vidéo
+      const videoId = uploadedMedia?.id || crypto.randomUUID();
+      const videoUrl = uploadedMedia?.url || URL.createObjectURL(compResult.blob);
+      const thumbUrl = uploadedMedia?.thumbnail_url || compResult.thumbnailDataUrl;
+
+      const newVideo = {
+        id: videoId,
+        url: videoUrl,
+        thumbnail_url: thumbUrl,
+        label: `Vidéo terrain #${videosTerrain.length + 1}`,
+        duration: compResult.duration,
+        size: compResult.compressedSize,
+        original_size: compResult.originalSize,
+        ratio: compResult.ratio,
+        lat,
+        lng,
+        precision_m: precisionM,
+        cree_le: new Date().toISOString(),
+        ajoute_par: currentUser || data.nom_technicien || "",
+      };
+
+      const nextVideos = [...videosTerrain, newVideo];
+      setVideosTerrain(nextVideos);
+      update("videos_terrain", nextVideos);
+      flushServerSync().catch(() => {});
+
+      const savings = compResult.originalSize > compResult.compressedSize
+        ? ` (compressée de ${formatFileSize(compResult.originalSize)} à ${formatFileSize(compResult.compressedSize)}, ${compResult.ratio})`
+        : ` (${formatFileSize(compResult.compressedSize)})`;
+
+      setVideoStatus(`✅ Vidéo terrain #${nextVideos.length} enregistrée avec succès${savings} !`);
+      setTimeout(() => setVideoStatus(""), 9000);
+    } catch (err) {
+      console.error("Erreur traitement vidéo:", err);
+      setVideoStatus(`❌ Erreur vidéo : ${err.message || "Échec de traitement"}`);
+    } finally {
+      setVideoProcessing(false);
+      setVideoProgress({ pct: 0, msg: "" });
+    }
+  };
+
+  const handleDeleteVideo = async (videoToDelete) => {
+    if (!videoToDelete) return;
+    const nextVideos = videosTerrain.filter((v) => v.id !== videoToDelete.id);
+    setVideosTerrain(nextVideos);
+    update("videos_terrain", nextVideos);
+    flushServerSync().catch(() => {});
+
+    try {
+      await deleteInterventionMedia(videoToDelete.id);
+    } catch (err) {
+      console.warn("Échec suppression distante média:", err);
+    }
+    setVideoStatus("✓ Vidéo supprimée.");
+    setTimeout(() => setVideoStatus(""), 4000);
+  };
+
+  const openVideoCamera = () => {
+    if (videoCameraInputRef.current) {
+      videoCameraInputRef.current.value = "";
+      videoCameraInputRef.current.click();
+    }
+  };
+
+  const openVideoGallery = () => {
+    if (videoGalleryInputRef.current) {
+      videoGalleryInputRef.current.value = "";
+      videoGalleryInputRef.current.click();
+    }
+  };
+
   function togglePhotoSelection(id) {
     setSelectedPhotoIds((prev) => {
       const next = new Set(prev);
@@ -2206,6 +2360,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         ...data,
         statut: "termine",
         whatsapp_photos: whatsappPhotos,
+        videos_terrain: videosTerrain,
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
         changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
@@ -2345,6 +2500,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         accept="image/*"
         style={{ display: "none" }}
         onChange={handleWaPhotoSelected}
+      />
+      <input
+        ref={videoCameraInputRef}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={handleVideoFileChange}
+      />
+      <input
+        ref={videoGalleryInputRef}
+        type="file"
+        accept="video/*"
+        style={{ display: "none" }}
+        onChange={handleVideoFileChange}
       />
 
       <div className="tab-content">
@@ -3528,6 +3698,225 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               </div>
             </div>
 
+            {/* 📹 Module Vidéo Terrain */}
+            <div className="form-card video-terrain-card-section" style={{ marginTop: 20 }}>
+              <div className="form-card-header">
+                <div className="form-card-icon" style={{ background: "#fef3c7", color: "#d97706" }}>📹</div>
+                <div>
+                  <h3>Vidéo Terrain</h3>
+                  <p className="form-card-sub">
+                    Enregistrement et stockage de vidéos compressées (chantier, poteaux, passages délicats, etc.)
+                  </p>
+                </div>
+                <span
+                  className={`photo-slot-badge ${videosTerrain.length > 0 ? "badge-success" : "badge-optional"}`}
+                  style={{ marginLeft: "auto" }}
+                >
+                  {videosTerrain.length > 0 ? `✓ ${videosTerrain.length} vidéo${videosTerrain.length > 1 ? "s" : ""}` : "0 vidéo"}
+                </span>
+              </div>
+
+              <div className="gps-buttons" style={{ margin: "14px 0" }}>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={videoProcessing}
+                  onClick={openVideoCamera}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  📹 Filmer une vidéo
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={videoProcessing}
+                  onClick={openVideoGallery}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+                >
+                  🎬 Importer de la galerie
+                </button>
+              </div>
+
+              {videoProcessing && (
+                <div
+                  className="video-uploading-box"
+                  style={{
+                    background: "#f8fafc",
+                    padding: 14,
+                    borderRadius: 10,
+                    margin: "14px 0",
+                    border: "1px dashed #cbd5e1",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "var(--primary)",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <span>{videoProgress.msg || "Traitement de la vidéo en cours…"}</span>
+                    <span>{videoProgress.pct}%</span>
+                  </div>
+                  <div className="progress-bar-track" style={{ height: 8 }}>
+                    <div
+                      className="progress-bar-fill"
+                      style={{ width: `${videoProgress.pct}%`, transition: "width 0.3s ease" }}
+                    />
+                  </div>
+                  <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "6px 0 0" }}>
+                    ⚡ Compression vidéo intelligente : réduction drastique de la taille pour préserver le stockage et garantir un chargement ultra-rapide.
+                  </p>
+                </div>
+              )}
+
+              {videoStatus && (
+                <p className="slot-feedback-hint" style={{ marginBottom: 12, fontWeight: 500 }}>
+                  {videoStatus}
+                </p>
+              )}
+
+              {videosTerrain.length > 0 ? (
+                <div
+                  className="videos-terrain-grid"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                    gap: 12,
+                    marginTop: 14,
+                  }}
+                >
+                  {videosTerrain.map((video, idx) => (
+                    <div
+                      key={video.id || idx}
+                      className="video-terrain-item"
+                      onClick={() => setActiveViewingVideo(video)}
+                      style={{
+                        position: "relative",
+                        borderRadius: 10,
+                        overflow: "hidden",
+                        background: "#0f172a",
+                        border: "1px solid var(--border)",
+                        cursor: "pointer",
+                        aspectRatio: "16 / 10",
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.06)",
+                        transition: "transform 0.15s ease",
+                      }}
+                      title="Cliquer pour lire la vidéo"
+                    >
+                      {video.thumbnail_url ? (
+                        <img
+                          src={video.thumbnail_url}
+                          alt={video.label || "Vidéo terrain"}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                        />
+                      ) : (
+                        <div
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            background: "#1e293b",
+                            color: "#94a3b8",
+                            fontSize: 28,
+                          }}
+                        >
+                          🎬
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          position: "absolute",
+                          top: "50%",
+                          left: "50%",
+                          transform: "translate(-50%, -50%)",
+                          width: 38,
+                          height: 38,
+                          borderRadius: "50%",
+                          background: "rgba(0, 0, 0, 0.65)",
+                          backdropFilter: "blur(4px)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#fff",
+                          fontSize: 16,
+                          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
+                        }}
+                      >
+                        ▶
+                      </div>
+
+                      {video.duration && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: 6,
+                            left: 6,
+                            background: "rgba(0,0,0,0.75)",
+                            color: "#fff",
+                            fontSize: 11,
+                            fontWeight: 600,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          ⏱️ {formatDuration(video.duration)}
+                        </span>
+                      )}
+
+                      {video.size && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            bottom: 6,
+                            right: 6,
+                            background: "rgba(16, 185, 129, 0.85)",
+                            color: "#fff",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: "2px 5px",
+                            borderRadius: 4,
+                          }}
+                        >
+                          {formatFileSize(video.size)}
+                        </span>
+                      )}
+
+                      <span
+                        style={{
+                          position: "absolute",
+                          top: 6,
+                          left: 6,
+                          background: "rgba(0,0,0,0.65)",
+                          color: "#fff",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          maxWidth: "85%",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {video.label || `Vidéo #${idx + 1}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "8px 0 0" }}>
+                  Aucune vidéo terrain enregistrée pour cette intervention. Vous pouvez en filmer ou en importer plusieurs sans risque de surcharger l'application grâce à la compression automatique.
+                </p>
+              )}
+            </div>
+
             <div className="other-photos-card">
               {(() => {
                 const photosAdditionnelles = (whatsappPhotos || []).filter(
@@ -4426,6 +4815,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       )}
 
       <PhotoViewerModal photo={viewingPhoto} onClose={() => setViewingPhoto(null)} />
+
+      {activeViewingVideo && (
+        <VideoPlayerModal
+          video={activeViewingVideo}
+          onClose={() => setActiveViewingVideo(null)}
+          onDelete={handleDeleteVideo}
+        />
+      )}
 
       <BarcodeScannerModal
         isOpen={scannerOpen}

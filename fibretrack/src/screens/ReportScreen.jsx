@@ -29,12 +29,15 @@ import {
   previewFichesPdf,
 } from "../lib/pdf";
 import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
+import VideoPlayerModal from "../components/VideoPlayerModal";
+import { formatDuration, formatFileSize } from "../lib/videoCompression";
 
 export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [data, setData] = useState(ensureInterventionDefaults(intervention));
   const [refreshing, setRefreshing] = useState(false);
   const [downloadProgressText, setDownloadProgressText] = useState("");
   const [shareFiles, setShareFiles] = useState({ files: [], failed: [], ready: false });
+  const [activeViewingVideo, setActiveViewingVideo] = useState(null);
 
   useEffect(() => {
     if (intervention) {
@@ -711,6 +714,100 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
             Aucune photo additionnelle enregistrée pour cette intervention.
           </p>
         )}
+
+        {/* Galerie des Vidéos Terrain */}
+        {Array.isArray(data.videos_terrain) && data.videos_terrain.length > 0 && (
+          <div style={{ marginTop: 12, background: "#fff", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>
+                📹 Vidéos terrain ({data.videos_terrain.length})
+              </span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 10 }}>
+              {data.videos_terrain.map((vid, vidIdx) => (
+                <div
+                  key={vid.id || vidIdx}
+                  style={{
+                    position: "relative",
+                    borderRadius: 8,
+                    overflow: "hidden",
+                    border: "1px solid #cbd5e1",
+                    background: "#0f172a",
+                    cursor: "pointer",
+                    aspectRatio: "16 / 10",
+                  }}
+                  onClick={() => setActiveViewingVideo(vid)}
+                  title="Cliquer pour lire la vidéo"
+                >
+                  {vid.thumbnail_url ? (
+                    <img
+                      src={vid.thumbnail_url}
+                      alt={vid.label || `Vidéo ${vidIdx + 1}`}
+                      style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                    />
+                  ) : (
+                    <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8" }}>
+                      🎬
+                    </div>
+                  )}
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      width: 32,
+                      height: 32,
+                      borderRadius: "50%",
+                      background: "rgba(0,0,0,0.65)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#fff",
+                      fontSize: 14,
+                    }}
+                  >
+                    ▶
+                  </div>
+                  {vid.duration && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        bottom: 4,
+                        left: 4,
+                        background: "rgba(0,0,0,0.75)",
+                        color: "#fff",
+                        fontSize: 10,
+                        fontWeight: 600,
+                        padding: "1px 5px",
+                        borderRadius: 3,
+                      }}
+                    >
+                      ⏱️ {formatDuration(vid.duration)}
+                    </span>
+                  )}
+                  {vid.size && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        bottom: 4,
+                        right: 4,
+                        background: "rgba(16, 185, 129, 0.85)",
+                        color: "#fff",
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: "1px 4px",
+                        borderRadius: 3,
+                      }}
+                    >
+                      {formatFileSize(vid.size)}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <button type="button" className="btn-secondary btn-large" onClick={handleShare} disabled={loadingAction === "share"} style={{ marginTop: 12 }}>
@@ -1205,6 +1302,13 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
             )}
           </div>
         </div>
+      )}
+
+      {activeViewingVideo && (
+        <VideoPlayerModal
+          video={activeViewingVideo}
+          onClose={() => setActiveViewingVideo(null)}
+        />
       )}
     </div>
   );

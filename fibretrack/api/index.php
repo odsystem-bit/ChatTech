@@ -188,6 +188,12 @@ function db() {
       PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
       PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     ]);
+    try {
+      $hasCol = $pdo->query("SHOW COLUMNS FROM interventions LIKE 'videos_terrain'")->fetch();
+      if (!$hasCol) {
+        $pdo->exec("ALTER TABLE interventions ADD COLUMN videos_terrain LONGTEXT NULL");
+      }
+    } catch (Exception $e) {}
   }
   return $pdo;
 }
@@ -276,6 +282,7 @@ function normalizeInterventionTypes(array &$r): void {
   $r['explications_donnees'] = (bool)($r['explications_donnees'] ?? false);
   $r['recommanderait'] = (bool)($r['recommanderait'] ?? false);
   $r['accepte_recontact'] = (bool)($r['accepte_recontact'] ?? false);
+  $r['videos_terrain'] = is_array($r['videos_terrain'] ?? null) ? $r['videos_terrain'] : (json_decode($r['videos_terrain'] ?? '[]', true) ?: []);
 }
 
 function authenticatedUser() {
@@ -354,8 +361,12 @@ try {
     // intermittent, le média peut arriver avant le premier save —
     // le rejet forçait le technicien à refaire la prise plusieurs fois.
     $extension = 'jpg';
-    if ($type === 'video') $extension = 'mp4';
-    elseif ($type === 'fiche' && strtolower(pathinfo($_FILES['file']['name'] ?? '', PATHINFO_EXTENSION)) === 'pdf') $extension = 'pdf';
+    if ($type === 'video') {
+      $clientExt = strtolower(pathinfo($_FILES['file']['name'] ?? '', PATHINFO_EXTENSION));
+      $extension = in_array($clientExt, ['mp4', 'webm', 'mov', 'm4v'], true) ? $clientExt : 'mp4';
+    } elseif ($type === 'fiche' && strtolower(pathinfo($_FILES['file']['name'] ?? '', PATHINFO_EXTENSION)) === 'pdf') {
+      $extension = 'pdf';
+    }
     $mediaId = bin2hex(random_bytes(16));
     $relativeDir = 'uploads/interventions/' . $interventionId;
     $absoluteDir = __DIR__ . '/' . $relativeDir;
@@ -364,10 +375,34 @@ try {
     if (!move_uploaded_file($_FILES['file']['tmp_name'], __DIR__ . '/' . $relativePath)) {
       http_response_code(500); echo json_encode(['error' => 'Impossible de stocker le média']); return;
     }
+
+    $thumbUrl = '';
+    if (!empty($_POST['thumbnail_base64'])) {
+      $rawThumb = (string)$_POST['thumbnail_base64'];
+      $thumbBin = base64_decode(preg_replace('#^data:image/\w+;base64,#i', '', $rawThumb));
+      if ($thumbBin) {
+        $thumbRelative = $relativeDir . '/' . $mediaId . '_thumb.jpg';
+        file_put_contents(__DIR__ . '/' . $thumbRelative, $thumbBin);
+        $thumbUrl = 'https://fibretrack.mantota.com/api/' . $thumbRelative;
+      }
+    }
+
     $capturedAt = !empty($_POST['captured_at']) ? date('Y-m-d H:i:s', strtotime($_POST['captured_at'])) : null;
     $stmt = db()->prepare('INSERT INTO intervention_media (id, intervention_id, type, file_path, latitude, longitude, precision_m, captured_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     $stmt->execute([$mediaId, $interventionId, $type, $relativePath, $_POST['latitude'] ?? null, $_POST['longitude'] ?? null, $_POST['precision_m'] ?? null, $capturedAt, $user['nom']]);
-    echo json_encode(['ok' => true, 'id' => $mediaId, 'path' => $relativePath]);
+
+    $fullUrl = 'https://fibretrack.mantota.com/api/' . $relativePath;
+    $fileSize = (int)@filesize(__DIR__ . '/' . $relativePath);
+    echo json_encode([
+      'ok' => true,
+      'id' => $mediaId,
+      'path' => $relativePath,
+      'url' => $fullUrl,
+      'thumbnail_url' => $thumbUrl,
+      'size' => $fileSize,
+      'duration' => (float)($_POST['duration'] ?? 0),
+      'label' => trim((string)($_POST['label'] ?? 'Vidéo terrain')),
+    ]);
     return;
   }
   if ($action === 'app_version') {
@@ -428,6 +463,8 @@ try {
       echo json_encode(['error' => 'Impossible de supprimer le fichier média']);
       return;
     }
+    $thumbPath = preg_replace('/\.\w+$/', '_thumb.jpg', $absolutePath);
+    if (is_file($thumbPath)) @unlink($thumbPath);
     $delete = db()->prepare('DELETE FROM intervention_media WHERE id = ?');
     $delete->execute([$mediaId]);
     echo json_encode(['ok' => true]);
@@ -762,7 +799,7 @@ try {
       $expectedUpdatedAt = trim((string)($d['expected_updated_at'] ?? ''));
       $changedFields = isset($d['changed_fields']) && is_array($d['changed_fields']) ? array_values($d['changed_fields']) : null;
       if (!empty($d['id'])) {
-        $stmtEx = $pdo->prepare('SELECT points_gps, whatsapp_photos, signature_client, signature_technicien, materiel_pose, materiel_deduit, statut, nom_client, nom_technicien, modifie_le FROM interventions WHERE id = ? FOR UPDATE');
+        $stmtEx = $pdo->prepare('SELECT points_gps, whatsapp_photos, videos_terrain, signature_client, signature_technicien, materiel_pose, materiel_deduit, statut, nom_client, nom_technicien, modifie_le FROM interventions WHERE id = ? FOR UPDATE');
         $stmtEx->execute([$d['id']]);
         $existing = $stmtEx->fetch() ?: null;
       }
@@ -1062,6 +1099,7 @@ try {
             $patchAssignments[] = 'nb_poteaux_traverses = :nb_poteaux_traverses_calc';
           }
           if (in_array('whatsapp_photos', $changedFields, true)) $patchAssignments[] = 'whatsapp_photos = :whatsapp_photos';
+          if (in_array('videos_terrain', $changedFields, true) || isset($d['videos_terrain'])) $patchAssignments[] = 'videos_terrain = :videos_terrain';
           if ($shouldDeductStock) $patchAssignments[] = 'materiel_deduit = 1';
           $patchAssignments[] = 'modifie_par = :modifie_par';
           $patchAssignments[] = 'modifie_le = :modifie_le';
@@ -1079,6 +1117,7 @@ try {
             $stmt->bindValue(':nb_poteaux_traverses_calc', (int)$d['nb_poteaux_traverses']);
           }
           if (in_array('whatsapp_photos', $changedFields, true)) $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
+          if (in_array('videos_terrain', $changedFields, true) || isset($d['videos_terrain'])) $stmt->bindValue(':videos_terrain', json_encode($incomingVideos));
           $stmt->bindValue(':modifie_par', $d['modifie_par'] ?? '');
           $stmt->bindValue(':modifie_le', $serverNow);
           $stmt->bindValue(':id', $d['id']);
@@ -1087,12 +1126,13 @@ try {
           $d['modifie_le'] = $serverNow;
           $stmt = $pdo->prepare("INSERT INTO interventions SET " .
             implode(', ', array_map(fn($f) => "$f = :$f", $fields)) .
-            ", materiel_pose = :materiel_pose, points_gps = :points_gps, whatsapp_photos = :whatsapp_photos" .
+            ", materiel_pose = :materiel_pose, points_gps = :points_gps, whatsapp_photos = :whatsapp_photos, videos_terrain = :videos_terrain" .
             ($shouldDeductStock ? ", materiel_deduit = 1" : "") .
             " ON DUPLICATE KEY UPDATE " . $setClause .
             ", materiel_pose = :materiel_pose" .
             ", points_gps = :points_gps" .
             ", whatsapp_photos = :whatsapp_photos" .
+            ", videos_terrain = :videos_terrain" .
             ($shouldDeductStock ? ", materiel_deduit = 1" : ""));
 
           foreach ($fields as $f) {
@@ -1103,6 +1143,7 @@ try {
           $stmt->bindValue(':materiel_pose', json_encode(empty($incomingMat) ? (object)[] : $incomingMat));
           $stmt->bindValue(':points_gps', json_encode($incomingGps));
           $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
+          $stmt->bindValue(':videos_terrain', json_encode($incomingVideos));
           $stmt->execute();
         }
 

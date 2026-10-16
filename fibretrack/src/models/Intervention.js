@@ -378,6 +378,7 @@ export function ensureInterventionDefaults(data) {
     type_intervention_satisfaction: data.type_intervention_satisfaction || "Installation",
     remarque_aucune: data.remarque_aucune !== undefined ? Boolean(data.remarque_aucune) : (!data.remarque_libre),
     remarque_libre: String(data.remarque_libre ?? ""),
+    videos_terrain: Array.isArray(data.videos_terrain) ? data.videos_terrain : [],
   };
 }
 
@@ -388,6 +389,7 @@ export function toLightIntervention(intv) {
     points_gps,
     signature_client,
     signature_technicien,
+    videos_terrain,
     ...light
   } = intv;
   return light;
@@ -817,5 +819,6 @@ export function createEmptyIntervention(technicien, initialNom = "") {
     signature_technicien: "",
 
     whatsapp_photos: [],
+    videos_terrain: [],
   };
 }
