@@ -71,6 +71,7 @@ export const CELPROS_PHOTO_SLOTS = [
     icon: "🏷️",
     description: "Code-barres ou numéro de série gravé sur le FAT",
     keywords: ["image scan fat", "scan fat", "code barre fat", "etiquette fat", "barcode fat"],
+    noBanner: true,
   },
   {
     key: "cable_interne",
@@ -93,6 +94,7 @@ export const CELPROS_PHOTO_SLOTS = [
     description: "Autre support ou matériel classé dans la catégorie poteau sur CelPros (sans déduction stock ni comptage de vrai poteau)",
     keywords: ["autre poteau", "autre poto", "autre support", "materiel poteau", "poteau autre"],
     optional: true,
+    noBanner: true,
   },
   {
     key: "fibre_fat",
@@ -156,6 +158,7 @@ export const CELPROS_PHOTO_SLOTS = [
     icon: "📝",
     description: "Contrat ou fiche d'intervention signée par le client",
     keywords: ["photo contrat", "contrat client", "signature"],
+    noBanner: true,
   },
 ];
 
@@ -1011,6 +1014,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
     const slotLabel = slotDef?.label || slotKey;
+    const noBanner = Boolean(slotDef?.noBanner) || ["scan_fat", "autre_poteau", "contrat_client"].includes(slotKey);
 
     setSlotCapturing(true);
     setSlotActionFeedback(`Capture et géolocalisation pour "${slotLabel}"…`);
@@ -1037,6 +1041,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         lng,
         precision_m,
         horodatage,
+        noBanner,
       });
 
       const newPhoto = {
@@ -1052,6 +1057,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         precision_m,
         horodatage,
         lieu,
+        no_banner: noBanner,
         added: new Date().toISOString(),
         additionnelle: false,
         is_additionnelle: false,
@@ -2746,7 +2752,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                         <p>{slot.description}</p>
                         {isAutrePoteau && (
                           <div style={{ marginTop: 3, fontSize: 11, color: "#0284c7", fontWeight: 600 }}>
-                            ℹ️ Multi-photos autorisé • Ajouté sur CelPros au niveau poteau (exclu du stock & rapports)
+                            ℹ️ Multi-photos autorisé • Ajouté sur CelPros au niveau poteau • Bande masquée pour lisibilité
                           </div>
                         )}
                       </div>
@@ -2803,7 +2809,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                       subtitle: ap.lieu || (ap.lat ? `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` : ""),
                                       info: [
                                         { label: "Catégorie", val: `Autre poteau #${apIdx + 1}` },
-                                        ...(ap.lat ? [{ label: "GPS", val: `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` }] : []),
+                                        ...(ap.lat ? [{ label: "GPS (enregistré sans bande)", val: `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` }] : []),
                                         ...(ap.precision_m ? [{ label: "Précision", val: `±${ap.precision_m.toFixed(1)} m` }] : []),
                                         ...(ap.horodatage ? [{ label: "Prise le", val: new Date(ap.horodatage).toLocaleString() }] : []),
                                         ...(ap.lieu ? [{ label: "Lieu", val: ap.lieu }] : []),
@@ -2822,7 +2828,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                     fontSize: 11,
                                   }}
                                 >
-                                  <span style={{ fontWeight: 700, color: "#475569" }}>#{apIdx + 1}</span>
+                                  <span style={{ fontWeight: 700, color: "#475569" }}>
+                                    #{apIdx + 1} {ap.lat != null ? "📍" : ""}
+                                  </span>
                                   <button
                                     type="button"
                                     onClick={() => removeAutrePoteauPhoto(ap.id)}
@@ -2900,6 +2908,31 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           {slot.hasOcr && (data.fat_ref || data.msan) && (
                             <div className="fat-ocr-detected-chip">
                               <span>⚡ FAT : <strong>{data.fat_ref || "N/A"}</strong> | MSAN : <strong>{data.msan || "N/A"}</strong></span>
+                            </div>
+                          )}
+
+                          {(slot.noBanner || photo.no_banner) && photo.lat != null && (
+                            <div
+                              style={{
+                                marginTop: 6,
+                                marginBottom: 4,
+                                padding: "5px 8px",
+                                background: "#f0fdf4",
+                                border: "1px solid #bbf7d0",
+                                borderRadius: 6,
+                                fontSize: 11,
+                                color: "#166534",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                              }}
+                            >
+                              <span style={{ fontSize: 13 }}>📍</span>
+                              <span>
+                                <strong>GPS enregistré :</strong> {Number(photo.lat).toFixed(5)}, {Number(photo.lng).toFixed(5)}
+                                {photo.precision_m ? ` (±${Number(photo.precision_m).toFixed(1)}m)` : ""}
+                                <span style={{ color: "#15803d", marginLeft: 4 }}>• Bande masquée pour lisibilité</span>
+                              </span>
                             </div>
                           )}
 

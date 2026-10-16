@@ -194,3 +194,56 @@ test("CelPros slot isolation: 'autre_poteau' matches its dedicated slot and does
   assert.notEqual(getPhotoForSlotStrict("poteau_1", photos, [])?.id, "3");
   assert.equal(getPhotoForSlotStrict("cable_interne", photos, []), null);
 });
+
+test("CelPros slot isolation: 'scan_fat', 'autre_poteau', and 'contrat_client' preserve GPS location metadata while masking watermark banner", () => {
+  const NO_BANNER_SLOTS = ["scan_fat", "autre_poteau", "contrat_client"];
+  
+  const testPhotos = [
+    {
+      id: "sf1",
+      slot: "scan_fat",
+      type: "scan_fat",
+      label: "image scan fat",
+      url: "data:image/jpeg;base64,clean_scan_fat_image",
+      lat: 6.381234,
+      lng: 2.598765,
+      precision_m: 8.5,
+      lieu: "Akpakpa, Cotonou",
+      no_banner: true,
+    },
+    {
+      id: "ap1",
+      slot: "autre_poteau",
+      type: "autre_poteau",
+      label: "Autre poteau (1)",
+      url: "data:image/jpeg;base64,clean_autre_poteau_image",
+      lat: 6.381500,
+      lng: 2.598900,
+      precision_m: 6.0,
+      lieu: "Akpakpa, Cotonou",
+      no_banner: true,
+    },
+    {
+      id: "cc1",
+      slot: "contrat_client",
+      type: "contrat_client",
+      label: "Photo contrat client",
+      url: "data:image/jpeg;base64,clean_contrat_image",
+      lat: 6.381999,
+      lng: 2.599111,
+      precision_m: 5.2,
+      lieu: "Akpakpa, Cotonou",
+      no_banner: true,
+    },
+  ];
+
+  for (const slotKey of NO_BANNER_SLOTS) {
+    const photo = getPhotoForSlotStrict(slotKey, testPhotos, []);
+    assert.ok(photo, `Photo for slot ${slotKey} must be found`);
+    assert.equal(photo.no_banner, true, `Photo for slot ${slotKey} must have no_banner = true`);
+    assert.equal(typeof photo.lat, "number", `Photo for slot ${slotKey} must preserve latitude`);
+    assert.equal(typeof photo.lng, "number", `Photo for slot ${slotKey} must preserve longitude`);
+    assert.ok(photo.precision_m > 0, `Photo for slot ${slotKey} must preserve precision`);
+    assert.ok(photo.lieu, `Photo for slot ${slotKey} must preserve lieu`);
+  }
+});

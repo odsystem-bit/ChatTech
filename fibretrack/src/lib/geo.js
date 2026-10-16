@@ -555,32 +555,34 @@ export function embedGpsOnPhoto(photoDataUrl, info, maxDimension = 1280) {
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0, width, height);
 
-      const dateStr = new Date(info.horodatage || Date.now()).toLocaleString();
-      const hasGps = typeof info.lat === "number" && typeof info.lng === "number";
-      const lines = [
-        `${info.type}`,
-        info.lieu ? `Lieu: ${info.lieu}` : null,
-        hasGps ? `Lat: ${Number(info.lat).toFixed(6)}  Lng: ${Number(info.lng).toFixed(6)}` : null,
-        hasGps ? `Précision: ±${Number(info.precision_m || 10).toFixed(1)} m - ${dateStr}` : `Horodatage: ${dateStr}`,
-        !hasGps && info.warning ? `⚠️ ${info.warning}` : null,
-      ].filter(Boolean);
+      if (!info?.noBanner) {
+        const dateStr = new Date(info.horodatage || Date.now()).toLocaleString();
+        const hasGps = typeof info.lat === "number" && typeof info.lng === "number";
+        const lines = [
+          `${info.type}`,
+          info.lieu ? `Lieu: ${info.lieu}` : null,
+          hasGps ? `Lat: ${Number(info.lat).toFixed(6)}  Lng: ${Number(info.lng).toFixed(6)}` : null,
+          hasGps ? `Précision: ±${Number(info.precision_m || 10).toFixed(1)} m - ${dateStr}` : `Horodatage: ${dateStr}`,
+          !hasGps && info.warning ? `⚠️ ${info.warning}` : null,
+        ].filter(Boolean);
 
-      const fontSize = Math.max(14, Math.round(width * 0.024));
-      const lineGap = fontSize * 1.35;
-      const pad = fontSize * 0.6;
-      const bandHeight = pad * 2 + lineGap * lines.length;
+        const fontSize = Math.max(14, Math.round(width * 0.024));
+        const lineGap = fontSize * 1.35;
+        const pad = fontSize * 0.6;
+        const bandHeight = pad * 2 + lineGap * lines.length;
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-      ctx.fillRect(0, height - bandHeight, width, bandHeight);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+        ctx.fillRect(0, height - bandHeight, width, bandHeight);
 
-      ctx.fillStyle = "#ffffff";
-      ctx.font = `bold ${fontSize}px sans-serif`;
-      ctx.textBaseline = "top";
+        ctx.fillStyle = "#ffffff";
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.textBaseline = "top";
 
-      let y = height - bandHeight + pad;
-      for (const line of lines) {
-        ctx.fillText(line, pad, y);
-        y += lineGap;
+        let y = height - bandHeight + pad;
+        for (const line of lines) {
+          ctx.fillText(line, pad, y);
+          y += lineGap;
+        }
       }
 
       resolve(canvas.toDataURL("image/jpeg", 0.78));
