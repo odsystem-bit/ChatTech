@@ -182,6 +182,11 @@ export async function preprocessImageSourceForOcr(imageSrc, options = {}) {
         const ctx = canvas.getContext("2d", { willReadFrequently: true });
         ctx.drawImage(img, 0, 0, w, sourceH, 0, 0, targetW, targetH);
 
+        if (options?.skipContrastStretch === true) {
+          resolve(canvas);
+          return;
+        }
+
         const imgData = ctx.getImageData(0, 0, targetW, targetH);
         const d = imgData.data;
         const len = d.length;
@@ -260,7 +265,7 @@ export function extractSpeedtestFromText(text) {
   let ping = null;
 
   // 1. Détection prioritaire nPerf : Lignes "Moyenne <valeur> <unité>"
-  const moyenneMatches = [...text.matchAll(/Moyenne\s+([0-9]+[.,][0-9]+|[0-9]+)\s*(Mb\/s|Mbps|kb\/s|ms)?/gi)];
+  const moyenneMatches = [...text.matchAll(/(?:Moyenne|Moy\.?|Avg\.?|Average)\s*[:]?\s*([0-9]+[.,][0-9]+|[0-9]+)\s*(Mb\/s|Mbps|kb\/s|ms)?/gi)];
 
   if (moyenneMatches.length >= 1) {
     for (let i = 0; i < moyenneMatches.length; i++) {
@@ -300,6 +305,15 @@ export function extractSpeedtestFromText(text) {
     if (pingMatch) ping = pingMatch[1].replace(",", ".");
   }
 
+  // 5. Repli nPerf valeurs instantanées ou séquentielles : chiffres suivis de Mb/s ou ms
+  if (!download || !upload || !ping) {
+    const allMbMatches = [...text.matchAll(/([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps)/gi)].map((m) => m[1].replace(",", "."));
+    const allMsMatches = [...text.matchAll(/([0-9]+[.,][0-9]+|[0-9]+)\s*(?:ms)/gi)].map((m) => m[1].replace(",", "."));
+    if (!download && allMbMatches.length >= 1) download = allMbMatches[0];
+    if (!upload && allMbMatches.length >= 2) upload = allMbMatches[1];
+    if (!ping && allMsMatches.length >= 1) ping = allMsMatches[0];
+  }
+
   return { download, upload, ping };
 }
 
@@ -314,7 +328,14 @@ export async function recognizeSpeedtestFromImage(imageSrc) {
   }
   try {
     const worker = await getOcrWorker();
-    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: true });
+    try {
+      await worker.setParameters({
+        tessedit_pageseg_mode: "3",
+        tessedit_char_whitelist: "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-/()., _~®[]",
+      });
+    } catch {}
+
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: false, skipContrastStretch: true });
     const result = await worker.recognize(preprocessed);
     const text = result?.data?.text || "";
     const extracted = extractSpeedtestFromText(text);
@@ -357,7 +378,14 @@ export async function recognizePowerMeterFromImage(imageSrc) {
   if (!imageSrc) return { power: null, rawText: "", confidence: 0 };
   try {
     const worker = await getOcrWorker();
-    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: true });
+    try {
+      await worker.setParameters({
+        tessedit_pageseg_mode: "3",
+        tessedit_char_whitelist: "0123456789.-–—,dBm ",
+      });
+    } catch {}
+
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: false });
     const result = await worker.recognize(preprocessed);
     const text = result?.data?.text || "";
     const power = extractPowerMeterFromText(text);

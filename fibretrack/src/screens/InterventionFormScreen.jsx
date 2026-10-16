@@ -111,6 +111,7 @@ export const CELPROS_PHOTO_SLOTS = [
     icon: "📊",
     description: "Écran du photomètre optique mesurant au FAT (dBm)",
     keywords: ["mesure fat", "photometre fat", "puissance fat"],
+    hasOcr: true,
   },
   {
     key: "mesure_pto",
@@ -118,6 +119,7 @@ export const CELPROS_PHOTO_SLOTS = [
     icon: "📊",
     description: "Écran du photomètre optique mesurant au PTO (dBm)",
     keywords: ["mesure pto", "photometre pto", "puissance pto"],
+    hasOcr: true,
   },
   {
     key: "debit_cable",
@@ -125,6 +127,8 @@ export const CELPROS_PHOTO_SLOTS = [
     icon: "⚡",
     description: "Capture du test de débit réalisé par câble Ethernet",
     keywords: ["debit cable", "test debit cable", "speedtest cable"],
+    hasOcr: true,
+    noBanner: true,
   },
   {
     key: "debit_wifi",
@@ -132,6 +136,8 @@ export const CELPROS_PHOTO_SLOTS = [
     icon: "📶",
     description: "Capture du test de débit réalisé en Wi-Fi",
     keywords: ["debit wifi", "test debit wifi", "speedtest wifi"],
+    hasOcr: true,
+    noBanner: true,
   },
   {
     key: "ont_sn",
@@ -1045,6 +1051,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       for (const [k, v] of Object.entries(updates)) {
         update(k, v);
       }
+      flushServerSync().catch(() => {});
 
       setOcrNotification({
         text: `📶 Débit extrait avec succès (${parts.join(", ")}). Renseigné automatiquement !`,
@@ -1062,12 +1069,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   const runPowerMeterOcrOnPhoto = useCallback(async (photoDataUrl, slotKey) => {
     if (!photoDataUrl) return;
+    setOcrProcessing(true);
     try {
       const ocrResult = await recognizePowerMeterFromImage(photoDataUrl);
       if (ocrResult?.power) {
         const fieldKey = slotKey === "mesure_pto" ? "puissance_pto_dbm" : "puissance_fat_dbm";
         const label = slotKey === "mesure_pto" ? "Puissance PTO" : "Puissance FAT";
         update(fieldKey, ocrResult.power);
+        flushServerSync().catch(() => {});
         setOcrNotification({
           text: `📊 ${label} détectée sur le photomètre : ${ocrResult.power} dBm. Renseignée automatiquement !`,
           success: true,
@@ -1076,6 +1085,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
     } catch (err) {
       console.warn("OCR Photomètre error:", err);
+    } finally {
+      setOcrProcessing(false);
     }
   }, [update]);
 
@@ -3078,7 +3089,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                 type="button"
                                 className="btn-slot-subtle"
                                 disabled={ocrProcessing}
-                                onClick={() => runFatOcrOnPhoto(photo.url)}
+                                onClick={() => {
+                                  if (slot.key === "fat") runFatOcrOnPhoto(photo.url);
+                                  else if (slot.key === "debit_wifi" || slot.key === "debit_cable") runSpeedtestOcrOnPhoto(photo.url);
+                                  else if (slot.key === "mesure_fat" || slot.key === "mesure_pto") runPowerMeterOcrOnPhoto(photo.url, slot.key);
+                                }}
                                 title="Relancer l'extraction OCR"
                               >
                                 🔍 {ocrProcessing ? "Lecture…" : "Re-scanner OCR"}
@@ -3120,6 +3135,102 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                         >
                           🖼️ Importer
                         </button>
+                      </div>
+                    )}
+
+                    {/* Saisie rapide / Valeurs OCR directement intégrées dans la case photo */}
+                    {(slot.key === "debit_wifi" || slot.key === "debit_cable") && (
+                      <div className="slot-quick-fields-box" style={{ marginTop: 8, padding: 8, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <span>📶 Valeurs du test de débit {slot.key === "debit_wifi" ? "(Wi-Fi)" : "(Câble)"}</span>
+                          {(data.debit_descendant || data.debit_montant || data.debit_ping) ? (
+                            <span style={{ color: "#16a34a", fontSize: 10, fontWeight: 700 }}>✓ Prêt pour CelPros Étape 3</span>
+                          ) : (
+                            <span style={{ color: "#94a3b8", fontSize: 10 }}>À renseigner ou via capture</span>
+                          )}
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                          <div>
+                            <label style={{ fontSize: 10, color: "#64748b", display: "block", marginBottom: 2 }}>Descendant (Mb/s)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="Ex: 48.26"
+                              value={data.debit_descendant || ""}
+                              onChange={(e) => update("debit_descendant", e.target.value)}
+                              onBlur={flushServerSync}
+                              style={{ width: "100%", padding: "6px 8px", fontSize: 13, fontWeight: 600, borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: "#64748b", display: "block", marginBottom: 2 }}>Montant (Mb/s)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="Ex: 9.504"
+                              value={data.debit_montant || ""}
+                              onChange={(e) => update("debit_montant", e.target.value)}
+                              onBlur={flushServerSync}
+                              style={{ width: "100%", padding: "6px 8px", fontSize: 13, fontWeight: 600, borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 10, color: "#64748b", display: "block", marginBottom: 2 }}>Ping (ms)</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="Ex: 18.99"
+                              value={data.debit_ping || ""}
+                              onChange={(e) => update("debit_ping", e.target.value)}
+                              onBlur={flushServerSync}
+                              style={{ width: "100%", padding: "6px 8px", fontSize: 13, fontWeight: 600, borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {slot.key === "mesure_fat" && (
+                      <div className="slot-quick-fields-box" style={{ marginTop: 8, padding: 8, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+                          <span>📊 Puissance optique au FAT (dBm)</span>
+                          {data.puissance_fat_dbm && Number(data.puissance_fat_dbm) !== 0 ? (
+                            <span style={{ color: "#16a34a", fontSize: 10, fontWeight: 700 }}>✓ Prêt pour CelPros ({data.puissance_fat_dbm} dBm)</span>
+                          ) : (
+                            <span style={{ color: "#94a3b8", fontSize: 10 }}>À renseigner ou via photomètre</span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Ex: -18.5"
+                          value={data.puissance_fat_dbm || ""}
+                          onChange={(e) => update("puissance_fat_dbm", e.target.value)}
+                          onBlur={flushServerSync}
+                          style={{ width: "100%", padding: "6px 8px", fontSize: 13, fontWeight: 600, borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                        />
+                      </div>
+                    )}
+
+                    {slot.key === "mesure_pto" && (
+                      <div className="slot-quick-fields-box" style={{ marginTop: 8, padding: 8, background: "#f8fafc", borderRadius: 8, border: "1px solid #e2e8f0" }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#334155", marginBottom: 4, display: "flex", justifyContent: "space-between" }}>
+                          <span>📊 Puissance optique au PTO (dBm)</span>
+                          {data.puissance_pto_dbm && Number(data.puissance_pto_dbm) !== 0 ? (
+                            <span style={{ color: "#16a34a", fontSize: 10, fontWeight: 700 }}>✓ Prêt pour CelPros ({data.puissance_pto_dbm} dBm)</span>
+                          ) : (
+                            <span style={{ color: "#94a3b8", fontSize: 10 }}>À renseigner ou via photomètre</span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Ex: -19.2"
+                          value={data.puissance_pto_dbm || ""}
+                          onChange={(e) => update("puissance_pto_dbm", e.target.value)}
+                          onBlur={flushServerSync}
+                          style={{ width: "100%", padding: "6px 8px", fontSize: 13, fontWeight: 600, borderRadius: 6, border: "1px solid #cbd5e1", boxSizing: "border-box" }}
+                        />
                       </div>
                     )}
                   </div>

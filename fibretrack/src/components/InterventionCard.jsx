@@ -81,6 +81,16 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
               <span>{offer}</span>
             </span>
           ) : null}
+
+          {(intervention.debit_descendant || intervention.debit_montant) ? (
+            <span
+              className="intv-chip"
+              style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", fontWeight: 600 }}
+              title={`Débit mesuré : Descendant ${intervention.debit_descendant || "-"} Mb/s, Montant ${intervention.debit_montant || "-"} Mb/s, Ping ${intervention.debit_ping || "-"} ms`}
+            >
+              📶 {intervention.debit_descendant ? `${intervention.debit_descendant}↓` : ""}{intervention.debit_montant ? ` ${intervention.debit_montant}↑` : ""} Mb/s
+            </span>
+          ) : null}
         </div>
 
         <div className="intv-card-footer">

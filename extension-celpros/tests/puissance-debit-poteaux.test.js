@@ -28,6 +28,18 @@ class MockElement {
     this.events = {};
   }
 
+  dispatchEvent(evt) {
+    if (this._clickHandler && evt && evt.type === "click") {
+      this._clickHandler(evt);
+    }
+    return true;
+  }
+
+  click() {
+    if (this._clickHandler) this._clickHandler({ type: "click" });
+    this.dispatchEvent({ type: "click" });
+  }
+
   getAttribute(k) {
     return this.attributes[k] || this.attributes[k.toLowerCase()] || null;
   }
@@ -79,11 +91,15 @@ class MockElement {
           if (p.startsWith(".")) {
             return (child.className || "").toLowerCase().includes(p.slice(1));
           }
+          if (p.startsWith("input")) {
+            if (child.tagName.toLowerCase() !== "input") return false;
+            if (p.includes(':not([type="file"])') && child.type === "file") return false;
+            if (p.includes(':not([type="hidden"])') && child.type === "hidden") return false;
+            if (p.includes('[type="file"]') && !p.includes(':not([type="file"])') && child.type !== "file") return false;
+            return true;
+          }
           if (p.includes('[type="file"]')) {
             return child.tagName.toLowerCase() === "input" && child.type === "file";
-          }
-          if (p.startsWith("input")) {
-            return child.tagName.toLowerCase() === "input";
           }
           if (p.startsWith("button")) {
             return child.tagName.toLowerCase() === "button";
@@ -218,3 +234,152 @@ test("Section Poteaux - Agrégation des Poteaux GPS et du dossier Autre poteau",
   const eligible = PhotoFiller.getEligibleWhatsappPhotos(data);
   assert.equal(eligible.length, 3);
 });
+
+test("Section Poteaux - Remplissage dynamique avec bouton + et injection multi-poteaux", async () => {
+  const root = new MockElement("div", { className: "form-step-4" });
+  const cardRattachement = new MockElement("div", { className: "card" });
+  
+  // Section Poteaux telle que structurée sur CelPros (titre, bouton +, sous-titre)
+  const poteauxBlock = new MockElement("div", { className: "col-12" });
+  const headerRow = new MockElement("div", { className: "d-flex justify-content-between" });
+  const title = new MockElement("span", { innerText: "Poteaux" });
+  const addBtn = new MockElement("button", { innerText: "+", className: "btn btn-sm" });
+  headerRow.appendChild(title);
+  headerRow.appendChild(addBtn);
+
+  const subtitle = new MockElement("div", { innerText: "Aucune photo — appuyez sur + pour ajouter (max 10)" });
+  const slotsContainer = new MockElement("div", { className: "poteaux-slots-list" });
+
+  poteauxBlock.appendChild(headerRow);
+  poteauxBlock.appendChild(subtitle);
+  poteauxBlock.appendChild(slotsContainer);
+  cardRattachement.appendChild(poteauxBlock);
+  root.appendChild(cardRattachement);
+
+  // Simuler le comportement d'Angular lors du clic sur le bouton '+' : ajoute un slot d'upload
+  let slotIndex = 0;
+  addBtn._clickHandler = () => {
+    slotIndex++;
+    const slotWrap = new MockElement("div", { className: "upload-box" });
+    const fileInput = new MockElement("input", {
+      type: "file",
+      id: `field_poteau_${slotIndex}`,
+      name: `poteau_${slotIndex}`,
+    });
+    slotWrap.appendChild(fileInput);
+    slotsContainer.appendChild(slotWrap);
+  };
+
+  const data = {
+    points_gps: [
+      { type: "Poteau", numero: 1, photo: "data:image/jpeg;base64,AAAA" },
+      { type: "Poteau", numero: 2, photo: "data:image/jpeg;base64,BBBB" },
+    ],
+    whatsapp_photos: [
+      { slot: "autre_poteau", name: "autre_poteau_1.jpg", url: "data:image/jpeg;base64,CCCC" },
+    ],
+  };
+
+  const res = await PhotoFiller.fillPhotosOnPage(data, root);
+  assert.ok(res.success);
+  assert.equal(res.details.length, 3, "Les 3 poteaux (2 GPS + 1 Autre poteau) doivent être injectés");
+  assert.equal(res.details[0].slot, "poteau_1");
+  assert.equal(res.details[1].slot, "poteau_2");
+  assert.equal(res.details[2].slot, "poteau_3");
+});
+
+test("Puissance FAT & PTO - Renseignement automatique des cases lors de l'injection des photos", async () => {
+  const root = new MockElement("div", { className: "form-step-4" });
+  
+  // Ligne FAT
+  const rowFat = new MockElement("div", { className: "row" });
+  const colFatVal = new MockElement("div", { className: "col-6" });
+  const labelFatVal = new MockElement("label", { innerText: "Valeur au FAT (dbm) *" });
+  const inputFatVal = new MockElement("input", { type: "number", placeholder: "Ex: -18", id: "valeur_fat" });
+  colFatVal.appendChild(labelFatVal);
+  colFatVal.appendChild(inputFatVal);
+
+  const colFatPhoto = new MockElement("div", { className: "col-6 upload-box" });
+  const labelFatPhoto = new MockElement("label", { innerText: "Image mesure au FAT *" });
+  const inputFatPhoto = new MockElement("input", { type: "file", id: "photo_mesure_fat" });
+  colFatPhoto.appendChild(labelFatPhoto);
+  colFatPhoto.appendChild(inputFatPhoto);
+
+  rowFat.appendChild(colFatVal);
+  rowFat.appendChild(colFatPhoto);
+
+  // Ligne PTO
+  const rowPto = new MockElement("div", { className: "row" });
+  const colPtoVal = new MockElement("div", { className: "col-6" });
+  const labelPtoVal = new MockElement("label", { innerText: "Valeur au PTO (dbm) *" });
+  const inputPtoVal = new MockElement("input", { type: "number", placeholder: "Ex: -22", id: "valeur_pto" });
+  colPtoVal.appendChild(labelPtoVal);
+  colPtoVal.appendChild(inputPtoVal);
+
+  const colPtoPhoto = new MockElement("div", { className: "col-6 upload-box" });
+  const labelPtoPhoto = new MockElement("label", { innerText: "Image mesure PTO *" });
+  const inputPtoPhoto = new MockElement("input", { type: "file", id: "photo_mesure_pto" });
+  colPtoPhoto.appendChild(labelPtoPhoto);
+  colPtoPhoto.appendChild(inputPtoPhoto);
+
+  rowPto.appendChild(colPtoVal);
+  rowPto.appendChild(colPtoPhoto);
+
+  root.appendChild(rowFat);
+  root.appendChild(rowPto);
+
+  const data = {
+    puissance_fat_dbm: -18.5,
+    puissance_pto_dbm: -19.2,
+    whatsapp_photos: [
+      { slot: "mesure_fat", name: "mesure_fat.jpg", url: "data:image/jpeg;base64,ZHVtbXkx" },
+      { slot: "mesure_pto", name: "mesure_pto.jpg", url: "data:image/jpeg;base64,ZHVtbXky" },
+    ],
+  };
+
+  const res = await PhotoFiller.fillPhotosOnPage(data, root);
+  assert.ok(res.success);
+  assert.equal(inputFatVal.value, "-18.5", "La valeur FAT doit être automatiquement renseignée dans la case");
+  assert.equal(inputPtoVal.value, "-19.2", "La valeur PTO doit être automatiquement renseignée dans la case");
+});
+
+test("Test débit Wi-Fi - Renseignement automatique des 3 cases (Montant, Descendant, Ping)", async () => {
+  const root = new MockElement("div", { className: "form-step-3" });
+  const cardWifi = new MockElement("div", { className: "card" });
+  const cardTitle = new MockElement("h4", { innerText: "Tests de débits par Wifi" });
+  cardWifi.appendChild(cardTitle);
+
+  const rowInputs = new MockElement("div", { className: "row" });
+  const inputUp = new MockElement("input", { placeholder: "Montant", id: "wifi_upload" });
+  const inputDown = new MockElement("input", { placeholder: "Descendant", id: "wifi_download" });
+  const inputPing = new MockElement("input", { placeholder: "Ping", id: "wifi_ping" });
+  rowInputs.appendChild(inputUp);
+  rowInputs.appendChild(inputDown);
+  rowInputs.appendChild(inputPing);
+  cardWifi.appendChild(rowInputs);
+
+  const uploadBox = new MockElement("div", { className: "upload-box" });
+  const labelBox = new MockElement("label", { innerText: "Image test débit Wifi" });
+  const fileInput = new MockElement("input", { type: "file", id: "photo_debit_wifi" });
+  uploadBox.appendChild(labelBox);
+  uploadBox.appendChild(fileInput);
+  cardWifi.appendChild(uploadBox);
+
+  root.appendChild(cardWifi);
+
+  const data = {
+    debit_descendant: "48.26",
+    debit_montant: "9.504",
+    debit_ping: "18.99",
+    whatsapp_photos: [
+      { slot: "debit_wifi", name: "debit_wifi.jpg", url: "data:image/jpeg;base64,ZHVtbXk=" },
+    ],
+  };
+
+  const res = await PhotoFiller.fillPhotosOnPage(data, root);
+  assert.ok(res.success);
+  assert.equal(inputDown.value, "48.26", "Débit descendant doit être renseigné");
+  assert.equal(inputUp.value, "9.504", "Débit montant doit être renseigné");
+  assert.equal(inputPing.value, "18.99", "Ping doit être renseigné");
+});
+

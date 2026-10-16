@@ -643,11 +643,13 @@
       }
 
       // Événements standards pour frameworks réactifs (Angular, React, Vue)
-      inputEl.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
-      inputEl.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+      if (typeof inputEl.dispatchEvent === "function") {
+        inputEl.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+        inputEl.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+      }
 
       // Si le conteneur écoute l'événement drop
-      if (containerEl) {
+      if (containerEl && typeof containerEl.dispatchEvent === "function") {
         try {
           const dropEvt = new DragEvent("drop", {
             bubbles: true,
@@ -656,7 +658,9 @@
           });
           containerEl.dispatchEvent(dropEvt);
         } catch {}
+      }
 
+      if (containerEl) {
         // Retour visuel immédiat pour le superviseur
         markContainerSuccess(containerEl, file.name);
       }
@@ -926,6 +930,11 @@
           if (rule.key === "debit_wifi" || rule.key === "debit_cable") {
             handleSpeedtestAutoFill(slot.container, interventionData, root);
           }
+
+          // Renseigner automatiquement les mesures de puissance (FAT, PTO) associées à la photo
+          if (rule.key === "mesure_fat" || rule.key === "mesure_pto") {
+            handlePowerAutoFill(slot.container, rule.key, interventionData, root);
+          }
         }
       }
     }
@@ -990,44 +999,157 @@
     const searchRoot = container ? (container.closest("section, div.form-section, div.card, fieldset, form") || root) : root;
     if (!searchRoot) return;
 
-    const inputs = Array.from(searchRoot.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="button"]):not([type="submit"])'));
+    const fillInputsInRoot = (targetRoot) => {
+      const inputs = Array.from(targetRoot.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="button"]):not([type="submit"])'));
+      for (const inp of inputs) {
+        const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.placeholder || ""}`.toLowerCase();
+        const prevText = (inp.previousElementSibling?.textContent || "").toLowerCase();
+        const parentText = (inp.parentElement?.textContent || "").toLowerCase();
+        const labelText = (inp.labels && inp.labels[0]?.textContent || "").toLowerCase();
+        const combined = `${idName} ${prevText} ${parentText} ${labelText}`;
 
-    for (const inp of inputs) {
+        // Montant (Upload)
+        if (upload && (combined.includes("montant") || combined.includes("upload")) && !combined.includes("descendant")) {
+          setNativeFieldValue(inp, upload);
+        }
+        // Descendant (Download)
+        else if (download && (combined.includes("descendant") || combined.includes("download") || combined.includes("reception")) && !combined.includes("montant")) {
+          setNativeFieldValue(inp, download);
+        }
+        // Ping (Latence)
+        else if (ping && (combined.includes("ping") || combined.includes("latence"))) {
+          setNativeFieldValue(inp, ping);
+        }
+      }
+    };
+
+    fillInputsInRoot(searchRoot);
+    if (root && root !== searchRoot) {
+      fillInputsInRoot(root);
+    }
+  }
+
+  // Renseigne automatiquement la case de mesure de puissance optique (Valeur au FAT ou Valeur au PTO)
+  function handlePowerAutoFill(container, ruleKey, data, root = (typeof document !== "undefined" ? document : null)) {
+    if (!data) return;
+    const isFat = ruleKey === "mesure_fat";
+    const raw = isFat
+      ? (data.puissance_fat_dbm ?? data.puissance_fat ?? data.puissance_optique_fat ?? data.mesure_fat_dbm)
+      : (data.puissance_pto_dbm ?? data.puissance_pto ?? data.puissance_optique_pto ?? data.mesure_pto_dbm);
+    if (raw === undefined || raw === null || raw === "" || Number(raw) === 0) return;
+
+    let str = String(raw).replace(",", ".").trim();
+    const num = parseFloat(str);
+    if (isNaN(num) || num === 0) return;
+    const stringValue = num > 0 ? `-${str}` : str;
+
+    const targetKey = isFat ? "fat" : "pto";
+    const forbiddenKey = isFat ? "pto" : "fat";
+
+    const tryFillInput = (inp) => {
       const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.placeholder || ""}`.toLowerCase();
       const prevText = (inp.previousElementSibling?.textContent || "").toLowerCase();
       const parentText = (inp.parentElement?.textContent || "").toLowerCase();
-      const combined = `${idName} ${prevText} ${parentText}`;
+      const labelText = (inp.labels && inp.labels[0]?.textContent || "").toLowerCase();
+      const combined = `${idName} ${prevText} ${parentText} ${labelText}`;
 
-      // Montant (Upload)
-      if (upload && (combined.includes("montant") || combined.includes("upload")) && !combined.includes("descendant")) {
-        setNativeFieldValue(inp, upload);
+      if (combined.includes(targetKey) && !combined.includes(forbiddenKey)) {
+        if (combined.includes("valeur") || combined.includes("puissance") || combined.includes("dbm") || (inp.placeholder && inp.placeholder.includes("-"))) {
+          setNativeFieldValue(inp, stringValue);
+          return true;
+        }
       }
-      // Descendant (Download)
-      else if (download && (combined.includes("descendant") || combined.includes("download") || combined.includes("reception")) && !combined.includes("montant")) {
-        setNativeFieldValue(inp, download);
+      return false;
+    };
+
+    // 1. Chercher dans la même ligne / conteneur parent (row, col, card)
+    const searchRoot = container ? (container.closest(".row, .form-row, [class*='row'], section, .card, fieldset") || container.parentElement || root) : root;
+    if (searchRoot) {
+      const inputs = Array.from(searchRoot.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="button"]):not([type="submit"])'));
+      for (const inp of inputs) {
+        if (tryFillInput(inp)) return;
       }
-      // Ping (Latence)
-      else if (ping && (combined.includes("ping") || combined.includes("latence"))) {
-        setNativeFieldValue(inp, ping);
+    }
+
+    // 2. Repli sur le document entier si non trouvé dans la ligne
+    if (root && root !== searchRoot) {
+      const allInputs = Array.from(root.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="button"]):not([type="submit"])'));
+      for (const inp of allInputs) {
+        if (tryFillInput(inp)) return;
       }
     }
   }
 
-  // Cherche le bouton '+' pour ajouter un nouveau poteau dans CelPros
-  function findAddPoleButton(section) {
-    if (!section) return null;
-    const candidates = Array.from(section.querySelectorAll("button, a, [role='button'], .btn, i, span"));
-    for (const el of candidates) {
-      const txt = (el.innerText || el.textContent || "").trim();
-      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
-      const cls = (el.className || "").toLowerCase();
-      const title = (el.getAttribute("title") || "").toLowerCase();
+  // Cherche le conteneur englobant de la section Poteaux dans CelPros (Étape 4)
+  function findPoteauxSection(root) {
+    if (!root) return null;
+    const candidates = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6, strong, b, div, span, p, label, section"));
 
-      if (txt === "+" || txt.includes("ajouter") || aria.includes("ajouter") || title.includes("ajouter") || aria.includes("add") || title.includes("add")) {
-        return el.closest("button, a, [role='button']") || el;
+    // 1. Chercher un élément dont le libellé mentionne explicitement "Poteaux" ou "Appuis"
+    let headerEl = null;
+    for (const el of candidates) {
+      if (el.children && el.children.length > 3) continue;
+      const txt = (el.innerText || el.textContent || "").trim();
+      if (/^(?:poteaux|poteaux travers[eé]s|appuis|appuis a[eé]riens)$/i.test(txt) ||
+          (/poteaux/i.test(txt) && /max\s*10/i.test(txt))) {
+        headerEl = el;
+        break;
       }
-      if (cls.includes("add") || cls.includes("plus") || cls.includes("fa-plus")) {
-        return el.closest("button, a, [role='button']") || el;
+    }
+
+    if (!headerEl) {
+      for (const el of candidates) {
+        if (el.children && el.children.length > 3) continue;
+        const txt = (el.innerText || el.textContent || "").trim();
+        if (/\bpoteaux\b/i.test(txt) && !/travers|implant|arm/i.test(txt) && txt.length < 60) {
+          headerEl = el;
+          break;
+        }
+      }
+    }
+
+    if (!headerEl) return null;
+
+    // Remonter vers le conteneur englobant de la section Poteaux
+    let container = headerEl;
+    while (container && container !== root) {
+      const parent = container.parentElement;
+      if (!parent) break;
+      const parentText = (parent.innerText || parent.textContent || "").toLowerCase();
+      if (parentText.includes("max 10") || parentText.includes("appuyez sur +") || parent.querySelector("button, [role='button'], i.fa-plus, [class*='plus']")) {
+        container = parent;
+        if (container.classList && (container.classList.contains("row") || container.classList.contains("form-group") || container.classList.contains("col-12") || container.classList.contains("card") || container.tagName === "SECTION" || container.tagName === "FIELDSET")) {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
+    return container;
+  }
+
+  // Cherche le bouton '+' pour ajouter un nouveau poteau dans CelPros
+  function findAddPoleButton(container, root) {
+    const areas = [container, root].filter(Boolean);
+    for (const area of areas) {
+      const candidates = Array.from(area.querySelectorAll("button, a, [role='button'], .btn, i, span, svg"));
+      for (const el of candidates) {
+        const txt = (el.innerText || el.textContent || "").trim();
+        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+        const title = (el.getAttribute("title") || "").toLowerCase();
+        const cls = (el.className || (typeof el.className === "string" ? el.className : "")).toLowerCase();
+
+        if (txt === "+" || /^(?:\+[\s\w]*|ajouter|ajouter un poteau|add)$/i.test(txt)) {
+          return el.closest("button, a, [role='button']") || el;
+        }
+        if (aria.includes("ajouter") || aria.includes("add") || aria.includes("plus") ||
+            title.includes("ajouter") || title.includes("add") || title.includes("plus")) {
+          return el.closest("button, a, [role='button']") || el;
+        }
+        if (cls.includes("fa-plus") || cls.includes("btn-plus") || cls.includes("plus-icon") || cls.includes("add-btn")) {
+          return el.closest("button, a, [role='button']") || el;
+        }
       }
     }
     return null;
@@ -1067,15 +1189,8 @@
 
     if (!polePhotos.length) return details;
 
-    // Cherche la section Poteaux
-    const headers = Array.from(root.querySelectorAll("h3, h4, strong, div, span"));
-    const poteauxHeader = headers.find((h) => {
-      const txt = (h.innerText || h.textContent || "").toLowerCase().trim();
-      return txt === "poteaux" || txt === "poteaux traverses" || txt === "appuis";
-    });
-    if (!poteauxHeader) return details;
-
-    const section = poteauxHeader.closest ? (poteauxHeader.closest("div, section") || poteauxHeader.parentElement) : poteauxHeader.parentElement;
+    // Détection de la section Poteaux
+    const section = findPoteauxSection(root);
     if (!section) return details;
 
     const isForbiddenForPoles = (txt) => {
@@ -1083,34 +1198,69 @@
     };
 
     const maxPoles = Math.min(10, polePhotos.length);
+    const addBtn = findAddPoleButton(section, root);
 
+    // Fonction de récupération de tous les inputs de fichiers non interdits dans la section
+    const getPoleInputs = () => {
+      return Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
+        const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.className || ""}`.toLowerCase();
+        return !isForbiddenForPoles(idName);
+      });
+    };
+
+    // Cas 1 : Si un input file unique avec attribut multiple existe déjà dans la section
+    const existingInputs = getPoleInputs();
+    const multipleInput = existingInputs.find((inp) => inp.multiple);
+    if (multipleInput) {
+      const poleFiles = [];
+      for (let i = 0; i < maxPoles; i++) {
+        const f = await srcToFile(polePhotos[i].src, polePhotos[i].name);
+        if (f) poleFiles.push(f);
+      }
+      if (poleFiles.length > 0) {
+        try {
+          const dt = new DataTransfer();
+          for (const f of poleFiles) dt.items.add(f);
+          multipleInput.files = dt.files;
+          multipleInput.dispatchEvent(new Event("input", { bubbles: true }));
+          multipleInput.dispatchEvent(new Event("change", { bubbles: true }));
+          for (let i = 0; i < poleFiles.length; i++) {
+            details.push({
+              slot: `poteau_${i + 1}`,
+              label: `Poteau ${i + 1}`,
+              fileName: poleFiles[i].name,
+              sizeKb: Math.round(poleFiles[i].size / 1024),
+            });
+          }
+          return details;
+        } catch {}
+      }
+    }
+
+    // Cas 2 : Slots dynamiques unitaires (appuyer sur '+' pour faire apparaître chaque case)
     for (let i = 0; i < maxPoles; i++) {
       const pole = polePhotos[i];
       if (!pole || !pole.src) continue;
 
-      // 1. Chercher un input disponible et non rempli dans la section
-      let allInputs = Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
-        const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""}`.toLowerCase();
-        return !isForbiddenForPoles(idName);
-      });
-
+      let allInputs = getPoleInputs();
       let emptyInput = allInputs.find((inp) => !inp.files || inp.files.length === 0);
 
-      // 2. Si aucun input libre n'est présent dans CelPros, cliquer sur le bouton '+' pour ajouter un nouveau slot
-      if (!emptyInput) {
-        const addBtn = findAddPoleButton(section);
-        if (addBtn) {
-          try {
-            addBtn.click();
-            // Délai pour laisser Angular FormArray instancier le nouveau slot
-            await new Promise((resolve) => setTimeout(resolve, 200));
-          } catch {}
+      // Si aucun slot libre, cliquer sur '+' et attendre réactivement jusqu'à 1500ms
+      if (!emptyInput && addBtn) {
+        const prevCount = allInputs.length;
+        try {
+          addBtn.click();
+        } catch {}
 
-          allInputs = Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
-            const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""}`.toLowerCase();
-            return !isForbiddenForPoles(idName);
-          });
-          emptyInput = allInputs.find((inp) => !inp.files || inp.files.length === 0);
+        // Scrutation active toutes les 100ms
+        const start = Date.now();
+        while (Date.now() - start < 1500) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          allInputs = getPoleInputs();
+          if (allInputs.length > prevCount) {
+            emptyInput = allInputs[allInputs.length - 1];
+            break;
+          }
         }
       }
 
