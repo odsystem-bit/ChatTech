@@ -37,6 +37,7 @@ import {
   ALL_FAT_PORTS,
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
+import { isInterventionTerminee } from "../lib/interventionFilters";
 import { downloadPhotoFile, downloadAllPhotosAsZip } from "../lib/photoDownload";
 import { findPhotoForSlot } from "../lib/slotPhotos";
 import {
