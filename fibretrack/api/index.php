@@ -897,27 +897,61 @@ try {
 
       // Recompute pole counts from points_gps to ensure DB consistency
       if (is_array($incomingGps)) {
+        $uniquePoles = [];
+        foreach ($incomingGps as $p) {
+          if (($p['type'] ?? '') === 'Poteau') {
+            $num = (int)($p['numero'] ?? 0);
+            $isImp = !empty($p['implante']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['implanté', 'implante'], true);
+            $isArm = !empty($p['arme']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['armé', 'arme'], true);
+            $cat = $isImp ? 'implante' : ($isArm && empty($p['traverse']) ? 'arme' : 'traverse');
+
+            $pLat = isset($p['lat']) ? (float)$p['lat'] : null;
+            $pLng = isset($p['lng']) ? (float)$p['lng'] : null;
+            $foundKey = null;
+
+            foreach ($uniquePoles as $k => $ex) {
+              $exLat = isset($ex['lat']) ? (float)$ex['lat'] : null;
+              $exLng = isset($ex['lng']) ? (float)$ex['lng'] : null;
+              if ($pLat !== null && $pLng !== null && $exLat !== null && $exLng !== null) {
+                if (abs($pLat - $exLat) < 0.00005 && abs($pLng - $exLng) < 0.00005) {
+                  $foundKey = $k;
+                  break;
+                }
+              }
+              if ($num > 0 && ($k === "{$cat}_{$num}")) {
+                $foundKey = $k;
+                break;
+              }
+            }
+
+            if ($foundKey === null) {
+              $key = $num > 0 ? "{$cat}_{$num}" : ($p['id'] ?? uniqid());
+              $uniquePoles[$key] = $p;
+            } else {
+              $ex = $uniquePoles[$foundKey];
+              if (empty($ex['type_poteau']) && !empty($p['type_poteau'])) $ex['type_poteau'] = $p['type_poteau'];
+              if (empty($ex['photo']) && !empty($p['photo'])) $ex['photo'] = $p['photo'];
+              if (empty($ex['lat']) && !empty($p['lat'])) $ex['lat'] = $p['lat'];
+              if (empty($ex['lng']) && !empty($p['lng'])) $ex['lng'] = $p['lng'];
+              $uniquePoles[$foundKey] = $ex;
+            }
+          }
+        }
         $calcImp = 0;
         $calcArm = 0;
         $calcTrav = 0;
-        foreach ($incomingGps as $p) {
-          if (($p['type'] ?? '') === 'Poteau') {
-            $isImp = !empty($p['implante']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['implanté', 'implante'], true);
-            $isArm = !empty($p['arme']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['armé', 'arme'], true);
-            $isTrav = !empty($p['traverse']) || (!$isImp && in_array(strtolower(trim($p['sous_type'] ?? '')), ['traversé', 'traverse', ''], true));
-            if ($isImp) $calcImp++;
-            if ($isArm) $calcArm++;
-            if ($isTrav) $calcTrav++;
-          }
+        foreach ($uniquePoles as $p) {
+          $isImp = !empty($p['implante']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['implanté', 'implante'], true);
+          $isArm = !empty($p['arme']) || in_array(strtolower(trim($p['sous_type'] ?? '')), ['armé', 'arme'], true);
+          $isTrav = !empty($p['traverse']) || (!$isImp && in_array(strtolower(trim($p['sous_type'] ?? '')), ['traversé', 'traverse', ''], true));
+          if ($isImp) $calcImp++;
+          if ($isArm) $calcArm++;
+          if ($isTrav) $calcTrav++;
         }
-        if (!$patchMode || in_array('points_gps', $changedFields, true)) {
+        if (!$patchMode || in_array('points_gps', $changedFields, true) || $calcTrav > 0) {
           $d['nb_poteaux_implantes'] = $calcImp;
           $d['nb_poteaux_armes'] = $calcArm;
           $d['nb_poteaux_traverses'] = $calcTrav;
-        } else {
-          $d['nb_poteaux_implantes'] = max((int)($d['nb_poteaux_implantes'] ?? 0), $calcImp);
-          $d['nb_poteaux_armes'] = max((int)($d['nb_poteaux_armes'] ?? 0), $calcArm);
-          $d['nb_poteaux_traverses'] = max((int)($d['nb_poteaux_traverses'] ?? 0), $calcTrav);
         }
       }
 

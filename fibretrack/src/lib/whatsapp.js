@@ -98,6 +98,81 @@ function getGpsCoordinatesString(p) {
   return `${lat},${lng}`;
 }
 
+function arePolesDuplicates(a, b) {
+  if (!a || !b) return false;
+  if (a.id && b.id && a.id === b.id) return true;
+
+  const latA = a.lat ?? a.latitude;
+  const lngA = a.lng ?? a.longitude;
+  const latB = b.lat ?? b.latitude;
+  const lngB = b.lng ?? b.longitude;
+
+  if (latA != null && lngA != null && latB != null && lngB != null) {
+    if (Math.abs(latA - latB) < 0.00005 && Math.abs(lngA - lngB) < 0.00005) {
+      return true;
+    }
+  }
+
+  const isImpA = isPoleImplante(a);
+  const isImpB = isPoleImplante(b);
+  const isArmA = isPoleArme(a) && !a.traverse && a.sous_type !== "Traversé";
+  const isArmB = isPoleArme(b) && !b.traverse && b.sous_type !== "Traversé";
+  const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
+  const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
+
+  if (catA !== catB) return false;
+
+  const numA = Number(a.numero);
+  const numB = Number(b.numero);
+  if (!numA || !numB || numA !== numB) return false;
+
+  const txtA = `${a.proprietaire || ""} ${a.type_poteau || ""} ${a.nom || ""}`.toLowerCase();
+  const txtB = `${b.proprietaire || ""} ${b.type_poteau || ""} ${b.nom || ""}`.toLowerCase();
+  const aIsSbee = txtA.includes("sbee");
+  const bIsSbee = txtB.includes("sbee");
+  const aIsPj = txtA.includes("petit") || txtA.includes("jean") || txtA.includes("pj");
+  const bIsPj = txtB.includes("petit") || txtB.includes("jean") || txtB.includes("pj");
+
+  if ((aIsSbee && bIsPj) || (aIsPj && bIsSbee)) {
+    return false;
+  }
+
+  return true;
+}
+
+export function getDeduplicatedPoles(intervention) {
+  const d = intervention || {};
+  const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
+  const directPoles = Array.isArray(d.poteaux) ? d.poteaux : [];
+  const gpsPoles = pts.filter((p) => p && String(p.type || "").toLowerCase() === "poteau");
+  const rawPoles = directPoles.length > 0 ? directPoles : gpsPoles;
+
+  const deduplicated = [];
+  rawPoles.forEach((p, idx) => {
+    if (!p) return;
+    const num = Number(p.numero || idx + 1);
+    const candidate = { ...p, numero: num };
+    const existingIdx = deduplicated.findIndex((ex) => arePolesDuplicates(ex, candidate));
+    if (existingIdx === -1) {
+      deduplicated.push(candidate);
+    } else {
+      const existing = deduplicated[existingIdx];
+      deduplicated[existingIdx] = {
+        ...existing,
+        ...candidate,
+        type_poteau: existing.type_poteau || candidate.type_poteau || existing.proprietaire || candidate.proprietaire || "",
+        proprietaire: existing.proprietaire || candidate.proprietaire || existing.type_poteau || candidate.type_poteau || "",
+        photo: existing.photo || candidate.photo || "",
+        lat: existing.lat ?? candidate.lat,
+        lng: existing.lng ?? candidate.lng,
+        numero: existing.numero || candidate.numero || num,
+      };
+    }
+  });
+
+  return deduplicated.sort((a, b) => Number(a.numero) - Number(b.numero));
+}
+
 /**
  * 1. RAPPORT GLOBAL WHATSAPP
  * Génère le rapport d'intervention complet selon la structure exacte attendue par l'équipe.
@@ -114,9 +189,7 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const msanFat = formatMsanFat(d.msan, d.fat_ref);
 
   const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
-  const directPoles = Array.isArray(d.poteaux) ? d.poteaux : [];
-  const gpsPoles = pts.filter((p) => p && String(p.type || "").toLowerCase() === "poteau");
-  const poles = directPoles.length > 0 ? directPoles : gpsPoles;
+  const poles = getDeduplicatedPoles(d);
 
   const poteauxTraverses = poles.filter(isPoleTraverse);
   const poteauxImplantes = poles.filter(isPoleImplante);
@@ -319,9 +392,7 @@ export function generateConformiteReport(intervention) {
   const msanFat = formatMsanFat(d.msan, d.fat_ref);
 
   const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
-  const directPoles = Array.isArray(d.poteaux) ? d.poteaux : [];
-  const gpsPoles = pts.filter((p) => p && String(p.type || "").toLowerCase() === "poteau");
-  const poles = directPoles.length > 0 ? directPoles : gpsPoles;
+  const poles = getDeduplicatedPoles(d);
 
   const poteauxTraverses = poles.filter(isPoleTraverse);
   const poteauxImplantes = poles.filter(isPoleImplante);
@@ -362,9 +433,9 @@ export function generateConformiteReport(intervention) {
     latFat = `${fatPhoto.lat}, ${fatPhoto.lng}`;
   }
 
-  const nbArmes = d.nb_poteaux_armes ?? poteauxArmes.length;
-  const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));
-  const nbImplantes = d.nb_poteaux_implantes ?? poteauxImplantes.length;
+  const nbArmes = Math.min(Number(d.nb_poteaux_armes ?? poteauxArmes.length), poteauxArmes.length);
+  const nbTraverses = Math.min(Number(d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length))), poteauxTraverses.length || (poles.length - poteauxImplantes.length));
+  const nbImplantes = Math.min(Number(d.nb_poteaux_implantes ?? poteauxImplantes.length), poteauxImplantes.length);
 
   const equipeName = cleanStr(d.nom_technicien || d.nom_equipe) || "Équipe";
   const lin = d.lineaire_m || 0;

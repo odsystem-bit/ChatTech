@@ -147,7 +147,7 @@ const INTV_STORAGE_PREFIX = "fibretrack_intv_";
 export function ensureInterventionDefaults(data) {
   if (!data || typeof data !== "object") return createEmptyIntervention();
   const empty = createEmptyIntervention(data.nom_technicien || "");
-  const pointsGps = Array.isArray(data.points_gps) ? data.points_gps.map((pt, idx) => {
+  const rawPoints = Array.isArray(data.points_gps) ? data.points_gps.map((pt, idx) => {
     if (pt && pt.type === "Poteau") {
       const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (pt.sous_type !== "Implanté");
       const isImplante = pt.implante !== undefined ? Boolean(pt.implante) : (pt.sous_type === "Implanté");
@@ -168,13 +168,109 @@ export function ensureInterventionDefaults(data) {
     return pt;
   }) : [];
 
-  const existingPoleNums = new Set(pointsGps.filter((p) => p && p.type === "Poteau").map((p) => Number(p.numero)));
+  // Dédupliquer strictement pointsGps par type, catégorie et coordonnées
+  const pointsGps = [];
+  const rawPolesList = [];
+  let fatPoint = null;
+  let abonnePoint = null;
+
+  for (const pt of rawPoints) {
+    if (!pt) continue;
+    const typeUpper = String(pt.type || "").trim().toUpperCase();
+    if (typeUpper === "POTEAU") {
+      rawPolesList.push(pt);
+    } else if (typeUpper === "FAT") {
+      if (!fatPoint) {
+        fatPoint = pt;
+      } else {
+        fatPoint = {
+          ...fatPoint,
+          photo: fatPoint.photo || pt.photo || "",
+          lat: fatPoint.lat ?? pt.lat ?? null,
+          lng: fatPoint.lng ?? pt.lng ?? null,
+          precision_m: fatPoint.precision_m ?? pt.precision_m ?? null,
+          lieu: fatPoint.lieu || pt.lieu || "",
+        };
+      }
+    } else if (["ABONNÉ", "ABONNE", "CLIENT"].includes(typeUpper)) {
+      if (!abonnePoint) {
+        abonnePoint = pt;
+      } else {
+        abonnePoint = {
+          ...abonnePoint,
+          photo: abonnePoint.photo || pt.photo || "",
+          lat: abonnePoint.lat ?? pt.lat ?? null,
+          lng: abonnePoint.lng ?? pt.lng ?? null,
+          precision_m: abonnePoint.precision_m ?? pt.precision_m ?? null,
+          lieu: abonnePoint.lieu || pt.lieu || "",
+        };
+      }
+    } else {
+      pointsGps.push(pt);
+    }
+  }
+
+  const deduplicatedPoles = [];
+  rawPolesList.forEach((p, idx) => {
+    const num = Number(p.numero || idx + 1);
+    const candidate = { ...p, numero: num };
+    const existingIdx = deduplicatedPoles.findIndex((ex) => {
+      if (ex.id && candidate.id && ex.id === candidate.id) return true;
+      const latA = ex.lat ?? ex.latitude;
+      const lngA = ex.lng ?? ex.longitude;
+      const latB = candidate.lat ?? candidate.latitude;
+      const lngB = candidate.lng ?? candidate.longitude;
+      if (latA != null && lngA != null && latB != null && lngB != null) {
+        if (Math.abs(latA - latB) < 0.00005 && Math.abs(lngA - lngB) < 0.00005) return true;
+      }
+      const isImpA = Boolean(ex.implante) || ["implanté", "implante"].includes(String(ex.sous_type || "").toLowerCase().trim());
+      const isImpB = Boolean(candidate.implante) || ["implanté", "implante"].includes(String(candidate.sous_type || "").toLowerCase().trim());
+      const isArmA = Boolean(ex.arme) && !ex.traverse && ex.sous_type !== "Traversé";
+      const isArmB = Boolean(candidate.arme) && !candidate.traverse && candidate.sous_type !== "Traversé";
+      const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
+      const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
+      return catA === catB && Number(ex.numero) === Number(candidate.numero) && Number(candidate.numero) > 0;
+    });
+
+    if (existingIdx === -1) {
+      deduplicatedPoles.push(candidate);
+    } else {
+      const existing = deduplicatedPoles[existingIdx];
+      deduplicatedPoles[existingIdx] = {
+        ...existing,
+        ...candidate,
+        type_poteau: existing.type_poteau || candidate.type_poteau || existing.proprietaire || candidate.proprietaire || "",
+        proprietaire: existing.proprietaire || candidate.proprietaire || existing.type_poteau || candidate.type_poteau || "",
+        photo: existing.photo || candidate.photo || "",
+        lat: existing.lat ?? candidate.lat ?? null,
+        lng: existing.lng ?? candidate.lng ?? null,
+        precision_m: existing.precision_m ?? candidate.precision_m ?? null,
+        traverse: existing.traverse !== undefined ? Boolean(existing.traverse) : Boolean(candidate.traverse),
+        implante: existing.implante !== undefined ? Boolean(existing.implante) : Boolean(candidate.implante),
+        arme: existing.arme !== undefined ? Boolean(existing.arme) : Boolean(candidate.arme),
+        lieu: existing.lieu || candidate.lieu || "",
+        numero: existing.numero || candidate.numero || num,
+      };
+    }
+  });
+
+  if (fatPoint) pointsGps.unshift(fatPoint);
+  deduplicatedPoles.sort((a, b) => Number(a.numero) - Number(b.numero));
+  pointsGps.push(...deduplicatedPoles);
+  if (abonnePoint) pointsGps.push(abonnePoint);
+
+  const existingPoleNums = new Set(deduplicatedPoles.map((p) => Number(p.numero)));
   if (Array.isArray(data.whatsapp_photos)) {
     data.whatsapp_photos.forEach((wa) => {
       const m = wa?.slot?.match(/^poteau_(\d+)$/);
       if (m) {
         const num = Number(m[1]);
-        if (!existingPoleNums.has(num)) {
+        const existingPole = pointsGps.find((p) => p && p.type === "Poteau" && Number(p.numero) === num);
+        if (existingPole) {
+          if (!existingPole.photo && wa.url) existingPole.photo = wa.url;
+          if (existingPole.lat == null && wa.lat != null) existingPole.lat = wa.lat;
+          if (existingPole.lng == null && wa.lng != null) existingPole.lng = wa.lng;
+        } else if (!existingPoleNums.has(num)) {
           existingPoleNums.add(num);
           pointsGps.push({
             id: wa.id || crypto.randomUUID(),
@@ -204,7 +300,7 @@ export function ensureInterventionDefaults(data) {
     if (!hasFat) {
       const fatWa = data.whatsapp_photos.find((p) => p && (p.slot === "fat" || p.type === "fat") && p.lat != null && p.lng != null);
       if (fatWa) {
-        pointsGps.push({
+        pointsGps.unshift({
           id: fatWa.id || crypto.randomUUID(),
           type: "FAT",
           photo: fatWa.url || "",

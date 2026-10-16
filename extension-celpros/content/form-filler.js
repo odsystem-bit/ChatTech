@@ -471,6 +471,87 @@
     return s == null ? "" : String(s).trim();
   }
 
+  function arePolesDuplicates(a, b) {
+    if (!a || !b) return false;
+    if (a.id && b.id && a.id === b.id) return true;
+
+    const latA = a.lat ?? a.latitude;
+    const lngA = a.lng ?? a.longitude;
+    const latB = b.lat ?? b.latitude;
+    const lngB = b.lng ?? b.longitude;
+
+    if (latA != null && lngA != null && latB != null && lngB != null) {
+      if (Math.abs(latA - latB) < 0.00005 && Math.abs(lngA - lngB) < 0.00005) {
+        return true;
+      }
+    }
+
+    const isImpA = Boolean(a.implante || a.implanted) || ["implanté", "implante"].includes(String(a.sous_type || "").toLowerCase().trim());
+    const isImpB = Boolean(b.implante || b.implanted) || ["implanté", "implante"].includes(String(b.sous_type || "").toLowerCase().trim());
+    const isArmA = (Boolean(a.arme || a.armed) || ["armé", "arme"].includes(String(a.sous_type || "").toLowerCase().trim())) && !a.traverse && a.sous_type !== "Traversé";
+    const isArmB = (Boolean(b.arme || b.armed) || ["armé", "arme"].includes(String(b.sous_type || "").toLowerCase().trim())) && !b.traverse && b.sous_type !== "Traversé";
+    const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
+    const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
+
+    if (catA !== catB) return false;
+
+    const numA = Number(a.numero);
+    const numB = Number(b.numero);
+    if (!numA || !numB || numA !== numB) return false;
+
+    const txtA = `${a.proprietaire || ""} ${a.type_poteau || ""} ${a.nom || ""}`.toLowerCase();
+    const txtB = `${b.proprietaire || ""} ${b.type_poteau || ""} ${b.nom || ""}`.toLowerCase();
+    const aIsSbee = txtA.includes("sbee");
+    const bIsSbee = txtB.includes("sbee");
+    const aIsPj = txtA.includes("petit") || txtA.includes("jean") || txtA.includes("pj");
+    const bIsPj = txtB.includes("petit") || txtB.includes("jean") || txtB.includes("pj");
+
+    if ((aIsSbee && bIsPj) || (aIsPj && bIsSbee)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  function getDeduplicatedPoles(data) {
+    const d = data || {};
+    const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
+    const directPoles = Array.isArray(d.poteaux) ? d.poteaux : [];
+    const gpsPoles = pts.filter((p) => p && String(p.type || "").toLowerCase() === "poteau");
+    const rawPoles = directPoles.length > 0 ? directPoles : gpsPoles;
+
+    const deduplicated = [];
+    rawPoles.forEach((p, idx) => {
+      if (!p) return;
+      const num = Number(p.numero || idx + 1);
+      const candidate = { ...p, numero: num };
+      const existingIdx = deduplicated.findIndex((ex) => arePolesDuplicates(ex, candidate));
+      if (existingIdx === -1) {
+        deduplicated.push(candidate);
+      } else {
+        const existing = deduplicated[existingIdx];
+        deduplicated[existingIdx] = {
+          ...existing,
+          ...candidate,
+          traverse: existing.traverse !== undefined ? Boolean(existing.traverse) : (candidate.traverse !== undefined ? Boolean(candidate.traverse) : undefined),
+          traversed: Boolean(existing.traversed || candidate.traversed),
+          implante: Boolean(existing.implante || candidate.implante),
+          implanted: Boolean(existing.implanted || candidate.implanted),
+          arme: Boolean(existing.arme || candidate.arme),
+          armed: Boolean(existing.armed || candidate.armed),
+          type_poteau: existing.type_poteau || candidate.type_poteau || existing.proprietaire || candidate.proprietaire || "",
+          proprietaire: existing.proprietaire || candidate.proprietaire || existing.type_poteau || candidate.type_poteau || "",
+          photo: existing.photo || candidate.photo || "",
+          lat: existing.lat ?? candidate.lat,
+          lng: existing.lng ?? candidate.lng,
+          numero: existing.numero || candidate.numero || num,
+        };
+      }
+    });
+
+    return deduplicated.sort((a, b) => Number(a.numero) - Number(b.numero));
+  }
+
   // 1. Rapport Global WhatsApp (Structure exacte demandée par l'équipe)
   function formatGlobalReport(data, compteurJour = {}) {
     if (!data) return "";
@@ -482,16 +563,15 @@
     const msanFat = formatMsanFat(d.msan, d.fat_ref);
 
     const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
-    const directPoles = Array.isArray(d.poteaux) ? d.poteaux : [];
-    const gpsPoles = pts.filter((p) => p && String(p.type || "").toLowerCase() === "poteau");
-    const poles = directPoles.length > 0 ? directPoles : gpsPoles;
+    const poles = getDeduplicatedPoles(d);
 
     const isArme = (p) => Boolean(p.arme || p.armed) || ["armé", "arme"].includes(String(p.sous_type || "").toLowerCase().trim());
     const isImplante = (p) => Boolean(p.implante || p.implanted) || ["implanté", "implante"].includes(String(p.sous_type || "").toLowerCase().trim());
     const isTraverse = (p) => {
       if (!p) return false;
+      if (p.traverse === false || p.traversed === false) return false;
       if (Boolean(p.traverse || p.traversed)) return true;
-      if (isImplante(p) || isArme(p)) return false;
+      if (isImplante(p)) return false;
       return ["traversé", "traverse", ""].includes(String(p.sous_type || "").toLowerCase().trim());
     };
 
@@ -673,16 +753,15 @@
     const msanFat = formatMsanFat(d.msan, d.fat_ref);
 
     const pts = Array.isArray(d.points_gps) ? d.points_gps : [];
-    const directPoles = Array.isArray(d.poteaux) ? d.poteaux : [];
-    const gpsPoles = pts.filter((p) => p && String(p.type || "").toLowerCase() === "poteau");
-    const poles = directPoles.length > 0 ? directPoles : gpsPoles;
+    const poles = getDeduplicatedPoles(d);
 
     const isArme = (p) => Boolean(p.arme || p.armed) || ["armé", "arme"].includes(String(p.sous_type || "").toLowerCase().trim());
     const isImplante = (p) => Boolean(p.implante || p.implanted) || ["implanté", "implante"].includes(String(p.sous_type || "").toLowerCase().trim());
     const isTraverse = (p) => {
       if (!p) return false;
+      if (p.traverse === false || p.traversed === false) return false;
       if (Boolean(p.traverse || p.traversed)) return true;
-      if (isImplante(p) || isArme(p)) return false;
+      if (isImplante(p)) return false;
       return ["traversé", "traverse", ""].includes(String(p.sous_type || "").toLowerCase().trim());
     };
 
@@ -708,9 +787,9 @@
     const latAbonne = abonnePt ? `${abonnePt.lat}, ${abonnePt.lng}` : (d.latitude && d.longitude ? `${d.latitude}, ${d.longitude}` : "");
     const latFat = fatPt ? `${fatPt.lat}, ${fatPt.lng}` : (d.latitude_fat && d.longitude_fat ? `${d.latitude_fat}, ${d.longitude_fat}` : "");
 
-    const nbArmes = d.nb_poteaux_armes ?? poteauxArmes.length;
-    const nbTraverses = d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length));
-    const nbImplantes = d.nb_poteaux_implantes ?? poteauxImplantes.length;
+    const nbArmes = Math.min(Number(d.nb_poteaux_armes ?? poteauxArmes.length), poteauxArmes.length);
+    const nbTraverses = Math.min(Number(d.nb_poteaux_traverses ?? (poteauxTraverses.length || (poles.length - poteauxImplantes.length))), poteauxTraverses.length || (poles.length - poteauxImplantes.length));
+    const nbImplantes = Math.min(Number(d.nb_poteaux_implantes ?? poteauxImplantes.length), poteauxImplantes.length);
 
     const equipeName = cleanStr(d.nom_technicien || d.nom_equipe) || "Équipe";
     const lin = d.lineaire_m || 0;
