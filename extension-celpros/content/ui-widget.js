@@ -254,9 +254,30 @@
 
     parseTimestampSafely(dateStr) {
       if (!dateStr || typeof dateStr !== "string") return 0;
-      const clean = dateStr.trim().replace(/\.+$/, "").replace(" ", "T");
-      const ts = Date.parse(clean);
-      return isNaN(ts) ? 0 : ts;
+      let clean = dateStr.trim();
+      if (!clean) return 0;
+      clean = clean.replace(" ", "T");
+      const hasTz = clean.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(clean);
+      const normalized = hasTz ? clean : `${clean}Z`;
+      const ts = Date.parse(normalized);
+      if (!isNaN(ts)) return ts;
+      const fallback = Date.parse(clean);
+      return isNaN(fallback) ? 0 : fallback;
+    }
+
+    isInterventionOutdated(lastKnown, serverUpdatedAt) {
+      if (!lastKnown) return true;
+      if (!serverUpdatedAt) return false;
+      const sStr = String(serverUpdatedAt).trim();
+      const lStr = String(lastKnown).trim();
+      if (sStr === lStr) return false;
+
+      const sTime = this.parseTimestampSafely(sStr);
+      const lTime = this.parseTimestampSafely(lStr);
+      if (sTime > 0 && lTime > 0) {
+        return Math.abs(sTime - lTime) >= 1000;
+      }
+      return sStr !== lStr;
     }
 
     isItemTermine(item) {
@@ -318,7 +339,7 @@
 
     setupAutoSyncPolling() {
       if (this.pollingInterval) clearInterval(this.pollingInterval);
-      // Polling de 5s pour détecter les modifications en direct sur les interventions "en cours"
+      // Polling actif de 3s pour détecter les modifications en direct sur les interventions
       this.pollingInterval = setInterval(async () => {
         if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
         if (!this.selectedIntervention || !this.selectedIntervention.id) return;
@@ -344,7 +365,7 @@
         } catch {
           // Erreur silencieuse de polling
         }
-      }, 5000);
+      }, 3000);
     }
 
     async checkForInterventionUpdates(id, lastKnownUpdatedAt = null) {
@@ -371,9 +392,7 @@
       try {
         const data = await this.fetchApi("intervention_updated_at", "POST", { id: String(id) }, true);
         const serverUpdatedAt = data?.updated_at || "";
-        const serverTime = this.parseTimestampSafely(serverUpdatedAt);
-        const localTime = this.parseTimestampSafely(lastKnownUpdatedAt);
-        const hasChanged = !lastKnownUpdatedAt || (serverTime > 0 && localTime > 0 ? serverTime > localTime : (serverUpdatedAt && serverUpdatedAt !== lastKnownUpdatedAt));
+        const hasChanged = this.isInterventionOutdated(lastKnownUpdatedAt, serverUpdatedAt);
         let freshItem = null;
         if (hasChanged) {
           freshItem = await this.fetchApi("intervention_get", "POST", { id: String(id) }, true);
@@ -1327,6 +1346,9 @@
         await this.fetchInterventions(true);
         if (this.selectedIntervention && this.selectedIntervention.id) {
           await this.onInterventionChange(this.selectedIntervention.id, true);
+          if (this.autoPilotEnabled) {
+            this.handleAutofill(true);
+          }
         }
       });
 

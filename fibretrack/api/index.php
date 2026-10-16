@@ -257,6 +257,9 @@ function normalizeInterventionTypes(array &$r): void {
   $r['lineaire_m'] = is_numeric($r['lineaire_m'] ?? null) ? (float)$r['lineaire_m'] : 0.0;
   $r['puissance_fat_dbm'] = is_numeric($r['puissance_fat_dbm'] ?? null) ? (float)$r['puissance_fat_dbm'] : 0.0;
   $r['puissance_pto_dbm'] = is_numeric($r['puissance_pto_dbm'] ?? null) ? (float)$r['puissance_pto_dbm'] : 0.0;
+  $r['debit_descendant'] = (string)($r['debit_descendant'] ?? '');
+  $r['debit_montant'] = (string)($r['debit_montant'] ?? '');
+  $r['debit_ping'] = (string)($r['debit_ping'] ?? '');
   $r['nb_poteaux_traverses'] = (int)($r['nb_poteaux_traverses'] ?? 0);
   $r['nb_poteaux_implantes'] = (int)($r['nb_poteaux_implantes'] ?? 0);
   $r['nb_poteaux_armes'] = (int)($r['nb_poteaux_armes'] ?? 0);
@@ -454,7 +457,7 @@ try {
         COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
         adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
         ports_disponibles, port_disponible, type_cable, depart_m, arrivee_m, lineaire_m, puissance_fat_dbm,
-        puissance_pto_dbm, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
+        puissance_pto_dbm, debit_descendant, debit_montant, debit_ping, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         materiel_pose, points_gps, ont_sn, pto_qte, repeteur_wifi_qte, emplacement_ont,
         client_confirme_emplacement, offre_souscrite, remise_equipement_ok,
         appreciation_satisfaction_libre, travaux_conformes, emplacement_valide,
@@ -490,7 +493,7 @@ try {
         COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
         adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
         ports_disponibles, port_disponible, type_cable, depart_m, arrivee_m, lineaire_m, puissance_fat_dbm,
-          puissance_pto_dbm, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
+          puissance_pto_dbm, debit_descendant, debit_montant, debit_ping, mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         materiel_pose, points_gps, ont_sn, pto_qte, repeteur_wifi_qte, emplacement_ont,
         client_confirme_emplacement, offre_souscrite, remise_equipement_ok,
         appreciation_satisfaction_libre, travaux_conformes, emplacement_valide,
@@ -517,6 +520,9 @@ try {
       break;
 
     case 'intervention_updated_at':
+      header('Cache-Control: no-cache, no-store, must-revalidate');
+      header('Pragma: no-cache');
+      header('Expires: 0');
       // Relevé léger pour le live refresh mobile : une seule colonne,
       // aucune donnée base64. L'APK compare puis appelle intervention_get_light
       // seulement si la valeur a changé.
@@ -653,6 +659,7 @@ try {
         'nom_client', 'nom_dossier', 'adresse_zone', 'telephone_ligne', 'mobile',
         'etat', 'msan', 'fat_ref', 'port', 'ports_disponibles', 'port_disponible', 'type_cable',
         'depart_m', 'arrivee_m', 'lineaire_m', 'puissance_fat_dbm', 'puissance_pto_dbm',
+        'debit_descendant', 'debit_montant', 'debit_ping',
         'mac', 'sn', 'nb_poteaux_traverses', 'nb_poteaux_implantes', 'nb_poteaux_armes',
         'ont_sn', 'pto_qte', 'repeteur_wifi_qte', 'emplacement_ont',
         'client_confirme_emplacement', 'offre_souscrite', 'remise_equipement_ok',

@@ -259,9 +259,30 @@ async function fetchInterventionDetails(id, forceFresh = false) {
 
 function parseTimestampSafely(dateStr) {
   if (!dateStr || typeof dateStr !== "string") return 0;
-  const clean = dateStr.trim().replace(/\.+$/, "").replace(" ", "T");
-  const ts = Date.parse(clean);
-  return isNaN(ts) ? 0 : ts;
+  let clean = dateStr.trim();
+  if (!clean) return 0;
+  clean = clean.replace(" ", "T");
+  const hasTz = clean.endsWith("Z") || /[+-]\d{2}:?\d{2}$/.test(clean);
+  const normalized = hasTz ? clean : `${clean}Z`;
+  const ts = Date.parse(normalized);
+  if (!isNaN(ts)) return ts;
+  const fallback = Date.parse(clean);
+  return isNaN(fallback) ? 0 : fallback;
+}
+
+function isInterventionOutdated(lastKnown, serverUpdatedAt) {
+  if (!lastKnown) return true;
+  if (!serverUpdatedAt) return false;
+  const sStr = String(serverUpdatedAt).trim();
+  const lStr = String(lastKnown).trim();
+  if (sStr === lStr) return false;
+
+  const sTime = parseTimestampSafely(sStr);
+  const lTime = parseTimestampSafely(lStr);
+  if (sTime > 0 && lTime > 0) {
+    return Math.abs(sTime - lTime) >= 1000;
+  }
+  return sStr !== lStr;
 }
 
 // Téléchargement sécurisé d'un média (photo) en tâche de fond pour contourner CORS & CSP
@@ -317,15 +338,14 @@ async function checkForUpdates(id, lastKnownUpdatedAt = null) {
 
   const json = await res.json();
   const serverUpdatedAt = json?.updated_at || "";
-  const serverTime = parseTimestampSafely(serverUpdatedAt);
-  const localTime = parseTimestampSafely(lastKnownUpdatedAt);
-  const hasChanged = !lastKnownUpdatedAt || (serverTime > 0 && localTime > 0 ? serverTime > localTime : (serverUpdatedAt && serverUpdatedAt !== lastKnownUpdatedAt));
+  const hasChanged = isInterventionOutdated(lastKnownUpdatedAt, serverUpdatedAt);
   let freshItem = null;
 
   if (hasChanged) {
     freshItem = await fetchInterventionDetails(id, true);
     await chrome.storage.local.set({ activeIntervention: freshItem });
     broadcastActiveIntervention(freshItem);
+    fetchInterventionsList(true).catch(() => {});
   }
 
   return {
@@ -404,6 +424,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .then((data) => sendResponse({ ok: true, data: data.activeIntervention || null }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
+
+    case "FIBRETRACK_UPDATE_BROADCAST":
+      if (payload && payload.id) {
+        chrome.storage.local.set({ activeIntervention: payload }).then(() => {
+          broadcastActiveIntervention(payload, sender?.tab?.id);
+          sendResponse({ ok: true });
+        }).catch((err) => sendResponse({ ok: false, error: err.message }));
+        fetchInterventionsList(true).catch(() => {});
+        return true;
+      }
+      sendResponse({ ok: false, error: "Payload d'intervention invalide" });
+      return false;
 
     default:
       sendResponse({ ok: false, error: `Action inconnue: ${action}` });

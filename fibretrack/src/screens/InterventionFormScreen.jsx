@@ -2703,18 +2703,21 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     placeholder="Ex: 48.26"
                     value={data.debit_descendant || ""}
                     onChange={(v) => update("debit_descendant", v)}
+                    onBlur={flushServerSync}
                   />
                   <TextField
                     label="Débit montant (Mb/s)"
                     placeholder="Ex: 9.504"
                     value={data.debit_montant || ""}
                     onChange={(v) => update("debit_montant", v)}
+                    onBlur={flushServerSync}
                   />
                   <TextField
                     label="Ping / Latence (ms)"
                     placeholder="Ex: 18.99"
                     value={data.debit_ping || ""}
                     onChange={(v) => update("debit_ping", v)}
+                    onBlur={flushServerSync}
                   />
                 </div>
               </div>

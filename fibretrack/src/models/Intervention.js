@@ -515,6 +515,17 @@ export function saveInterventionLocally(intervention) {
     if (index >= 0) list[index] = { ...list[index], ...light };
     else list.unshift(light);
     setCached(list);
+
+    // Notification broadcast instantanée pour l'extension CelPros et les autres onglets
+    if (typeof window !== "undefined") {
+      try {
+        window.postMessage({
+          type: "FIBRETRACK_INTERVENTION_UPDATED",
+          intervention: defaulted,
+          timestamp: Date.now(),
+        }, "*");
+      } catch {}
+    }
   } catch (err) {
     console.warn("saveInterventionLocally error:", err);
   }
@@ -546,6 +557,15 @@ export async function saveIntervention(intervention) {
     }
     // Succès confirmé : retirer de la file d'attente hors-ligne si présent
     removeFromOutbox(intervention.id);
+    if (typeof window !== "undefined") {
+      try {
+        window.postMessage({
+          type: "FIBRETRACK_INTERVENTION_UPDATED",
+          intervention,
+          timestamp: Date.now(),
+        }, "*");
+      } catch {}
+    }
     return { ...ensureInterventionDefaults(intervention), _synced: true, updated_at: response?.updated_at || intervention.updated_at };
   } catch (err) {
     console.warn("saveIntervention network sync failed, buffered into persistent outbox:", err);

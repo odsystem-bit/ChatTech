@@ -32,6 +32,9 @@
           }
           if (widgetInstance) {
             widgetInstance.setSelectedIntervention(newIntv, false);
+            if (widgetInstance.autoPilotEnabled) {
+              widgetInstance.handleAutofill(true);
+            }
           }
         }
       }
@@ -62,6 +65,14 @@
         }
         if (widgetInstance && payload) {
           widgetInstance.setSelectedIntervention(payload, false);
+          widgetInstance.showToast(
+            `⚡ Données actualisées en direct (${payload.nom_client || "Dossier"}) !`,
+            "info",
+            3000
+          );
+          if (widgetInstance.autoPilotEnabled) {
+            widgetInstance.handleAutofill(true);
+          }
           sendResponse({ ok: true });
         } else {
           sendResponse({ ok: true });
