@@ -921,6 +921,11 @@
             fileName: file.name,
             sizeKb: Math.round(file.size / 1024),
           });
+
+          // Renseigner automatiquement les débits (Montant, Descendant, Ping) associés à la photo
+          if (rule.key === "debit_wifi" || rule.key === "debit_cable") {
+            handleSpeedtestAutoFill(slot.container, interventionData, root);
+          }
         }
       }
     }
@@ -940,21 +945,112 @@
     };
   }
 
-  // Gère l'ajout et l'injection des photos de poteaux géolocalisés (uniquement si elles existent)
+  // Injecte une valeur textuelle ou numérique avec déclenchement d'événements réactifs
+  function setNativeFieldValue(element, value) {
+    if (!element || value === null || value === undefined || value === "") return false;
+    let stringValue = String(value).replace(",", ".").trim();
+    if (element.value === stringValue) return true;
+
+    try {
+      const prototype = Object.getPrototypeOf(element);
+      const descriptor = Object.getOwnPropertyDescriptor(
+        typeof HTMLInputElement !== "undefined" ? HTMLInputElement.prototype : prototype,
+        "value"
+      );
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(element, stringValue);
+      } else {
+        element.value = stringValue;
+      }
+      element.dispatchEvent(new Event("focus", { bubbles: true }));
+      element.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+      element.dispatchEvent(new Event("blur", { bubbles: true }));
+      if (element.style) {
+        element.style.borderColor = "#22c55e";
+        element.style.backgroundColor = "#f0fdf4";
+      }
+      return true;
+    } catch {
+      element.value = stringValue;
+      return true;
+    }
+  }
+
+  // Renseigne automatiquement les 3 cases de débit (Montant, Descendant, Ping) associées au test de débit
+  function handleSpeedtestAutoFill(container, data, root = (typeof document !== "undefined" ? document : null)) {
+    if (!data) return;
+    const download = data.debit_descendant || data.debit_download;
+    const upload = data.debit_montant || data.debit_upload;
+    const ping = data.debit_ping || data.ping;
+
+    if (!download && !upload && !ping) return;
+
+    // Trouver le conteneur englobant (section Tests de débits par Wifi) ou à défaut la page
+    const searchRoot = container ? (container.closest("section, div.form-section, div.card, fieldset, form") || root) : root;
+    if (!searchRoot) return;
+
+    const inputs = Array.from(searchRoot.querySelectorAll('input:not([type="hidden"]):not([type="file"]):not([type="button"]):not([type="submit"])'));
+
+    for (const inp of inputs) {
+      const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.placeholder || ""}`.toLowerCase();
+      const prevText = (inp.previousElementSibling?.textContent || "").toLowerCase();
+      const parentText = (inp.parentElement?.textContent || "").toLowerCase();
+      const combined = `${idName} ${prevText} ${parentText}`;
+
+      // Montant (Upload)
+      if (upload && (combined.includes("montant") || combined.includes("upload")) && !combined.includes("descendant")) {
+        setNativeFieldValue(inp, upload);
+      }
+      // Descendant (Download)
+      else if (download && (combined.includes("descendant") || combined.includes("download") || combined.includes("reception")) && !combined.includes("montant")) {
+        setNativeFieldValue(inp, download);
+      }
+      // Ping (Latence)
+      else if (ping && (combined.includes("ping") || combined.includes("latence"))) {
+        setNativeFieldValue(inp, ping);
+      }
+    }
+  }
+
+  // Cherche le bouton '+' pour ajouter un nouveau poteau dans CelPros
+  function findAddPoleButton(section) {
+    if (!section) return null;
+    const candidates = Array.from(section.querySelectorAll("button, a, [role='button'], .btn, i, span"));
+    for (const el of candidates) {
+      const txt = (el.innerText || el.textContent || "").trim();
+      const aria = (el.getAttribute("aria-label") || "").toLowerCase();
+      const cls = (el.className || "").toLowerCase();
+      const title = (el.getAttribute("title") || "").toLowerCase();
+
+      if (txt === "+" || txt.includes("ajouter") || aria.includes("ajouter") || title.includes("ajouter") || aria.includes("add") || title.includes("add")) {
+        return el.closest("button, a, [role='button']") || el;
+      }
+      if (cls.includes("add") || cls.includes("plus") || cls.includes("fa-plus")) {
+        return el.closest("button, a, [role='button']") || el;
+      }
+    }
+    return null;
+  }
+
+  // Gère l'ajout et l'injection des photos de poteaux géolocalisés et "Autre poteau" (uniquement si elles existent)
   async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null)) {
     const details = [];
     if (!root) return details;
 
     const polePhotos = [];
+    // 1. Poteaux issus du relevé GPS
     const pts = Array.isArray(interventionData?.points_gps) ? interventionData.points_gps : [];
     for (const p of pts) {
       if (p && normalizeText(p.type).includes("poteau")) {
         const src = getPhotoSource(p.photo);
-        if (src) {
+        if (src && !polePhotos.some((existing) => existing.src === src)) {
           polePhotos.push({ src, name: `poteau_${p.numero || polePhotos.length + 1}.jpg` });
         }
       }
     }
+
+    // 2. Photos du dossier "Autre poteau" de FibreTrack
     const wa = getEligibleWhatsappPhotos(interventionData);
     for (const p of wa) {
       const src = getPhotoSource(p);
@@ -982,65 +1078,48 @@
     const section = poteauxHeader.closest ? (poteauxHeader.closest("div, section") || poteauxHeader.parentElement) : poteauxHeader.parentElement;
     if (!section) return details;
 
-    // Injecte sur chaque zone de poteau existante
     const isForbiddenForPoles = (txt) => {
       return /c[aâ]ble|interne|externe|fat|pto|scan|mesure|d[eé]bit|wifi|contrat|combin[eé]|abonn[eé]|ont|box/i.test(txt);
     };
 
-    const poleSlots = Array.from(section.querySelectorAll(".upload-box, [class*='upload'], [class*='photo'], label, div")).filter((el) => {
-      const txt = (el.innerText || el.textContent || "").toLowerCase();
-      if (isForbiddenForPoles(txt)) return false;
-      const hasPoleKw = txt.includes("poteau") || txt.includes("appui") || txt.includes("pole") || txt.includes("poto");
-      return hasPoleKw && (el.clientHeight || 0) > 50;
-    });
+    const maxPoles = Math.min(10, polePhotos.length);
 
-    if (!poleSlots.length) {
-      // Rechercher des inputs spécifiques aux poteaux
-      const poleInputs = Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
+    for (let i = 0; i < maxPoles; i++) {
+      const pole = polePhotos[i];
+      if (!pole || !pole.src) continue;
+
+      // 1. Chercher un input disponible et non rempli dans la section
+      let allInputs = Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
         const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""}`.toLowerCase();
-        if (isForbiddenForPoles(idName)) return false;
-        return idName.includes("poteau") || idName.includes("pole") || idName.includes("appui");
+        return !isForbiddenForPoles(idName);
       });
-      for (let i = 0; i < Math.min(polePhotos.length, poleInputs.length); i++) {
-        const pole = polePhotos[i];
-        const input = poleInputs[i];
-        if (input && input.files && input.files.length > 0) continue; // Ne jamais écraser un slot déjà rempli
-        if (input && pole.src) {
-          const file = await srcToFile(pole.src, pole.name);
-          if (file) {
-            const container = input.closest ? (input.closest(".upload-box, [class*='upload'], div") || input.parentElement) : input.parentElement;
-            const ok = injectFileIntoInput(input, file, container);
-            if (ok) {
-              details.push({
-                slot: `poteau_${i + 1}`,
-                label: `Poteau ${i + 1}`,
-                fileName: file.name,
-                sizeKb: Math.round(file.size / 1024),
-              });
-            }
-          }
+
+      let emptyInput = allInputs.find((inp) => !inp.files || inp.files.length === 0);
+
+      // 2. Si aucun input libre n'est présent dans CelPros, cliquer sur le bouton '+' pour ajouter un nouveau slot
+      if (!emptyInput) {
+        const addBtn = findAddPoleButton(section);
+        if (addBtn) {
+          try {
+            addBtn.click();
+            // Délai pour laisser Angular FormArray instancier le nouveau slot
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          } catch {}
+
+          allInputs = Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
+            const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""}`.toLowerCase();
+            return !isForbiddenForPoles(idName);
+          });
+          emptyInput = allInputs.find((inp) => !inp.files || inp.files.length === 0);
         }
       }
-      return details;
-    }
 
-    for (let i = 0; i < Math.min(polePhotos.length, poleSlots.length); i++) {
-      const pole = polePhotos[i];
-      const slotContainer = poleSlots[i];
-      if (!slotContainer) continue;
-      const containerTxt = (slotContainer.innerText || slotContainer.textContent || "").toLowerCase();
-      if (isForbiddenForPoles(containerTxt)) continue;
-
-      const input = findFileInputForContainer(slotContainer);
-      if (!input) continue;
-      const idName = `${input.id || ""} ${input.name || ""} ${input.getAttribute("formcontrolname") || ""}`.toLowerCase();
-      if (isForbiddenForPoles(idName)) continue;
-      if (input.files && input.files.length > 0) continue; // Ne jamais écraser un slot déjà rempli
-
-      if (pole.src) {
+      const targetInput = emptyInput || allInputs[i];
+      if (targetInput && (!targetInput.files || targetInput.files.length === 0)) {
         const file = await srcToFile(pole.src, pole.name);
         if (file) {
-          const ok = injectFileIntoInput(input, file, slotContainer);
+          const container = targetInput.closest ? (targetInput.closest(".upload-box, [class*='upload'], div") || targetInput.parentElement) : targetInput.parentElement;
+          const ok = injectFileIntoInput(targetInput, file, container);
           if (ok) {
             details.push({
               slot: `poteau_${i + 1}`,

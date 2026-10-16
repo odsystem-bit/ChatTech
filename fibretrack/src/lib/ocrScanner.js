@@ -1,5 +1,5 @@
 import { createWorker } from "tesseract.js";
-import { extractOntDataFromText, extractFatAndMsanFromText } from "./barcodeParser";
+import { extractOntDataFromText, extractFatAndMsanFromText } from "./barcodeParser.js";
 
 let workerPromise = null;
 
@@ -243,3 +243,128 @@ export async function recognizeFatAndMsanFromImage(imageSrc) {
     return { fat_ref: null, msan: null, rawText: "", error: err?.message, confidence: 0 };
   }
 }
+
+/**
+ * Extrait les valeurs de test de débit (Download, Upload, Ping) à partir d'un texte OCR
+ * Compatible nPerf (Moyenne XX.XX Mb/s), Speedtest, Fast.com
+ * @param {string} text
+ * @returns {{ download: string|null, upload: string|null, ping: string|null }}
+ */
+export function extractSpeedtestFromText(text) {
+  if (!text || typeof text !== "string") {
+    return { download: null, upload: null, ping: null };
+  }
+
+  let download = null;
+  let upload = null;
+  let ping = null;
+
+  // 1. Détection prioritaire nPerf : Lignes "Moyenne <valeur> <unité>"
+  const moyenneMatches = [...text.matchAll(/Moyenne\s+([0-9]+[.,][0-9]+|[0-9]+)\s*(Mb\/s|Mbps|kb\/s|ms)?/gi)];
+
+  if (moyenneMatches.length >= 1) {
+    for (let i = 0; i < moyenneMatches.length; i++) {
+      const m = moyenneMatches[i];
+      const val = m[1].replace(",", ".");
+      const unit = (m[2] || "").toLowerCase();
+
+      if (unit === "ms") {
+        if (!ping) ping = val;
+      } else if (unit.includes("mb") || unit.includes("kb") || !unit) {
+        if (!download) {
+          download = val;
+        } else if (!upload) {
+          upload = val;
+        } else if (!ping && i === 2 && parseFloat(val) < 500) {
+          ping = val;
+        }
+      }
+    }
+  }
+
+  // 2. Détection par mots-clés contextuels (Download / Réception / Descendant)
+  if (!download) {
+    const dlMatch = text.match(/(?:r[eé]ception|download|descendant|descendante)[\s\S]{0,40}?([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps|kb\/s)?/i);
+    if (dlMatch) download = dlMatch[1].replace(",", ".");
+  }
+
+  // 3. Détection par mots-clés contextuels (Upload / Envoi / Montant)
+  if (!upload) {
+    const ulMatch = text.match(/(?:envoi|upload|montant|montante)[\s\S]{0,40}?([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps|kb\/s)?/i);
+    if (ulMatch) upload = ulMatch[1].replace(",", ".");
+  }
+
+  // 4. Détection par mots-clés contextuels (Ping / Latence)
+  if (!ping) {
+    const pingMatch = text.match(/(?:ping|latence)[\s\S]{0,40}?([0-9]+[.,][0-9]+|[0-9]+)\s*(?:ms)?/i);
+    if (pingMatch) ping = pingMatch[1].replace(",", ".");
+  }
+
+  return { download, upload, ping };
+}
+
+/**
+ * Analyse une capture d'écran de test de débit (nPerf / Speedtest)
+ * @param {string} imageSrc
+ * @returns {Promise<{ download: string|null, upload: string|null, ping: string|null, rawText: string, confidence: number }>}
+ */
+export async function recognizeSpeedtestFromImage(imageSrc) {
+  if (!imageSrc) {
+    return { download: null, upload: null, ping: null, rawText: "", confidence: 0 };
+  }
+  try {
+    const worker = await getOcrWorker();
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: true });
+    const result = await worker.recognize(preprocessed);
+    const text = result?.data?.text || "";
+    const extracted = extractSpeedtestFromText(text);
+    return {
+      download: extracted.download,
+      upload: extracted.upload,
+      ping: extracted.ping,
+      rawText: text,
+      confidence: result?.data?.confidence || 0,
+    };
+  } catch (err) {
+    console.warn("Erreur reconnaissance OCR Speedtest:", err);
+    return { download: null, upload: null, ping: null, rawText: "", error: err?.message, confidence: 0 };
+  }
+}
+
+/**
+ * Extrait une mesure de puissance optique (dBm) d'un photomètre
+ * @param {string} text
+ * @returns {string|null} Valeur en dBm avec signe négatif (ex: "-18.52")
+ */
+export function extractPowerMeterFromText(text) {
+  if (!text || typeof text !== "string") return null;
+  const match = text.match(/(?:[-–—]\s*)?([1-3]?[0-9][.,][0-9]{1,2})\s*(?:dBm|dbm)?/i);
+  if (match) {
+    const num = parseFloat(match[1].replace(",", "."));
+    if (!isNaN(num) && num > 5 && num < 40) {
+      return `-${num.toFixed(2)}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Analyse une photo de photomètre optique (FAT / PTO)
+ * @param {string} imageSrc
+ * @returns {Promise<{ power: string|null, rawText: string, confidence: number }>}
+ */
+export async function recognizePowerMeterFromImage(imageSrc) {
+  if (!imageSrc) return { power: null, rawText: "", confidence: 0 };
+  try {
+    const worker = await getOcrWorker();
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: true });
+    const result = await worker.recognize(preprocessed);
+    const text = result?.data?.text || "";
+    const power = extractPowerMeterFromText(text);
+    return { power, rawText: text, confidence: result?.data?.confidence || 0 };
+  } catch (err) {
+    console.warn("Erreur reconnaissance OCR Photomètre:", err);
+    return { power: null, rawText: "", error: err?.message, confidence: 0 };
+  }
+}
+

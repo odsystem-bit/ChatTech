@@ -1200,36 +1200,51 @@
       category: "Réseau",
       type: "number",
       attrPatterns: [
-        /^field_puissancefat$/i,
-        /^field_puissancefatdbm$/i,
-        /^puissance_fat_dbm$/i,
-        /^puissancefatdbm$/i,
-        /^puissancefat$/i,
-        /^puissance_fat$/i,
-        /^pfat$/i,
-        /^dbmfat$/i,
-        /^mesurefat$/i,
-        /^puissancepbo$/i,
+        /^field_?(?:valeur_?(?:au_?)?)?puissance_?fat/i,
+        /^field_?valeur_?(?:au_?)?fat/i,
+        /^valeur_?(?:au_?)?fat/i,
+        /^valeurfat/i,
+        /^field_puissancefat/i,
+        /^field_puissancefatdbm/i,
+        /^puissance_fat_dbm/i,
+        /^puissancefatdbm/i,
+        /^puissancefat/i,
+        /^puissance_fat/i,
+        /^pfat/i,
+        /^dbmfat/i,
+        /^mesure_?fat/i,
+        /^puissancepbo/i,
+        /^valeur_?pbo/i,
       ],
       labelKeywords: [
         "valeur au fat",
         "valeur au fat dbm",
         "valeur au fat (dbm)",
+        "valeur fat",
+        "valeur fat dbm",
         "puissance fat",
         "puissance fat dbm",
+        "puissance au fat",
         "niveau optique fat",
         "dbm fat",
         "puissance au pbo",
         "mesure optique fat",
+        "mesure fat",
         "puissance pbo",
       ],
       valueExtractor: (data) => {
-        const val = data?.puissance_fat_dbm;
-        if (val === undefined || val === null || val === "") return "";
-        const str = String(val).replace(",", ".").trim();
+        const raw =
+          data?.puissance_fat_dbm ??
+          data?.puissance_fat ??
+          data?.puissance_optique_fat ??
+          data?.mesure_fat_dbm ??
+          data?.mesure_fat ??
+          data?.fat_dbm;
+        if (raw === undefined || raw === null || raw === "") return "";
+        const str = String(raw).replace(",", ".").trim();
         const num = parseFloat(str);
         if (isNaN(num) || num === 0) return "";
-        return str;
+        return num > 0 ? `-${str}` : str;
       },
     },
 
@@ -1514,36 +1529,51 @@
       category: "Intérieur",
       type: "number",
       attrPatterns: [
-        /^field_puissancepto$/i,
-        /^field_puissanceptodbm$/i,
-        /^puissance_pto_dbm$/i,
-        /^puissanceptodbm$/i,
-        /^puissancepto$/i,
-        /^puissance_pto$/i,
-        /^ppto$/i,
-        /^dbmpto$/i,
-        /^mesurepto$/i,
-        /^puissancearrivee$/i,
+        /^field_?(?:valeur_?(?:au_?)?)?puissance_?pto/i,
+        /^field_?valeur_?(?:au_?)?pto/i,
+        /^valeur_?(?:au_?)?pto/i,
+        /^valeurpto/i,
+        /^field_puissancepto/i,
+        /^field_puissanceptodbm/i,
+        /^puissance_pto_dbm/i,
+        /^puissanceptodbm/i,
+        /^puissancepto/i,
+        /^puissance_pto/i,
+        /^ppto/i,
+        /^dbmpto/i,
+        /^mesure_?pto/i,
+        /^puissancearrivee/i,
+        /^valeur_?prise/i,
       ],
       labelKeywords: [
         "valeur au pto",
         "valeur au pto dbm",
         "valeur au pto (dbm)",
+        "valeur pto",
+        "valeur pto dbm",
         "puissance pto",
         "puissance pto dbm",
+        "puissance au pto",
         "niveau optique pto",
         "dbm pto",
         "puissance chez le client",
         "mesure pto",
+        "mesure optique pto",
         "puissance prise",
       ],
       valueExtractor: (data) => {
-        const val = data?.puissance_pto_dbm;
-        if (val === undefined || val === null || val === "") return "";
-        const str = String(val).replace(",", ".").trim();
+        const raw =
+          data?.puissance_pto_dbm ??
+          data?.puissance_pto ??
+          data?.puissance_optique_pto ??
+          data?.mesure_pto_dbm ??
+          data?.mesure_pto ??
+          data?.pto_dbm;
+        if (raw === undefined || raw === null || raw === "") return "";
+        const str = String(raw).replace(",", ".").trim();
         const num = parseFloat(str);
         if (isNaN(num) || num === 0) return "";
-        return str;
+        return num > 0 ? `-${str}` : str;
       },
     },
 
@@ -2788,46 +2818,120 @@
     debit_montant: {
       key: "debit_montant",
       step: 3,
-      ftSource: "materiel_pose.debit_up",
+      ftSource: "debit_montant",
       celprosTarget: "Débit montant",
       onAbsent: "leave_empty",
       negativeKeywords: ["descendant"],
       label: "Débit montant",
       category: "Tests",
       type: "number",
-      attrPatterns: [/^montant/i, /^debit_?montant/i],
-      labelKeywords: ["montant", "debit montant", "upload"],
-      valueExtractor: (data) => (data?.debit_montant || data?.debit_upload ? String(data.debit_montant || data.debit_upload).trim() : ""),
+      attrPatterns: [
+        /^field_?debit_?montant/i,
+        /^field_?montant/i,
+        /^debit_?montant/i,
+        /^montant/i,
+        /^upload/i,
+        /^debit_?up/i,
+        /^wifi_?montant/i,
+        /^debit_?wifi_?montant/i,
+      ],
+      labelKeywords: [
+        "debit montant",
+        "montant",
+        "montant (mb/s)",
+        "montante",
+        "debit montant (mb/s)",
+        "upload",
+        "debit upload",
+      ],
+      valueExtractor: (data) => {
+        const val =
+          data?.debit_montant ??
+          data?.debit_upload ??
+          data?.debit_wifi_montant ??
+          data?.materiel_pose?.debit_up ??
+          data?.materiel_pose?.debit_montant;
+        if (val === undefined || val === null || val === "") return "";
+        return String(val).replace(",", ".").trim();
+      },
     },
 
     debit_descendant: {
       key: "debit_descendant",
       step: 3,
-      ftSource: "materiel_pose.debit_down",
+      ftSource: "debit_descendant",
       celprosTarget: "Débit descendant",
       onAbsent: "leave_empty",
       negativeKeywords: ["montant"],
       label: "Débit descendant",
       category: "Tests",
       type: "number",
-      attrPatterns: [/^descendant/i, /^debit_?descendant/i],
-      labelKeywords: ["descendant", "debit descendant", "download"],
-      valueExtractor: (data) => (data?.debit_descendant || data?.debit_download ? String(data.debit_descendant || data.debit_download).trim() : ""),
+      attrPatterns: [
+        /^field_?debit_?descendant/i,
+        /^field_?descendant/i,
+        /^debit_?descendant/i,
+        /^descendant/i,
+        /^download/i,
+        /^debit_?down/i,
+        /^wifi_?descendant/i,
+        /^debit_?wifi_?descendant/i,
+      ],
+      labelKeywords: [
+        "debit descendant",
+        "descendant",
+        "descendant (mb/s)",
+        "descendante",
+        "debit descendant (mb/s)",
+        "download",
+        "debit download",
+        "reception",
+      ],
+      valueExtractor: (data) => {
+        const val =
+          data?.debit_descendant ??
+          data?.debit_download ??
+          data?.debit_wifi_descendant ??
+          data?.materiel_pose?.debit_down ??
+          data?.materiel_pose?.debit_descendant;
+        if (val === undefined || val === null || val === "") return "";
+        return String(val).replace(",", ".").trim();
+      },
     },
 
     debit_ping: {
       key: "debit_ping",
       step: 3,
-      ftSource: "materiel_pose.ping",
+      ftSource: "debit_ping",
       celprosTarget: "Ping latence",
       onAbsent: "leave_empty",
       negativeKeywords: [],
       label: "Ping",
       category: "Tests",
       type: "number",
-      attrPatterns: [/^ping/i],
-      labelKeywords: ["ping", "latence"],
-      valueExtractor: (data) => (data?.debit_ping || data?.ping ? String(data.debit_ping || data.ping).trim() : ""),
+      attrPatterns: [
+        /^field_?ping/i,
+        /^field_?latence/i,
+        /^ping/i,
+        /^latence/i,
+        /^wifi_?ping/i,
+        /^debit_?wifi_?ping/i,
+      ],
+      labelKeywords: [
+        "ping",
+        "ping (ms)",
+        "latence",
+        "latence (ms)",
+        "temps de reponse",
+      ],
+      valueExtractor: (data) => {
+        const val =
+          data?.debit_ping ??
+          data?.ping ??
+          data?.debit_wifi_ping ??
+          data?.materiel_pose?.ping;
+        if (val === undefined || val === null || val === "") return "";
+        return String(val).replace(",", ".").trim();
+      },
     },
 
     // ----------------------------------------------------
@@ -3045,6 +3149,57 @@
     return candidates;
   }
 
+  // Détection du libellé direct et immédiat associé à l'élément (sans englober les ancêtres)
+  function getElementDirectLabel(element) {
+    if (!element) return "";
+    let texts = [];
+    const doc = element.ownerDocument || (typeof document !== "undefined" ? document : null);
+
+    // 0. Propriété standard HTML5 element.labels
+    if (element.labels && element.labels.length > 0) {
+      for (const l of element.labels) {
+        if (l && l.textContent) texts.push(l.textContent);
+      }
+    }
+
+    // 1. Balise <label for="elementId">
+    if (element.id && doc) {
+      const escapedId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(element.id) : element.id;
+      try {
+        const explicitLabel = doc.querySelector(`label[for="${escapedId}"]`);
+        if (explicitLabel) texts.push(explicitLabel.textContent || "");
+      } catch {}
+    }
+
+    // 2. Parent <label> enveloppant
+    const parentLabel = element.closest ? element.closest("label") : null;
+    if (parentLabel) texts.push(parentLabel.textContent || "");
+
+    // 3. Frère précédent direct (previousElementSibling) qui est un label ou titre
+    if (element.previousElementSibling) {
+      const tag = element.previousElementSibling.tagName?.toLowerCase();
+      if (tag === "label" || tag === "mat-label" || tag === "span" || tag === "strong" || tag === "p") {
+        texts.push(element.previousElementSibling.textContent || "");
+      }
+    }
+
+    // 4. Frère précédent du parent direct (ex: <div class="input-group">)
+    if (element.parentElement && element.parentElement.previousElementSibling) {
+      const pTag = element.parentElement.previousElementSibling.tagName?.toLowerCase();
+      if (pTag === "label" || pTag === "mat-label" || pTag === "span" || pTag === "strong") {
+        texts.push(element.parentElement.previousElementSibling.textContent || "");
+      }
+    }
+
+    // 5. Placeholder ou title ou aria-label
+    if (element.placeholder) texts.push(element.placeholder);
+    if (element.title) texts.push(element.title);
+    const ariaLabel = element.getAttribute ? element.getAttribute("aria-label") : null;
+    if (ariaLabel) texts.push(ariaLabel);
+
+    return texts.join(" ").trim();
+  }
+
   // Détection du texte de libellé associé à l'élément (compatible HTML5, Bootstrap, JHipster et Angular Material)
   function getElementLabelText(element) {
     if (!element) return "";
@@ -3107,10 +3262,11 @@
       }
     }
 
-    // 5. Conteneur de champ (ex: mat-form-field, .form-group, .field, .mb-3, .col, .row)
+    // 5. Conteneur de champ (ex: mat-form-field, .form-group, .form-field, .mb-3)
+    // Note : on n'englobe JAMAIS .row ou .col qui peuvent contenir plusieurs champs distincts
     if (element.closest) {
       const group = element.closest(
-        "mat-form-field, [class*='mat-form-field'], [class*='mat-mdc-form-field'], .form-group, .form-field, .mb-3, .col, .row, [class*='field'], [class*='group']"
+        "mat-form-field, [class*='mat-form-field'], [class*='mat-mdc-form-field'], .form-group, .form-field, .mb-3, [class*='field'], [class*='group']"
       );
       if (group) {
         const groupLabel = group.querySelector(
@@ -3138,20 +3294,31 @@
 
     const attributes = getElementAttributeCandidates(element);
     const labelText = getElementLabelText(element);
+    const directLabel = getElementDirectLabel(element);
     const normalizedLabel = normalizeText(labelText);
+    const normDirectLabel = normalizeText(directLabel);
     const normAttrs = attributes.map((a) => normalizeText(a));
 
     let bestMatch = null;
     let highestScore = 0;
 
     for (const [, def] of Object.entries(FIELD_DEFINITIONS)) {
-      // Disqualification par mots-clés négatifs
+      // Disqualification par mots-clés négatifs :
+      // On ne disqualifie JAMAIS un champ si son label direct ou son attribut ID/Name
+      // correspond expressément et positivement à sa cible (ex: directLabel contient "fat" pour puissance_fat_dbm)
       if (def.negativeKeywords && def.negativeKeywords.length > 0) {
-        const isDisqualified = def.negativeKeywords.some((neg) => {
-          const normNeg = normalizeText(neg);
-          return normNeg && (normalizedLabel.includes(normNeg) || normAttrs.some((a) => a.includes(normNeg)));
+        const hasDirectPositiveMatch = def.labelKeywords.some((kw) => {
+          const nKw = normalizeText(kw);
+          return nKw.length >= 3 && (normDirectLabel.includes(nKw) || normAttrs.some((a) => a.includes(nKw)));
         });
-        if (isDisqualified) continue;
+
+        if (!hasDirectPositiveMatch) {
+          const isDisqualified = def.negativeKeywords.some((neg) => {
+            const normNeg = normalizeText(neg);
+            return normNeg && (normalizedLabel.includes(normNeg) || normAttrs.some((a) => a.includes(normNeg)));
+          });
+          if (isDisqualified) continue;
+        }
       }
 
       let score = 0;

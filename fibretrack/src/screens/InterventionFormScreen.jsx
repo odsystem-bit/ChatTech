@@ -24,6 +24,8 @@ import {
 } from "../lib/geo";
 import {
   recognizeFatAndMsanFromImage,
+  recognizeSpeedtestFromImage,
+  recognizePowerMeterFromImage,
 } from "../lib/ocrScanner";
 import {
   getDesignations,
@@ -1007,6 +1009,76 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }, [update]);
 
+  // ===== OCR automatique sur photo de test de débit (Wi-Fi / Câble) =====
+
+  const runSpeedtestOcrOnPhoto = useCallback(async (photoDataUrl) => {
+    if (!photoDataUrl) return;
+    setOcrProcessing(true);
+    try {
+      const ocrResult = await recognizeSpeedtestFromImage(photoDataUrl);
+      const { download, upload, ping } = ocrResult;
+
+      if (!download && !upload && !ping) {
+        setOcrNotification({
+          text: "ℹ️ Photo de test de débit enregistrée. Valeurs non détectées automatiquement, vous pouvez les renseigner manuellement.",
+          success: false,
+        });
+        setTimeout(() => setOcrNotification(null), 8000);
+        return;
+      }
+
+      const updates = {};
+      const parts = [];
+      if (download) {
+        updates.debit_descendant = download;
+        parts.push(`Descendant : ${download} Mb/s`);
+      }
+      if (upload) {
+        updates.debit_montant = upload;
+        parts.push(`Montant : ${upload} Mb/s`);
+      }
+      if (ping) {
+        updates.debit_ping = ping;
+        parts.push(`Ping : ${ping} ms`);
+      }
+
+      for (const [k, v] of Object.entries(updates)) {
+        update(k, v);
+      }
+
+      setOcrNotification({
+        text: `📶 Débit extrait avec succès (${parts.join(", ")}). Renseigné automatiquement !`,
+        success: true,
+      });
+      setTimeout(() => setOcrNotification(null), 10000);
+    } catch (err) {
+      console.warn("OCR Speedtest error:", err);
+    } finally {
+      setOcrProcessing(false);
+    }
+  }, [update]);
+
+  // ===== OCR automatique sur photo de photomètre optique (FAT / PTO) =====
+
+  const runPowerMeterOcrOnPhoto = useCallback(async (photoDataUrl, slotKey) => {
+    if (!photoDataUrl) return;
+    try {
+      const ocrResult = await recognizePowerMeterFromImage(photoDataUrl);
+      if (ocrResult?.power) {
+        const fieldKey = slotKey === "mesure_pto" ? "puissance_pto_dbm" : "puissance_fat_dbm";
+        const label = slotKey === "mesure_pto" ? "Puissance PTO" : "Puissance FAT";
+        update(fieldKey, ocrResult.power);
+        setOcrNotification({
+          text: `📊 ${label} détectée sur le photomètre : ${ocrResult.power} dBm. Renseignée automatiquement !`,
+          success: true,
+        });
+        setTimeout(() => setOcrNotification(null), 9000);
+      }
+    } catch (err) {
+      console.warn("OCR Photomètre error:", err);
+    }
+  }, [update]);
+
   // ===== Gestion des Boîtes de Photos CelPros =====
 
   function getPhotoForSlot(slotKey) {
@@ -1197,9 +1269,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         setSlotActionFeedback(`⚠️ Photo enregistrée dans l'app, mais non sauvegardée sur le téléphone : ${dlErr.message}`);
       });
 
-      // Si c'est la photo du boîtier FAT, extraction automatique OCR de Référence FAT et MSAN !
+      // Extractions automatiques OCR selon le type de photo
       if (slotKey === "fat") {
         runFatOcrOnPhoto(photoDataUrl);
+      } else if (slotKey === "debit_wifi" || slotKey === "debit_cable") {
+        runSpeedtestOcrOnPhoto(photoDataUrl);
+      } else if (slotKey === "mesure_fat" || slotKey === "mesure_pto") {
+        runPowerMeterOcrOnPhoto(photoDataUrl, slotKey);
       }
     } catch (err) {
       setSlotActionFeedback(`Erreur : ${err.message}`);
@@ -2608,6 +2684,39 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 >
                   📷 Scanner les deux codes (MAC + SN) en un seul scan
                 </button>
+              </div>
+            </div>
+
+            {/* Carte Tests de Débit (Wi-Fi) */}
+            <div className="form-card">
+              <div className="form-card-header">
+                <div className="form-card-icon speed-icon">📶</div>
+                <div>
+                  <h3>Tests de débit (Wi-Fi)</h3>
+                  <p className="form-card-sub">Extrait automatiquement de la capture de test débit ou saisie manuelle</p>
+                </div>
+              </div>
+              <div className="form-card-body">
+                <div className="form-row-3">
+                  <TextField
+                    label="Débit descendant (Mb/s)"
+                    placeholder="Ex: 48.26"
+                    value={data.debit_descendant || ""}
+                    onChange={(v) => update("debit_descendant", v)}
+                  />
+                  <TextField
+                    label="Débit montant (Mb/s)"
+                    placeholder="Ex: 9.504"
+                    value={data.debit_montant || ""}
+                    onChange={(v) => update("debit_montant", v)}
+                  />
+                  <TextField
+                    label="Ping / Latence (ms)"
+                    placeholder="Ex: 18.99"
+                    value={data.debit_ping || ""}
+                    onChange={(v) => update("debit_ping", v)}
+                  />
+                </div>
               </div>
             </div>
 
