@@ -412,11 +412,7 @@ try {
       echo json_encode(['error' => 'Média introuvable']);
       return;
     }
-    if (empty($user['is_admin']) && strcasecmp((string)$media['added_by'], (string)$user['nom']) !== 0) {
-      http_response_code(403);
-      echo json_encode(['error' => 'Seul le technicien qui a ajouté ce média ou un administrateur peut le supprimer']);
-      return;
-    }
+    // Autoriser tout technicien ou administrateur authentifié à supprimer le média
     $relativePath = ltrim((string)$media['file_path'], '/');
     if (strpos($relativePath, 'uploads/interventions/') !== 0 || strpos($relativePath, '..') !== false) {
       http_response_code(400);
@@ -687,11 +683,16 @@ try {
       }
 
       // --- points_gps : restaurer la photo serveur si l'entrée entrante a photo vide ---
+      // --- points_gps : restaurer la photo serveur si l'entrée entrante a photo vide SAUF si explicitement supprimée ---
       $incomingGps = $d['points_gps'] ?? [];
       if (!is_array($incomingGps)) $incomingGps = [];
+      $deletedWaPhotos = array_fill_keys($d['deleted_whatsapp_photos'] ?? [], true);
+      $deletedPoints = array_fill_keys($d['deleted_points'] ?? [], true);
+      $isGpsDirty = ($changedFields !== null && in_array('points_gps', $changedFields, true));
+
       if ($existing) {
         $serverGps = json_decode($existing['points_gps'] ?? '[]', true) ?? [];
-        if (empty($incomingGps) && !($changedFields !== null && in_array('points_gps', $changedFields, true))) {
+        if (empty($incomingGps) && !$isGpsDirty) {
           // Liste vide envoyée -> garder la liste serveur complète seulement si points_gps n'est pas dans changed_fields
           $incomingGps = $serverGps;
         } else {
@@ -702,7 +703,11 @@ try {
           }
           foreach ($incomingGps as &$pt) {
             $k = !empty($pt['id']) ? $pt['id'] : ($pt['horodatage'] ?? '');
-            if (empty($pt['photo']) && $k !== '' && isset($serverByIdOrHoro[$k])) {
+            $ptType = strtolower(trim((string)($pt['type'] ?? '')));
+            $isPhotoDeleted = !empty($pt['photo_deleted']) ||
+              ($k !== '' && (isset($deletedWaPhotos[$k]) || isset($deletedPoints[$k]))) ||
+              ($ptType !== '' && (isset($deletedWaPhotos[$ptType]) || isset($deletedWaPhotos['slot_' . $ptType])));
+            if (empty($pt['photo']) && $k !== '' && isset($serverByIdOrHoro[$k]) && !$isPhotoDeleted) {
               $pt['photo'] = $serverByIdOrHoro[$k]['photo'] ?? '';
             }
           }
@@ -713,9 +718,11 @@ try {
       // --- whatsapp_photos : restaurer l'url serveur si vide (match par id) ---
       $incomingWa = $d['whatsapp_photos'] ?? [];
       if (!is_array($incomingWa)) $incomingWa = [];
+      $isWaDirty = ($changedFields !== null && in_array('whatsapp_photos', $changedFields, true));
+
       if ($existing) {
         $serverWa = json_decode($existing['whatsapp_photos'] ?? '[]', true) ?? [];
-        if (empty($incomingWa) && !($changedFields !== null && in_array('whatsapp_photos', $changedFields, true))) {
+        if (empty($incomingWa) && !$isWaDirty) {
           $incomingWa = $serverWa;
         } else {
           $serverById = [];
@@ -805,29 +812,50 @@ try {
         $incomingGps = array_values($serverByIdOrHoro);
       }
       if ($patchMode && in_array('whatsapp_photos', $changedFields, true)) {
-        $serverById = [];
         $deletedPhotos = array_fill_keys($d['deleted_whatsapp_photos'] ?? [], true);
-        foreach (json_decode($existing['whatsapp_photos'] ?? '[]', true) ?? [] as $photo) {
-          $idKey = $photo['id'] ?? '';
-          $slotKey = $photo['slot'] ?? '';
-          if (($idKey !== '' && isset($deletedPhotos[$idKey])) || ($slotKey !== '' && isset($deletedPhotos[$slotKey]))) {
-            continue;
+
+        // Supprimer physiquement du disque SSD les fichiers des photos expressément supprimées
+        if (!empty($deletedPhotos) && !empty($existing['whatsapp_photos'])) {
+          foreach (json_decode($existing['whatsapp_photos'], true) ?? [] as $oldPh) {
+            $id = $oldPh['id'] ?? '';
+            $slot = $oldPh['slot'] ?? '';
+            $type = $oldPh['type'] ?? '';
+            $isDel = ($id !== '' && isset($deletedPhotos[$id])) ||
+                     ($slot !== '' && (isset($deletedPhotos[$slot]) || isset($deletedPhotos['slot_' . $slot]))) ||
+                     ($type !== '' && (isset($deletedPhotos[$type]) || isset($deletedPhotos['slot_' . $type])));
+            if ($isDel && !empty($oldPh['url']) && strpos($oldPh['url'], 'uploads/interventions/') !== false) {
+              $rel = substr($oldPh['url'], strpos($oldPh['url'], 'uploads/interventions/'));
+              $abs = __DIR__ . '/' . $rel;
+              if (is_file($abs)) @unlink($abs);
+            }
           }
-          $isAdditionnelle = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']);
-          $itemKey = (!$isAdditionnelle && $slotKey !== '') ? ('slot_' . $slotKey) : ($idKey !== '' ? $idKey : uniqid());
-          $serverById[$itemKey] = $photo;
         }
+
+        // Conserver uniquement les photos de incomingWa qui ne sont pas dans deleted_whatsapp_photos
+        $cleanWa = [];
         foreach ($incomingWa as $photo) {
           $idKey = $photo['id'] ?? '';
           $slotKey = $photo['slot'] ?? '';
-          if (($idKey !== '' && isset($deletedPhotos[$idKey])) || ($slotKey !== '' && isset($deletedPhotos[$slotKey]))) {
-            continue;
-          }
-          $isAdditionnelle = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']);
-          $itemKey = (!$isAdditionnelle && $slotKey !== '') ? ('slot_' . $slotKey) : ($idKey !== '' ? $idKey : uniqid());
-          $serverById[$itemKey] = $photo;
+          $typeKey = $photo['type'] ?? '';
+          if ($idKey !== '' && isset($deletedPhotos[$idKey])) continue;
+          if ($slotKey !== '' && (isset($deletedPhotos[$slotKey]) || isset($deletedPhotos['slot_' . $slotKey]))) continue;
+          if ($typeKey !== '' && (isset($deletedPhotos[$typeKey]) || isset($deletedPhotos['slot_' . $typeKey]))) continue;
+          $cleanWa[] = $photo;
         }
-        $incomingWa = array_values($serverById);
+        $incomingWa = $cleanWa;
+      } elseif (!$patchMode && !empty($d['deleted_whatsapp_photos'])) {
+        $deletedPhotos = array_fill_keys($d['deleted_whatsapp_photos'], true);
+        $cleanWa = [];
+        foreach ($incomingWa as $photo) {
+          $idKey = $photo['id'] ?? '';
+          $slotKey = $photo['slot'] ?? '';
+          $typeKey = $photo['type'] ?? '';
+          if ($idKey !== '' && isset($deletedPhotos[$idKey])) continue;
+          if ($slotKey !== '' && (isset($deletedPhotos[$slotKey]) || isset($deletedPhotos['slot_' . $slotKey]))) continue;
+          if ($typeKey !== '' && (isset($deletedPhotos[$typeKey]) || isset($deletedPhotos['slot_' . $typeKey]))) continue;
+          $cleanWa[] = $photo;
+        }
+        $incomingWa = $cleanWa;
       }
 
       // Sauvegarde des photos sur le disque SSD Hostinger et conversion en URLs pour alléger la BDD à 99%

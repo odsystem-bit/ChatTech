@@ -378,52 +378,76 @@ export function saveInterventionLocally(intervention) {
       const deletedPhotoIds = new Set(Array.isArray(defaulted._deleted_photo_ids) ? defaulted._deleted_photo_ids : []);
       const deletedPointIds = new Set(Array.isArray(defaulted._deleted_point_ids) ? defaulted._deleted_point_ids : []);
 
-      if ((!defaulted.whatsapp_photos || defaulted.whatsapp_photos.length === 0) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
-        defaulted.whatsapp_photos = existing.whatsapp_photos.filter((p) => p && !deletedPhotoIds.has(p.id) && !deletedPhotoIds.has(p.slot));
-      } else if (Array.isArray(defaulted.whatsapp_photos) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
-        const incomingIds = new Set(defaulted.whatsapp_photos.map((p) => p?.id).filter(Boolean));
-        const incomingSlots = new Set(defaulted.whatsapp_photos.map((p) => p?.slot).filter(Boolean));
-        const localOnly = existing.whatsapp_photos.filter((p) => {
-          if (!p || !p.id) return false;
-          if (deletedPhotoIds.has(p.id) || (p.slot && deletedPhotoIds.has(p.slot))) return false;
-          if (incomingIds.has(p.id)) return false;
-          if (p.slot && incomingSlots.has(p.slot)) return false;
+      const isFullyLoaded = Boolean(defaulted._fully_loaded);
+
+      if (isFullyLoaded) {
+        // Mode plein : l'intervention est ouverte dans le formulaire avec sa liste de photos à jour.
+        // La liste passée est la source de vérité : on purge les photos/points supprimés sans jamais les ressusciter.
+        defaulted.whatsapp_photos = (defaulted.whatsapp_photos || []).filter((p) => {
+          if (!p) return false;
+          if (p.id && deletedPhotoIds.has(p.id)) return false;
+          if (p.slot && (deletedPhotoIds.has(p.slot) || deletedPhotoIds.has(`slot_${p.slot}`))) return false;
+          if (p.type && (deletedPhotoIds.has(p.type) || deletedPhotoIds.has(`slot_${p.type}`))) return false;
           return true;
         });
-        if (localOnly.length > 0) {
-          defaulted.whatsapp_photos = [...defaulted.whatsapp_photos, ...localOnly];
+
+        defaulted.points_gps = (defaulted.points_gps || []).filter((p) => {
+          if (!p) return false;
+          if (p.id && deletedPointIds.has(p.id)) return false;
+          if (p.horodatage && deletedPointIds.has(p.horodatage)) return false;
+          return true;
+        });
+      } else {
+        // Mode partiel / objet light (ex: mise à jour du statut depuis la liste sans photos en mémoire) :
+        // protéger les photos et points existants contre un écrasement accidentel.
+        if ((!defaulted.whatsapp_photos || defaulted.whatsapp_photos.length === 0) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
+          defaulted.whatsapp_photos = existing.whatsapp_photos.filter((p) => p && !deletedPhotoIds.has(p.id) && !deletedPhotoIds.has(p.slot));
+        } else if (Array.isArray(defaulted.whatsapp_photos) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
+          const incomingIds = new Set(defaulted.whatsapp_photos.map((p) => p?.id).filter(Boolean));
+          const incomingSlots = new Set(defaulted.whatsapp_photos.map((p) => p?.slot).filter(Boolean));
+          const localOnly = existing.whatsapp_photos.filter((p) => {
+            if (!p || !p.id) return false;
+            if (deletedPhotoIds.has(p.id) || (p.slot && deletedPhotoIds.has(p.slot))) return false;
+            if (incomingIds.has(p.id)) return false;
+            if (p.slot && incomingSlots.has(p.slot)) return false;
+            return true;
+          });
+          if (localOnly.length > 0) {
+            defaulted.whatsapp_photos = [...defaulted.whatsapp_photos, ...localOnly];
+          }
+        }
+
+        if ((!defaulted.points_gps || defaulted.points_gps.length === 0) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
+          defaulted.points_gps = existing.points_gps.filter((p) => p && !deletedPointIds.has(p.id) && !deletedPointIds.has(p.horodatage));
+        } else if (Array.isArray(defaulted.points_gps) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
+          const incomingIds = new Set(defaulted.points_gps.map((p) => p?.id).filter(Boolean));
+          const incomingPoleNums = new Set(
+            defaulted.points_gps
+              .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
+              .map((p) => Number(p.numero))
+          );
+          const localOnly = existing.points_gps.filter((p) => {
+            if (!p || !p.id) return false;
+            if (deletedPointIds.has(p.id) || (p.horodatage && deletedPointIds.has(p.horodatage))) return false;
+            if (incomingIds.has(p.id)) return false;
+            if (p.type === "Poteau" && Number(p.numero) > 0 && incomingPoleNums.has(Number(p.numero))) {
+              return false;
+            }
+            return true;
+          });
+          if (localOnly.length > 0) {
+            defaulted.points_gps = [...defaulted.points_gps, ...localOnly];
+          }
         }
       }
 
-      if ((!defaulted.points_gps || defaulted.points_gps.length === 0) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
-        defaulted.points_gps = existing.points_gps.filter((p) => p && !deletedPointIds.has(p.id) && !deletedPointIds.has(p.horodatage));
-      } else if (Array.isArray(defaulted.points_gps) && Array.isArray(existing.points_gps) && existing.points_gps.length > 0) {
-        const incomingIds = new Set(defaulted.points_gps.map((p) => p?.id).filter(Boolean));
-        const incomingPoleNums = new Set(
-          defaulted.points_gps
-            .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
-            .map((p) => Number(p.numero))
-        );
-        const localOnly = existing.points_gps.filter((p) => {
-          if (!p || !p.id) return false;
-          if (deletedPointIds.has(p.id) || (p.horodatage && deletedPointIds.has(p.horodatage))) return false;
-          if (incomingIds.has(p.id)) return false;
-          if (p.type === "Poteau" && Number(p.numero) > 0 && incomingPoleNums.has(Number(p.numero))) {
-            return false;
-          }
-          return true;
-        });
-        if (localOnly.length > 0) {
-          defaulted.points_gps = [...defaulted.points_gps, ...localOnly];
-        }
-      }
       if (!defaulted.signature_client && existing.signature_client) {
         defaulted.signature_client = existing.signature_client;
       }
       if (!defaulted.signature_technicien && existing.signature_technicien) {
         defaulted.signature_technicien = existing.signature_technicien;
       }
-      if (existing._fully_loaded) {
+      if (existing._fully_loaded && defaulted._fully_loaded === undefined) {
         defaulted._fully_loaded = true;
       }
     }

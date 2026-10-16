@@ -391,5 +391,76 @@ test("non-destructive merge protects local filled fields from being overwritten 
   assert.equal(protectedResult.port, "Port 2");
 });
 
+test("saveInterventionLocally with _fully_loaded: true permanently deletes photos and does not resurrect them", async () => {
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => storage.get(k) || null,
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: (k) => storage.delete(k),
+  };
+
+  const { saveInterventionLocally, getStoredIntervention } = await import("./Intervention.js");
+
+  // 1. Initial full record with 2 photos (FAT and ONT)
+  const fullRecord = {
+    id: "test-delete-photo-1",
+    nom_client: "Client Test Deletion",
+    whatsapp_photos: [
+      { id: "wa-fat-1", slot: "fat", url: "data:image/jpeg;base64,fatimg" },
+      { id: "wa-ont-1", slot: "ont_sn", url: "data:image/jpeg;base64,ontimg" },
+    ],
+    points_gps: [
+      { id: "pt-fat-1", type: "FAT", photo: "data:image/jpeg;base64,fatimg" },
+    ],
+    _fully_loaded: true,
+  };
+  saveInterventionLocally(fullRecord);
+  assert.equal(getStoredIntervention("test-delete-photo-1").whatsapp_photos.length, 2);
+
+  // 2. User deletes FAT photo in the form:
+  // whatsapp_photos now contains only ONT, and _deleted_photo_ids contains the FAT ID and slot
+  const recordAfterDelete = {
+    id: "test-delete-photo-1",
+    nom_client: "Client Test Deletion",
+    whatsapp_photos: [
+      { id: "wa-ont-1", slot: "ont_sn", url: "data:image/jpeg;base64,ontimg" },
+    ],
+    points_gps: [
+      { id: "pt-fat-1", type: "FAT", photo: "", photo_deleted: true },
+    ],
+    _deleted_photo_ids: ["wa-fat-1", "fat", "slot_fat"],
+    _fully_loaded: true,
+  };
+  saveInterventionLocally(recordAfterDelete);
+
+  // 3. Verify: The deleted FAT photo is GONE permanently and NOT resurrected!
+  const storedAfter = getStoredIntervention("test-delete-photo-1");
+  assert.equal(storedAfter.whatsapp_photos.length, 1, "There should be exactly 1 photo left");
+  assert.equal(storedAfter.whatsapp_photos[0].slot, "ont_sn", "Only ONT should remain");
+  assert.equal(storedAfter.points_gps[0].photo, "", "The point photo must be cleared");
+
+  // 4. Replacing the photo with a new one
+  const recordAfterReplace = {
+    id: "test-delete-photo-1",
+    nom_client: "Client Test Deletion",
+    whatsapp_photos: [
+      { id: "wa-ont-1", slot: "ont_sn", url: "data:image/jpeg;base64,ontimg" },
+      { id: "wa-fat-new", slot: "fat", url: "data:image/jpeg;base64,newfatimg" },
+    ],
+    points_gps: [
+      { id: "pt-fat-1", type: "FAT", photo: "data:image/jpeg;base64,newfatimg" },
+    ],
+    _deleted_photo_ids: [],
+    _fully_loaded: true,
+  };
+  saveInterventionLocally(recordAfterReplace);
+
+  const storedReplaced = getStoredIntervention("test-delete-photo-1");
+  assert.equal(storedReplaced.whatsapp_photos.length, 2, "There should be 2 photos after replacement");
+  const fatPhoto = storedReplaced.whatsapp_photos.find((p) => p.slot === "fat");
+  assert.equal(fatPhoto.id, "wa-fat-new", "Replaced photo must be the new one");
+  assert.equal(fatPhoto.url, "data:image/jpeg;base64,newfatimg");
+});
+
 
 

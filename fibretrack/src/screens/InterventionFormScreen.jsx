@@ -236,10 +236,25 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (Array.isArray(intervention.whatsapp_photos)) {
       setWhatsappPhotos((prev) => {
         const deletedIds = deletedWhatsappPhotoIdsRef.current;
-        const incoming = intervention.whatsapp_photos.filter((p) => !p?.id || !deletedIds.has(p.id));
+        const incoming = intervention.whatsapp_photos.filter((p) => {
+          if (!p) return false;
+          if (p.id && deletedIds.has(p.id)) return false;
+          if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+          if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+          return true;
+        });
         if (!prev || prev.length === 0) return incoming;
         const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-        const localUnsynced = prev.filter((p) => p?.id && !incomingIds.has(p.id) && !deletedIds.has(p.id));
+        const incomingSlots = new Set(incoming.map((p) => p?.slot).filter(Boolean));
+        const localUnsynced = prev.filter((p) => {
+          if (!p) return false;
+          if (p.id && deletedIds.has(p.id)) return false;
+          if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+          if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+          if (p.id && incomingIds.has(p.id)) return false;
+          if (p.slot && incomingSlots.has(p.slot)) return false;
+          return true;
+        });
         return [...incoming, ...localUnsynced];
       });
     }
@@ -337,7 +352,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     const payload = {
       ...currentData,
-      whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? whatsappPhotos : [],
+      whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? (currentData.whatsapp_photos ?? whatsappPhotos) : [],
       points_gps: isGpsDirty || !currentData.updated_at ? currentData.points_gps : [],
       changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
       deleted_points: [...deletedGpsPointIdsRef.current],
@@ -496,9 +511,25 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
         if (Array.isArray(fullIntervention.whatsapp_photos)) {
           setWhatsappPhotos((prev) => {
-            const incoming = fullIntervention.whatsapp_photos;
+            const deletedIds = deletedWhatsappPhotoIdsRef.current;
+            const incoming = fullIntervention.whatsapp_photos.filter((p) => {
+              if (!p) return false;
+              if (p.id && deletedIds.has(p.id)) return false;
+              if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+              if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+              return true;
+            });
             const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-            const localUnsynced = prev.filter((p) => p?.id && !incomingIds.has(p.id));
+            const incomingSlots = new Set(incoming.map((p) => p?.slot).filter(Boolean));
+            const localUnsynced = prev.filter((p) => {
+              if (!p) return false;
+              if (p.id && deletedIds.has(p.id)) return false;
+              if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+              if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+              if (p.id && incomingIds.has(p.id)) return false;
+              if (p.slot && incomingSlots.has(p.slot)) return false;
+              return true;
+            });
             return [...incoming, ...localUnsynced];
           });
         }
@@ -1021,15 +1052,44 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         exclude_celpros: false,
       };
 
-      setWhatsappPhotos((prev) => {
-        const filtered = prev.filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
-        const next = [...filtered, newPhoto];
-        saveInterventionLocally({ ...data, whatsapp_photos: next });
-        return next;
+      // Retirer les anciens marqueurs de suppression pour ce slot
+      deletedWhatsappPhotoIdsRef.current.delete(slotKey);
+      deletedWhatsappPhotoIdsRef.current.delete(`slot_${slotKey}`);
+
+      const filtered = (whatsappPhotos || []).filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
+      const nextPhotos = [...filtered, newPhoto];
+
+      // Si c'est FAT ou ONT/Abonné, mettre également à jour la photo du point GPS
+      const nextPoints = (data.points_gps || []).map((pt) => {
+        if (!pt) return pt;
+        if (slotKey === "fat" && String(pt.type).trim().toUpperCase() === "FAT") {
+          return { ...pt, photo: embeddedPhoto, photo_deleted: false };
+        }
+        if (slotKey === "ont_sn" && (String(pt.type).trim().toUpperCase() === "ABONNÉ" || String(pt.type).trim().toUpperCase() === "ONT")) {
+          return { ...pt, photo: embeddedPhoto, photo_deleted: false };
+        }
+        return pt;
       });
-      markDirty("whatsapp_photos");
+
+      const nextData = {
+        ...data,
+        whatsapp_photos: nextPhotos,
+        points_gps: nextPoints,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+        _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
+        _fully_loaded: true,
+      };
+
+      setWhatsappPhotos(nextPhotos);
+      setData(nextData);
+      dataRef.current = nextData;
+      saveInterventionLocally(nextData);
+      markDirty("whatsapp_photos", "points_gps");
       setSaveStatus("✓ Photo enregistrée");
       setSlotActionFeedback(`✓ Photo "${slotLabel}" enregistrée et sauvegardée sur votre téléphone.`);
+      flushServerSync().catch(() => {});
 
       // Sauvegarde / téléchargement automatique immédiat sur le téléphone de l'agent
       downloadPhotoFile(newPhoto, data.nom_client).catch((dlErr) => {
@@ -1048,42 +1108,72 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
-  function removeSlotPhoto(slotKey) {
+  async function removeSlotPhoto(slotKey) {
     const existing = getPhotoForSlot(slotKey);
     if (!existing) return;
     const slotDef = CELPROS_PHOTO_SLOTS.find((s) => s.key === slotKey);
     const slotLabel = slotDef?.label || slotKey;
-    if (confirm(`Supprimer la photo de la catégorie "${slotLabel}" ?`)) {
-      markDirty("whatsapp_photos");
+    if (confirm(`Supprimer définitivement la photo de la catégorie "${slotLabel}" ?`)) {
+      markDirty("whatsapp_photos", "points_gps");
       if (existing.id) deletedWhatsappPhotoIdsRef.current.add(existing.id);
+      deletedWhatsappPhotoIdsRef.current.add(slotKey);
+      deletedWhatsappPhotoIdsRef.current.add(`slot_${slotKey}`);
+      if (existing.type) deletedWhatsappPhotoIdsRef.current.add(existing.type);
 
-      // Si la photo provenait d'un point GPS, nettoyer également le point GPS
-      if (existing.from_gps) {
-        setData((prev) => {
-          const nextPoints = (prev.points_gps || []).map((pt) => {
-            if (slotKey === "fat" && String(pt.type).trim().toUpperCase() === "FAT") {
-              return { ...pt, photo: "" };
-            }
-            if (slotKey === "ont_sn" && (String(pt.type).trim().toUpperCase() === "ABONNÉ" || String(pt.type).trim().toUpperCase() === "ONT")) {
-              return { ...pt, photo: "" };
-            }
-            return pt;
-          });
-          const nextData = { ...prev, points_gps: nextPoints };
-          saveInterventionLocally(nextData);
-          return nextData;
-        });
-        markDirty("points_gps");
-      }
+      const isPole = slotKey.startsWith("poteau_");
+      const poleNum = isPole ? Number(slotKey.replace("poteau_", "")) : null;
 
-      setWhatsappPhotos((prev) => {
-        const next = prev.filter((p) => p && p.id !== existing.id && p.slot !== slotKey && p.type !== slotKey);
-        saveInterventionLocally({ ...data, whatsapp_photos: next });
-        return next;
+      // Nettoyer points_gps (pour FAT, Abonné/ONT, ou Poteau)
+      const nextPoints = (data.points_gps || []).map((pt) => {
+        if (!pt) return pt;
+        if (slotKey === "fat" && String(pt.type).trim().toUpperCase() === "FAT") {
+          return { ...pt, photo: "", photo_deleted: true };
+        }
+        if (slotKey === "ont_sn" && (String(pt.type).trim().toUpperCase() === "ABONNÉ" || String(pt.type).trim().toUpperCase() === "ONT")) {
+          return { ...pt, photo: "", photo_deleted: true };
+        }
+        if (isPole && String(pt.type).trim().toUpperCase() === "POTEAU" && Number(pt.numero) === poleNum) {
+          return { ...pt, photo: "", photo_deleted: true };
+        }
+        if (existing.id && pt.id === existing.id) {
+          return { ...pt, photo: "", photo_deleted: true };
+        }
+        return pt;
       });
-      setSaveStatus("✓ Modifié");
-      setSlotActionFeedback(`Photo "${slotLabel}" supprimée.`);
+
+      // Nettoyer whatsapp_photos
+      const nextPhotos = (whatsappPhotos || []).filter((p) => {
+        if (!p) return false;
+        if (existing.id && p.id === existing.id) return false;
+        if (p.slot === slotKey || p.type === slotKey) return false;
+        return true;
+      });
+
+      const nextData = {
+        ...data,
+        whatsapp_photos: nextPhotos,
+        points_gps: nextPoints,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+        _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
+        _fully_loaded: true,
+      };
+
+      setWhatsappPhotos(nextPhotos);
+      setData(nextData);
+      dataRef.current = nextData;
+      saveInterventionLocally(nextData);
+
+      setSaveStatus("✓ Photo supprimée");
+      setSlotActionFeedback(`Photo "${slotLabel}" supprimée définitivement.`);
       setTimeout(() => setSlotActionFeedback(""), 3000);
+
+      try {
+        await flushServerSync();
+      } catch (err) {
+        console.warn("Erreur synchronisation suppression photo:", err);
+      }
     }
   }
 
@@ -1579,6 +1669,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         _fully_loaded: true,
       };
       saveInterventionLocally(next);
+      dataRef.current = next;
+      flushServerSync().catch(() => {});
       return next;
     });
 
@@ -1665,14 +1757,26 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         is_additionnelle: true,
         exclude_celpros: true,
       };
-      setWhatsappPhotos((prev) => {
-        const next = [...prev, newPhoto];
-        saveInterventionLocally({ ...data, whatsapp_photos: next });
-        return next;
-      });
+      deletedWhatsappPhotoIdsRef.current.delete(newPhoto.id);
+      const nextPhotos = [...(whatsappPhotos || []), newPhoto];
+      const nextData = {
+        ...data,
+        whatsapp_photos: nextPhotos,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+        _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
+        _fully_loaded: true,
+      };
+
+      setWhatsappPhotos(nextPhotos);
+      setData(nextData);
+      dataRef.current = nextData;
+      saveInterventionLocally(nextData);
       markDirty("whatsapp_photos");
       setSaveStatus("✓ Photo enregistrée");
       setWhatsappStatus("Photo additionnelle enregistrée.");
+      flushServerSync().catch(() => {});
     } catch (err) {
       console.error("handleWaPhotoSelected error:", err);
       setWhatsappStatus(`Erreur : ${err.message}`);
@@ -1681,20 +1785,38 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
   }
 
-  function removeWhatsappPhoto(id) {
+  async function removeWhatsappPhoto(id) {
     markDirty("whatsapp_photos");
     deletedWhatsappPhotoIdsRef.current.add(id);
-    setWhatsappPhotos((prev) => {
-      const next = prev.filter((p) => p.id !== id);
-      saveInterventionLocally({ ...data, whatsapp_photos: next });
-      return next;
-    });
-    setSaveStatus("✓ Modifié");
+
+    const nextPhotos = (whatsappPhotos || []).filter((p) => p && p.id !== id);
+    const nextData = {
+      ...data,
+      whatsapp_photos: nextPhotos,
+      modifie_par: currentUser,
+      modifie_le: new Date().toISOString(),
+      _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+      _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
+      _fully_loaded: true,
+    };
+
+    setWhatsappPhotos(nextPhotos);
+    setData(nextData);
+    dataRef.current = nextData;
+    saveInterventionLocally(nextData);
+
+    setSaveStatus("✓ Photo supprimée");
     setSelectedPhotoIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
+
+    try {
+      await flushServerSync();
+    } catch (err) {
+      console.warn("Erreur synchronisation suppression photo wa:", err);
+    }
   }
 
   function togglePhotoSelection(id) {
@@ -3213,7 +3335,22 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     style={{ padding: "4px 8px", fontSize: 12, color: "var(--danger)", flexShrink: 0 }}
                     onClick={() => {
                       if (confirm(`Supprimer le point "${point.type} ${point.numero}" ?`)) {
-                        update("points_gps", data.points_gps.filter((_, i) => i !== idx));
+                        if (point.id) deletedGpsPointIdsRef.current.add(point.id);
+                        if (point.horodatage) deletedGpsPointIdsRef.current.add(point.horodatage);
+                        markDirty("points_gps");
+                        const nextPoints = data.points_gps.filter((_, i) => i !== idx);
+                        const nextData = {
+                          ...data,
+                          points_gps: nextPoints,
+                          modifie_par: currentUser,
+                          modifie_le: new Date().toISOString(),
+                          _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
+                          _fully_loaded: true,
+                        };
+                        setData(nextData);
+                        dataRef.current = nextData;
+                        saveInterventionLocally(nextData);
+                        flushServerSync().catch(() => {});
                       }
                     }}
                   >
