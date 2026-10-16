@@ -838,8 +838,13 @@ try {
           $slotKey = $photo['slot'] ?? '';
           $typeKey = $photo['type'] ?? '';
           if ($idKey !== '' && isset($deletedPhotos[$idKey])) continue;
-          if ($slotKey !== '' && (isset($deletedPhotos[$slotKey]) || isset($deletedPhotos['slot_' . $slotKey]))) continue;
-          if ($typeKey !== '' && (isset($deletedPhotos[$typeKey]) || isset($deletedPhotos['slot_' . $typeKey]))) continue;
+          $isMulti = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']) ||
+                     $slotKey === 'additionnelle' || str_starts_with($slotKey, 'additionnelle_') ||
+                     $slotKey === 'autre_poteau' || str_starts_with($slotKey, 'autre_poteau');
+          if (!$isMulti) {
+            if ($slotKey !== '' && (isset($deletedPhotos[$slotKey]) || isset($deletedPhotos['slot_' . $slotKey]))) continue;
+            if ($typeKey !== '' && (isset($deletedPhotos[$typeKey]) || isset($deletedPhotos['slot_' . $typeKey]))) continue;
+          }
           $cleanWa[] = $photo;
         }
         $incomingWa = $cleanWa;
@@ -851,8 +856,13 @@ try {
           $slotKey = $photo['slot'] ?? '';
           $typeKey = $photo['type'] ?? '';
           if ($idKey !== '' && isset($deletedPhotos[$idKey])) continue;
-          if ($slotKey !== '' && (isset($deletedPhotos[$slotKey]) || isset($deletedPhotos['slot_' . $slotKey]))) continue;
-          if ($typeKey !== '' && (isset($deletedPhotos[$typeKey]) || isset($deletedPhotos['slot_' . $typeKey]))) continue;
+          $isMulti = !empty($photo['additionnelle']) || !empty($photo['is_additionnelle']) ||
+                     $slotKey === 'additionnelle' || str_starts_with($slotKey, 'additionnelle_') ||
+                     $slotKey === 'autre_poteau' || str_starts_with($slotKey, 'autre_poteau');
+          if (!$isMulti) {
+            if ($slotKey !== '' && (isset($deletedPhotos[$slotKey]) || isset($deletedPhotos['slot_' . $slotKey]))) continue;
+            if ($typeKey !== '' && (isset($deletedPhotos[$typeKey]) || isset($deletedPhotos['slot_' . $typeKey]))) continue;
+          }
           $cleanWa[] = $photo;
         }
         $incomingWa = $cleanWa;

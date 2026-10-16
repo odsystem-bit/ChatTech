@@ -242,20 +242,31 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         const incoming = intervention.whatsapp_photos.filter((p) => {
           if (!p) return false;
           if (p.id && deletedIds.has(p.id)) return false;
-          if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-          if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+          const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+          if (!isMulti) {
+            if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+            if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+          }
           return true;
         });
         if (!prev || prev.length === 0) return incoming;
         const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-        const incomingSlots = new Set(incoming.map((p) => p?.slot).filter(Boolean));
+        const incomingSingleSlots = new Set(
+          incoming
+            .filter((p) => p && !p.additionnelle && !p.is_additionnelle && p.slot !== "additionnelle" && !String(p.slot).startsWith("additionnelle_") && p.slot !== "autre_poteau" && !String(p.slot).startsWith("autre_poteau"))
+            .map((p) => p?.slot)
+            .filter(Boolean)
+        );
         const localUnsynced = prev.filter((p) => {
           if (!p) return false;
           if (p.id && deletedIds.has(p.id)) return false;
-          if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-          if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+          const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+          if (!isMulti) {
+            if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+            if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+          }
           if (p.id && incomingIds.has(p.id)) return false;
-          if (p.slot && incomingSlots.has(p.slot)) return false;
+          if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
           return true;
         });
         return [...incoming, ...localUnsynced];
@@ -518,19 +529,31 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             const incoming = fullIntervention.whatsapp_photos.filter((p) => {
               if (!p) return false;
               if (p.id && deletedIds.has(p.id)) return false;
-              if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-              if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+              const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+              if (!isMulti) {
+                if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+                if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+              }
               return true;
             });
+            if (!prev || prev.length === 0) return incoming;
             const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-            const incomingSlots = new Set(incoming.map((p) => p?.slot).filter(Boolean));
+            const incomingSingleSlots = new Set(
+              incoming
+                .filter((p) => p && !p.additionnelle && !p.is_additionnelle && p.slot !== "additionnelle" && !String(p.slot).startsWith("additionnelle_") && p.slot !== "autre_poteau" && !String(p.slot).startsWith("autre_poteau"))
+                .map((p) => p?.slot)
+                .filter(Boolean)
+            );
             const localUnsynced = prev.filter((p) => {
               if (!p) return false;
               if (p.id && deletedIds.has(p.id)) return false;
-              if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-              if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+              const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+              if (!isMulti) {
+                if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+                if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+              }
               if (p.id && incomingIds.has(p.id)) return false;
-              if (p.slot && incomingSlots.has(p.slot)) return false;
+              if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
               return true;
             });
             return [...incoming, ...localUnsynced];
@@ -1819,26 +1842,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (!file) return;
 
     setWaCapturing(true);
-    setWhatsappStatus("Capture de la photo additionnelle…");
+    setWhatsappStatus("Géolocalisation et enregistrement de la photo additionnelle…");
     try {
       const photoDataUrl = await readFileAsDataUrl(file);
       if (e.target) e.target.value = "";
 
-      let pos = null;
-      try {
-        pos = await getCurrentPositionHighAccuracy();
-      } catch (geoErr) {
-        console.warn("GPS non disponible ou timeout:", geoErr);
-      }
-
-      const lat = pos?.coords?.latitude ?? null;
-      const lng = pos?.coords?.longitude ?? null;
-      const precision_m = pos?.coords?.accuracy ?? null;
+      const posResult = await acquireBestPosition(file);
+      const lat = posResult?.lat ?? null;
+      const lng = posResult?.lng ?? null;
+      const precision_m = posResult?.precision_m ?? null;
       const horodatage = new Date().toISOString();
 
       let lieu = "";
       if (lat != null && lng != null) {
-        setWhatsappStatus("Géolocalisation…");
+        setWhatsappStatus("Recherche de l'adresse…");
         try {
           lieu = await reverseGeocode(lat, lng);
         } catch {}
@@ -1852,16 +1869,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             lieu,
             lat,
             lng,
-            precision_m,
+            precision_m: precision_m || 10,
             horodatage,
+            warning: posResult?.warning,
           });
         } catch (embedErr) {
           console.warn("Erreur incrustation GPS:", embedErr);
         }
       }
 
+      const photoId = crypto.randomUUID();
       const newPhoto = {
-        id: crypto.randomUUID(),
+        id: photoId,
         url: embeddedPhoto,
         lat,
         lng,
@@ -1871,12 +1890,16 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         added: new Date().toISOString(),
         label: "Photo additionnelle",
         type: "additionnelle",
-        slot: "additionnelle",
+        slot: `additionnelle_${photoId}`,
         additionnelle: true,
         is_additionnelle: true,
         exclude_celpros: true,
       };
-      deletedWhatsappPhotoIdsRef.current.delete(newPhoto.id);
+
+      deletedWhatsappPhotoIdsRef.current.delete(photoId);
+      deletedWhatsappPhotoIdsRef.current.delete("additionnelle");
+      deletedWhatsappPhotoIdsRef.current.delete("slot_additionnelle");
+
       const nextPhotos = [...(whatsappPhotos || []), newPhoto];
       const nextData = {
         ...data,
@@ -3282,32 +3305,117 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             </div>
 
             <div className="other-photos-card">
-              <div className="form-card-header">
-                <div className="form-card-icon wa-icon">💬</div>
-                <div>
-                  <h3>Autres photos terrain & WhatsApp</h3>
-                  <p className="form-card-sub">Photos additionnelles (partageables en un clic sur WhatsApp)</p>
-                </div>
-              </div>
+              {(() => {
+                const photosAdditionnelles = (whatsappPhotos || []).filter(
+                  (p) => p && (p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.type === "additionnelle")
+                );
+                return (
+                  <>
+                    <div className="form-card-header">
+                      <div className="form-card-icon wa-icon">💬</div>
+                      <div>
+                        <h3>Autres photos terrain & WhatsApp</h3>
+                        <p className="form-card-sub">Photos additionnelles (stockées sur le serveur & partageables sur WhatsApp)</p>
+                      </div>
+                      <span className={`photo-slot-badge ${photosAdditionnelles.length > 0 ? "badge-success" : "badge-optional"}`} style={{ marginLeft: "auto" }}>
+                        {photosAdditionnelles.length > 0 ? `✓ ${photosAdditionnelles.length} additionnelle${photosAdditionnelles.length > 1 ? "s" : ""}` : "0 additionnelle"}
+                      </span>
+                    </div>
 
-              <div className="gps-buttons" style={{ margin: "14px 0" }}>
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={waCapturing}
-                  onClick={openWaCamera}
-                >
-                  {waCapturing ? "Capture..." : "📷 Prendre photo additionnelle"}
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  disabled={waCapturing}
-                  onClick={openWaGallery}
-                >
-                  🖼️ Importer de la galerie
-                </button>
-              </div>
+                    <div className="gps-buttons" style={{ margin: "14px 0" }}>
+                      <button
+                        type="button"
+                        className="btn-primary"
+                        disabled={waCapturing}
+                        onClick={openWaCamera}
+                      >
+                        {waCapturing ? "Géolocalisation & Enregistrement…" : "📷 Prendre photo additionnelle"}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={waCapturing}
+                        onClick={openWaGallery}
+                      >
+                        🖼️ Importer de la galerie
+                      </button>
+                    </div>
+
+                    {whatsappStatus && (
+                      <p className="slot-feedback-hint" style={{ marginBottom: 12 }}>{whatsappStatus}</p>
+                    )}
+
+                    {/* Galerie dédiée des photos additionnelles */}
+                    {photosAdditionnelles.length > 0 && (
+                      <div style={{ marginBottom: 18, background: "#f8fafc", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, flexWrap: "wrap", gap: 6 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", display: "flex", alignItems: "center", gap: 6 }}>
+                            <span>📸 Photos additionnelles enregistrées ({photosAdditionnelles.length})</span>
+                          </div>
+                          <span style={{ fontSize: 11, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "2px 8px", borderRadius: 6, fontWeight: 600 }}>
+                            ✓ Stockées sur le serveur
+                          </span>
+                        </div>
+
+                        <div className="whatsapp-photos-grid">
+                          {photosAdditionnelles.map((photo, pIdx) => (
+                            <div
+                              key={photo.id}
+                              className="whatsapp-photo-item"
+                              onClick={() => togglePhotoSelection(photo.id)}
+                              style={{
+                                cursor: "pointer",
+                                border: selectedPhotoIds.has(photo.id) ? "2px solid var(--primary)" : "2px solid #cbd5e1"
+                              }}
+                            >
+                              <img src={photo.url} alt={`Photo additionnelle ${pIdx + 1}`} />
+                              <span className="photo-tag-pill" style={{ background: "rgba(15, 23, 42, 0.85)" }}>
+                                Additionnelle #{pIdx + 1}
+                              </span>
+                              {selectedPhotoIds.has(photo.id) && (
+                                <div className="selected-check">✓</div>
+                              )}
+                              <button
+                                type="button"
+                                className="zoom-photo-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setViewingPhoto({
+                                    url: photo.url,
+                                    title: `Photo additionnelle #${pIdx + 1}`,
+                                    subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
+                                    info: [
+                                      { label: "Catégorie", val: `Photo additionnelle #${pIdx + 1}` },
+                                      ...(photo.lat ? [{ label: "Coordonnées GPS", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
+                                      ...(photo.precision_m ? [{ label: "Précision", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
+                                      ...(photo.horodatage ? [{ label: "Prise le", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                                      ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
+                                    ],
+                                  });
+                                }}
+                                title="Agrandir"
+                              >
+                                🔍
+                              </button>
+                              <button
+                                type="button"
+                                className="remove-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeWhatsappPhoto(photo.id);
+                                }}
+                                title="Supprimer cette photo"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {whatsappPhotos.length > 0 && (
                 <>

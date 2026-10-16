@@ -427,8 +427,11 @@ export function saveInterventionLocally(intervention) {
         defaulted.whatsapp_photos = (defaulted.whatsapp_photos || []).filter((p) => {
           if (!p) return false;
           if (p.id && deletedPhotoIds.has(p.id)) return false;
-          if (p.slot && (deletedPhotoIds.has(p.slot) || deletedPhotoIds.has(`slot_${p.slot}`))) return false;
-          if (p.type && (deletedPhotoIds.has(p.type) || deletedPhotoIds.has(`slot_${p.type}`))) return false;
+          const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+          if (!isMulti) {
+            if (p.slot && (deletedPhotoIds.has(p.slot) || deletedPhotoIds.has(`slot_${p.slot}`))) return false;
+            if (p.type && (deletedPhotoIds.has(p.type) || deletedPhotoIds.has(`slot_${p.type}`))) return false;
+          }
           return true;
         });
 
@@ -445,12 +448,19 @@ export function saveInterventionLocally(intervention) {
           defaulted.whatsapp_photos = existing.whatsapp_photos.filter((p) => p && !deletedPhotoIds.has(p.id) && !deletedPhotoIds.has(p.slot));
         } else if (Array.isArray(defaulted.whatsapp_photos) && Array.isArray(existing.whatsapp_photos) && existing.whatsapp_photos.length > 0) {
           const incomingIds = new Set(defaulted.whatsapp_photos.map((p) => p?.id).filter(Boolean));
-          const incomingSlots = new Set(defaulted.whatsapp_photos.map((p) => p?.slot).filter(Boolean));
+          const incomingSingleSlots = new Set(
+            defaulted.whatsapp_photos
+              .filter((p) => p && !p.additionnelle && !p.is_additionnelle && p.slot !== "additionnelle" && !String(p.slot).startsWith("additionnelle_") && p.slot !== "autre_poteau" && !String(p.slot).startsWith("autre_poteau"))
+              .map((p) => p?.slot)
+              .filter(Boolean)
+          );
           const localOnly = existing.whatsapp_photos.filter((p) => {
             if (!p || !p.id) return false;
-            if (deletedPhotoIds.has(p.id) || (p.slot && deletedPhotoIds.has(p.slot))) return false;
+            if (deletedPhotoIds.has(p.id)) return false;
+            const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+            if (!isMulti && p.slot && deletedPhotoIds.has(p.slot)) return false;
             if (incomingIds.has(p.id)) return false;
-            if (p.slot && incomingSlots.has(p.slot)) return false;
+            if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
             return true;
           });
           if (localOnly.length > 0) {
@@ -565,6 +575,15 @@ export async function getIntervention(id) {
           for (const key of ["nom_client", "nom_dossier", "telephone_ligne", "mobile", "adresse_zone", "msan", "fat_ref", "port"]) {
             if (!finalIntv[key] && local[key]) {
               finalIntv[key] = local[key];
+            }
+          }
+          // Préserver les photos locales additionnelles ou slots non encore synchronisés
+          if (Array.isArray(local.whatsapp_photos) && local.whatsapp_photos.length > 0) {
+            const remotePhotoIds = new Set((finalIntv.whatsapp_photos || []).map((p) => p?.id).filter(Boolean));
+            const deletedPhotoIds = new Set(Array.isArray(local._deleted_photo_ids) ? local._deleted_photo_ids : []);
+            const unsyncedPhotos = local.whatsapp_photos.filter((p) => p && p.id && !remotePhotoIds.has(p.id) && !deletedPhotoIds.has(p.id));
+            if (unsyncedPhotos.length > 0) {
+              finalIntv.whatsapp_photos = [...(finalIntv.whatsapp_photos || []), ...unsyncedPhotos];
             }
           }
         }

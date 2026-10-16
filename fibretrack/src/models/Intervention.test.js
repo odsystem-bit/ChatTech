@@ -262,6 +262,54 @@ test("ensureInterventionDefaults preserves additional photos and their CelPros e
   assert.equal(addPhoto.slot, "additionnelle");
 });
 
+test("saveInterventionLocally preserves multiple photos additionnelles and never drops them on sync or light save", async () => {
+  const { saveInterventionLocally, getStoredIntervention } = await import("./Intervention.js");
+  const testId = "test-multi-add-save";
+
+  // 1. Initial save with 1 photo additionnelle and 1 FAT photo
+  const initial = {
+    id: testId,
+    nom_client: "Test Multi Additionnelle",
+    whatsapp_photos: [
+      { id: "fat-1", slot: "fat", type: "fat", url: "data:image/jpeg;base64,fat" },
+      { id: "add-1", slot: "additionnelle_add-1", type: "additionnelle", additionnelle: true, is_additionnelle: true, url: "data:image/jpeg;base64,add1" },
+    ],
+    _fully_loaded: true,
+  };
+  saveInterventionLocally(initial);
+
+  // 2. Add second and third photo additionnelle
+  const secondSave = {
+    id: testId,
+    nom_client: "Test Multi Additionnelle",
+    whatsapp_photos: [
+      { id: "fat-1", slot: "fat", type: "fat", url: "data:image/jpeg;base64,fat" },
+      { id: "add-1", slot: "additionnelle_add-1", type: "additionnelle", additionnelle: true, is_additionnelle: true, url: "data:image/jpeg;base64,add1" },
+      { id: "add-2", slot: "additionnelle_add-2", type: "additionnelle", additionnelle: true, is_additionnelle: true, url: "data:image/jpeg;base64,add2" },
+      { id: "add-3", slot: "additionnelle_add-3", type: "additionnelle", additionnelle: true, is_additionnelle: true, url: "data:image/jpeg;base64,add3" },
+    ],
+    _fully_loaded: true,
+  };
+  saveInterventionLocally(secondSave);
+
+  const stored = getStoredIntervention(testId);
+  assert.equal(stored.whatsapp_photos.length, 4, "Toutes les 3 photos additionnelles + 1 FAT doivent être conservées");
+
+  // 3. Simuler un light save (sans photos en mémoire)
+  const lightSave = {
+    id: testId,
+    nom_client: "Test Multi Additionnelle",
+    whatsapp_photos: [],
+    _fully_loaded: false,
+  };
+  saveInterventionLocally(lightSave);
+
+  const storedAfterLight = getStoredIntervention(testId);
+  assert.equal(storedAfterLight.whatsapp_photos.length, 4, "Le light save ne doit jamais écraser les 3 photos additionnelles");
+  const addIds = storedAfterLight.whatsapp_photos.filter(p => p.additionnelle).map(p => p.id);
+  assert.deepEqual(addIds, ["add-1", "add-2", "add-3"]);
+});
+
 test("saveInterventionLocally replaces slot photos and prevents duplicate pole entries", async () => {
   const { saveInterventionLocally, getStoredIntervention } = await import("./Intervention.js");
   const testId = "test-pole2-slot-replace";

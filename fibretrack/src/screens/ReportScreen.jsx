@@ -33,7 +33,18 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   // Photos CelPros de cette intervention (ordre CelPros + poteaux), additionnelles exclues
   const photoEntries = useMemo(() => collectCelprosPhotos(data, CELPROS_PHOTO_SLOTS), [data]);
 
-  // Pré-construction des fichiers : l'appel de partage doit se faire immédiatement au clic
+  // Photos additionnelles terrain
+  const photosAdditionnelles = useMemo(() => {
+    return (data?.whatsapp_photos || []).filter(
+      (p) => p && (p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.type === "additionnelle")
+    );
+  }, [data?.whatsapp_photos]);
+
+  const [viewingPhoto, setViewingPhoto] = useState(null);
+  const [sendAddStatus, setSendAddStatus] = useState("");
+  const [addShareFiles, setAddShareFiles] = useState({ files: [], failed: [], ready: false });
+
+  // Pré-construction des fichiers photos CelPros
   useEffect(() => {
     let cancelled = false;
     setShareFiles((s) => ({ ...s, ready: false }));
@@ -44,6 +55,24 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       cancelled = true;
     };
   }, [photoEntries]);
+
+  // Pré-construction des fichiers photos additionnelles
+  useEffect(() => {
+    let cancelled = false;
+    setAddShareFiles((s) => ({ ...s, ready: false }));
+    const entries = photosAdditionnelles.map((p, i) => ({
+      key: `additionnelle_${i + 1}`,
+      label: `Photo additionnelle ${i + 1}`,
+      url: p.url,
+      photo: p,
+    }));
+    buildShareFiles(entries).then((res) => {
+      if (!cancelled) setAddShareFiles({ ...res, ready: true });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [photosAdditionnelles]);
 
   // Les listes en cache sont "légères" (sans photos) : charger la fiche complète à l'ouverture
   useEffect(() => {
@@ -314,6 +343,30 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction(null);
   }
 
+  async function handleSendAdditionnellesToWhatsapp() {
+    if (loadingAction) return;
+    if (!addShareFiles.ready || addShareFiles.files.length === 0) return;
+    setLoadingAction("sendAdditionnelles");
+    try {
+      const clientName = data.nom_client || "Intervention";
+      const result = await shareReportWithPhotos({
+        text: `*Photos additionnelles* — Client : ${clientName}\nDate : ${new Date().toLocaleDateString()}`,
+        files: addShareFiles.files,
+        title: `Photos additionnelles - ${clientName}`,
+      });
+      if (result === "shared") {
+        setSendAddStatus(`✓ ${addShareFiles.files.length} photo(s) additionnelle(s) transmise(s) à WhatsApp.`);
+      } else if (result === "cancelled") {
+        setSendAddStatus("");
+      } else {
+        setSendAddStatus("Partage non pris en charge directement par ce navigateur.");
+      }
+    } catch (err) {
+      setSendAddStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
   return (
     <div className="report-screen">
       <header className="form-header">
@@ -413,6 +466,69 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
 
         {satStatus && <p className="gps-status" style={{ marginTop: 8 }}>{satStatus}</p>}
         {pdfStatus && <p className="gps-status" style={{ marginTop: 8 }}>{pdfStatus}</p>}
+      </div>
+
+      {/* SECTION PHOTOS DE L'INTERVENTION */}
+      <div style={{ marginTop: 14, padding: 16, background: "#f8fafc", borderRadius: 14, border: "1px solid #cbd5e1" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+          <div>
+            <h4 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: "#0f172a" }}>
+              📸 Photos de l'intervention
+            </h4>
+            <p style={{ margin: "2px 0 0", fontSize: 12.5, color: "#64748b" }}>
+              {photoEntries.length} photo{photoEntries.length > 1 ? "s" : ""} CelPros • {photosAdditionnelles.length} photo{photosAdditionnelles.length > 1 ? "s" : ""} additionnelle{photosAdditionnelles.length > 1 ? "s" : ""}
+            </p>
+          </div>
+          <span style={{ fontSize: 11, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "3px 10px", borderRadius: 6, fontWeight: 700 }}>
+            ✓ Enregistrées en BDD
+          </span>
+        </div>
+
+        {/* Galerie des photos additionnelles */}
+        {photosAdditionnelles.length > 0 ? (
+          <div style={{ marginBottom: 12, background: "#fff", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>
+                Photos additionnelles ({photosAdditionnelles.length})
+              </span>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ fontSize: 12, padding: "5px 12px", background: "#16a34a", borderColor: "#16a34a" }}
+                disabled={loadingAction === "sendAdditionnelles" || !addShareFiles.ready}
+                onClick={handleSendAdditionnellesToWhatsapp}
+              >
+                {loadingAction === "sendAdditionnelles"
+                  ? "Ouverture…"
+                  : `📤 Envoyer ces photos (${photosAdditionnelles.length}) sur WhatsApp`}
+              </button>
+            </div>
+            {sendAddStatus && <p className="gps-status" style={{ margin: "4px 0 8px" }}>{sendAddStatus}</p>}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
+              {photosAdditionnelles.map((ap, apIdx) => (
+                <div key={ap.id || apIdx} style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #cbd5e1", background: "#f1f5f9" }}>
+                  <img
+                    src={ap.url}
+                    alt={`Photo additionnelle ${apIdx + 1}`}
+                    style={{ width: "100%", height: 75, objectFit: "cover", display: "block", cursor: "pointer" }}
+                    onClick={() => setViewingPhoto({
+                      url: ap.url,
+                      title: `Photo additionnelle #${apIdx + 1}`,
+                      subtitle: ap.lieu || (ap.lat ? `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` : ""),
+                    })}
+                  />
+                  <div style={{ padding: "3px 4px", fontSize: 10.5, textAlign: "center", fontWeight: 700, color: "#475569" }}>
+                    #{apIdx + 1} {ap.lat != null ? "📍" : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <p style={{ margin: "6px 0 0", fontSize: 12, color: "#64748b" }}>
+            Aucune photo additionnelle enregistrée pour cette intervention.
+          </p>
+        )}
       </div>
 
       <button type="button" className="btn-secondary btn-large" onClick={handleShare} disabled={loadingAction === "share"} style={{ marginTop: 12 }}>
@@ -528,6 +644,75 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
               onSave={handleSaveFichesChanges}
               onClose={() => setShowFichesModal(false)}
             />
+          </div>
+        </div>
+      )}
+      {/* Modal Agrandissement Photo */}
+      {viewingPhoto && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.85)",
+            zIndex: 9999,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 16,
+          }}
+          onClick={() => setViewingPhoto(null)}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 12,
+              maxWidth: 700,
+              width: "100%",
+              overflow: "hidden",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "12px 16px",
+                borderBottom: "1px solid #e2e8f0",
+              }}
+            >
+              <h4 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#0f172a" }}>
+                {viewingPhoto.title || "Photo"}
+              </h4>
+              <button
+                type="button"
+                onClick={() => setViewingPhoto(null)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: 18,
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                  color: "#64748b",
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ padding: 12, display: "flex", justifyContent: "center", background: "#0f172a" }}>
+              <img
+                src={viewingPhoto.url}
+                alt={viewingPhoto.title || "Photo"}
+                style={{ maxWidth: "100%", maxHeight: "65vh", objectFit: "contain" }}
+              />
+            </div>
+            {viewingPhoto.subtitle && (
+              <div style={{ padding: "10px 16px", fontSize: 12, color: "#64748b", background: "#f8fafc" }}>
+                📍 {viewingPhoto.subtitle}
+              </div>
+            )}
           </div>
         </div>
       )}
