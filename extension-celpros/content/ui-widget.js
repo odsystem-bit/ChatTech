@@ -179,12 +179,15 @@
             <div class="chaptech-result-banner" id="chaptech-fill-result" style="display: none;"></div>
 
             <!-- Outils rapides (Boutons secondaires) -->
-            <div class="chaptech-tools-row">
-              <button class="chaptech-btn-sub" id="chaptech-btn-copy-wa" title="Copier rapport texte pour WhatsApp">
-                📋 Copier WhatsApp
+            <div class="chaptech-tools-row" style="display: flex; flex-wrap: wrap; gap: 4px;">
+              <button class="chaptech-btn-sub" id="chaptech-btn-copy-wa" title="Copier le Rapport Global officiel pour WhatsApp (*...*)">
+                📋 Rapport Global
+              </button>
+              <button class="chaptech-btn-sub" id="chaptech-btn-copy-conformite" title="Copier le Rapport de Conformité épuré">
+                ✅ Conformité
               </button>
               <button class="chaptech-btn-sub" id="chaptech-btn-copy-json" title="Copier les données JSON brutes">
-                📦 Copier JSON
+                📦 JSON
               </button>
               <button class="chaptech-btn-sub" id="chaptech-btn-import-toggle" title="Importer du JSON">
                 📥 Importer
@@ -1198,10 +1201,25 @@
         this.showToast("Sélectionnez une intervention d'abord", "warning");
         return;
       }
-      const text = FormFiller.formatWhatsAppReport(this.selectedIntervention);
+      const formatter = FormFiller.formatGlobalReport || FormFiller.formatWhatsAppReport;
+      const text = formatter(this.selectedIntervention);
       const ok = await this.safeCopyToClipboard(text);
       if (ok) {
-        this.showToast("📋 Rapport texte copié dans le presse-papiers !", "success");
+        this.showToast("📋 Rapport Global (WhatsApp) copié !", "success");
+      } else {
+        this.showToast("⚠️ Erreur lors de la copie dans le presse-papiers", "error");
+      }
+    }
+
+    async copyConformiteReport() {
+      if (!this.selectedIntervention) {
+        this.showToast("Sélectionnez une intervention d'abord", "warning");
+        return;
+      }
+      const text = FormFiller.formatConformiteReport ? FormFiller.formatConformiteReport(this.selectedIntervention) : "";
+      const ok = await this.safeCopyToClipboard(text);
+      if (ok) {
+        this.showToast("✅ Rapport de Conformité copié !", "success");
       } else {
         this.showToast("⚠️ Erreur lors de la copie dans le presse-papiers", "error");
       }
@@ -1346,8 +1364,14 @@
       // Bouton Remplir
       document.getElementById("chaptech-btn-autofill").addEventListener("click", () => this.handleAutofill(false));
 
-      // Bouton Copier WhatsApp
+      // Bouton Copier WhatsApp / Global
       document.getElementById("chaptech-btn-copy-wa").addEventListener("click", () => this.copyWhatsApp());
+
+      // Bouton Copier Conformité
+      const btnConformite = document.getElementById("chaptech-btn-copy-conformite");
+      if (btnConformite) {
+        btnConformite.addEventListener("click", () => this.copyConformiteReport());
+      }
 
       // Bouton Copier JSON
       document.getElementById("chaptech-btn-copy-json").addEventListener("click", () => this.copyJson());

@@ -190,40 +190,104 @@ test('FormFiller - autofillPage matches and fills complete simulated CelPros for
   assert.equal(elConforme.checked, true);
 });
 
-test('FormFiller - formatWhatsAppReport outputs well-formatted text report with GPS and photos', () => {
+test('FormFiller - formatGlobalReport outputs WhatsApp format with bold asterisks and exact structure', () => {
   const mockIntervention = {
     nom_client: 'SOSSOU Paul',
     adresse_zone: 'Cadjehoun, Cotonou',
     mobile: '0196554433',
-    nom_technicien: 'Davy H.',
-    fat_ref: 'FAT-CAD-02',
-    port: '5',
-    puissance_fat_dbm: -17.8,
-    puissance_pto_dbm: -19.1,
-    lineaire_m: 120,
-    mac: '00:11:22:33:44:55',
-    sn: 'ZTE12345',
-    travaux_conformes: true,
-    service_fonctionne: true,
+    telephone_ligne: '0121293029',
+    nom_technicien: 'Rodolpho',
+    fat_ref: 'SEM-PL02 FAT191',
+    msan: 'SEM-PL02',
+    port: '2',
+    ports_disponibles: 'Port 3, Port 4, Port 5',
+    puissance_fat_dbm: -19.93,
+    puissance_pto_dbm: -19.47,
+    lineaire_m: 200,
+    mac: '9025F247EC49-59(17)',
+    sn: '4857544329E4FBB8',
+    date: '2026-10-15',
     points_gps: [
-      { type: 'Abonné', lat: 6.3562, lng: 2.4128 },
+      { type: 'Abonné', lat: 6.3794279, lng: 2.5992384 },
+      { type: 'FAT', lat: 6.37951, lng: 2.59950 },
     ],
-    whatsapp_photos: [{ id: 'photo-1' }, { id: 'photo-2' }],
+    poteaux: [
+      { numero: 1, type_poteau: 'sbee', latitude: 6.3796868, longitude: 2.5996342, traversed: true },
+      { numero: 2, type_poteau: 'sbee', latitude: 6.3793048, longitude: 2.599595, traversed: true },
+      { numero: 3, type_poteau: 'petit_jean', latitude: 6.3787602, longitude: 2.5998584, traversed: true },
+      { numero: 4, type_poteau: 'petit_jean', latitude: 6.3785583, longitude: 2.599395, traversed: true },
+      { numero: 1, type_poteau: 'sbee', latitude: 6.3820145, longitude: 2.5994916, arme: true },
+    ],
+    materiel_pose: {
+      crochets: 10,
+      piton: 1,
+      cheville: 1,
+      traverse_15t: 1,
+    },
   };
 
-  const text = FormFiller.formatWhatsAppReport(mockIntervention);
+  const text = FormFiller.formatGlobalReport(mockIntervention, { realises: 0, recus: 0 });
 
-  assert.ok(text.includes('RAPPORT D\'INTERVENTION FIBRE - CELTIIS'));
-  assert.ok(text.includes('SOSSOU Paul'));
-  assert.ok(text.includes('FAT-CAD-02'));
-  assert.ok(text.includes('-17.8 dBm'));
-  assert.ok(text.includes('-19.1 dBm'));
-  assert.ok(text.includes('120 m'));
-  assert.ok(text.includes('ZTE12345'));
-  assert.ok(text.includes('OUI ✅'));
-  assert.ok(text.includes('6.356200, 2.412800'));
-  assert.ok(text.includes('https://maps.google.com/?q=6.3562,2.4128'));
-  assert.ok(text.includes('2 photo(s)'));
+  assert.ok(text.includes("*Chef d'Équipe : Rodolpho*"));
+  assert.ok(text.includes('*00 Réalisés / 00 Reçus*'));
+  assert.ok(text.includes('*RACCORDEMENT*'));
+  assert.ok(text.includes('*Client: SOSSOU Paul*'));
+  assert.ok(text.includes('*Etat:PON*'));
+  assert.ok(text.includes('*Msan: SEM-PL02  FAT191*'));
+  assert.ok(text.includes('*Linéaire:200.0m*'));
+  assert.ok(text.includes('*Puissance FAT: -19.93 dBm*'));
+  assert.ok(text.includes('*Puissance PTO: -19.47 dBm*'));
+  assert.ok(text.includes('*CPC 200: 01*'));
+  assert.ok(text.includes('*CPC 50: 00*'));
+  assert.ok(text.includes('*Crochets:10*'));
+  assert.ok(text.includes('*GPS poteaux SBEE*'));
+  assert.ok(text.includes('*GPS PT1: 6.3796868,2.5996342*'));
+  assert.ok(text.includes('*GPS poteaux Petit Jean*'));
+  assert.ok(text.includes('*GPS abonné: 6.3794279,2.5992384*'));
+  assert.ok(text.includes('*GPS FAT: 6.37951,2.5995*'));
+});
+
+test('FormFiller - formatConformiteReport outputs plain text conforming to official audit structure', () => {
+  const mockIntervention = {
+    nom_client: 'ODOUNLAMI CHORIC DAVID',
+    mobile: '0197337800',
+    telephone_ligne: '0121293766',
+    nom_technicien: 'RODOLPHO',
+    fat_ref: 'FAT140',
+    msan: 'SEM-PL02',
+    lineaire_m: 350,
+    date: '2026-10-15',
+    points_gps: [
+      { type: 'Abonné', lat: 6.3862167, lng: 2.6116733 },
+      { type: 'FAT', lat: 6.3854482, lng: 2.6129592 },
+    ],
+    poteaux: [
+      { numero: 1, type_poteau: 'sbee', latitude: 6.38580, longitude: 2.61296, traversed: true },
+      { numero: 2, type_poteau: 'sbee', latitude: 6.38603, longitude: 2.61289, traversed: true },
+      { numero: 1, type_poteau: 'petit_jean', latitude: 6.38612, longitude: 2.61201, traversed: true },
+      { numero: 1, type_poteau: 'sbee', latitude: 6.38580, longitude: 2.61296, arme: true },
+      { numero: 2, type_poteau: 'sbee', latitude: 6.38603, longitude: 2.61289, arme: true },
+    ],
+  };
+
+  const text = FormFiller.formatConformiteReport(mockIntervention);
+
+  assert.ok(text.includes('Équipe : RODOLPHO'));
+  assert.ok(text.includes('15/10/2026'));
+  assert.ok(text.includes('RACCORDEMENT — CONFORMITÉ'));
+  assert.ok(text.includes('Client : ODOUNLAMI CHORIC DAVID'));
+  assert.ok(text.includes('Ligne : 0121293766'));
+  assert.ok(text.includes('MSAN : SEM-PL02  FAT140'));
+  assert.ok(text.includes('Linéaire : 350 m'));
+  assert.ok(text.includes('GPS FAT : 6.3854482, 2.6129592'));
+  assert.ok(text.includes('GPS abonné : 6.3862167, 2.6116733'));
+  assert.ok(text.includes('Poteaux traversés : 03'));
+  assert.ok(text.includes('Poteaux SBEE : 02'));
+  assert.ok(text.includes('Poteau Petit Jean : 01'));
+  assert.ok(text.includes('GPS poteaux SBEE :'));
+  assert.ok(text.includes('- PT1 : 6.3858, 2.61296'));
+  assert.ok(text.includes('GPS poteau Petit Jean : 6.38612, 2.61201'));
+  assert.ok(!text.includes('*')); // Aucun astérisque dans le rapport de conformité
 });
 
 test('FormFiller - setNativeInputValue sanitizes comma decimals for number inputs', () => {

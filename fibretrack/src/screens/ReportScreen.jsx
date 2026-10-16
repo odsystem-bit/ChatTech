@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { generateWhatsAppReport } from "../lib/whatsapp";
+import { generateGlobalReport, generateConformiteReport, generateWhatsAppReport } from "../lib/whatsapp";
 import { ensureInterventionDefaults, getIntervention, saveInterventionLocally, saveIntervention } from "../models/Intervention";
 import {
   generateInterventionPdf,
@@ -49,6 +49,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [shareStatus, setShareStatus] = useState("");
   const [satStatus, setSatStatus] = useState("");
   const [showFichesModal, setShowFichesModal] = useState(false);
+  const [reportType, setReportType] = useState("global");
   const [realises, setRealises] = useState("");
   const [recus, setRecus] = useState("");
   const [loadingAction, setLoadingAction] = useState(null);
@@ -57,7 +58,9 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     realises: realises !== "" ? Number(realises) : 0,
     recus: recus !== "" ? Number(recus) : 0,
   };
-  const report = generateWhatsAppReport(data, compteurJour);
+  const globalReport = generateGlobalReport(data, compteurJour);
+  const conformiteReport = generateConformiteReport(data);
+  const activeReport = reportType === "conformite" ? conformiteReport : globalReport;
 
   // --- Actions Fiche 1 : SBIN ---
   async function handleDownloadSbin() {
@@ -153,7 +156,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   }
 
   async function handleCopy() {
-    await navigator.clipboard.writeText(report);
+    await navigator.clipboard.writeText(activeReport);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   }
@@ -334,42 +337,65 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       </button>
       {shareStatus && <p className="gps-status">{shareStatus}</p>}
 
-      <h3>Compteur journalier</h3>
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-        <label className="form-field" style={{ flex: "1 1 120px" }}>
-          <span>Réalisés (aujourd'hui)</span>
-          <input
-            type="number"
-            min="0"
-            value={realises}
-            onChange={(e) => setRealises(e.target.value)}
-            placeholder="0"
-          />
-        </label>
-        <label className="form-field" style={{ flex: "1 1 120px" }}>
-          <span>Reçus (dossiers donnés)</span>
-          <input
-            type="number"
-            min="0"
-            value={recus}
-            onChange={(e) => setRecus(e.target.value)}
-            placeholder="0"
-          />
-        </label>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16, marginBottom: 16 }}>
+        <button
+          type="button"
+          className={reportType === "global" ? "btn-primary" : "btn-secondary"}
+          onClick={() => { setReportType("global"); setCopied(false); }}
+          style={{ flex: "1 1 200px", padding: "12px 16px", fontWeight: "600", fontSize: "14px" }}
+        >
+          📋 Rapport Global WhatsApp
+        </button>
+        <button
+          type="button"
+          className={reportType === "conformite" ? "btn-primary" : "btn-secondary"}
+          onClick={() => { setReportType("conformite"); setCopied(false); }}
+          style={{ flex: "1 1 200px", padding: "12px 16px", fontWeight: "600", fontSize: "14px" }}
+        >
+          ✅ Rapport de Conformité
+        </button>
       </div>
 
-      <h3>Rapport WhatsApp (texte)</h3>
-      <textarea className="whatsapp-report" readOnly value={report} rows={18} />
+      {reportType === "global" && (
+        <div style={{ background: "#f8fafc", padding: "12px 16px", borderRadius: 8, marginBottom: 16, border: "1px solid #e2e8f0" }}>
+          <h4 style={{ margin: "0 0 8px 0", fontSize: 13, color: "#475569" }}>Compteur journalier</h4>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label className="form-field" style={{ flex: "1 1 120px" }}>
+              <span>Réalisés (aujourd'hui)</span>
+              <input
+                type="number"
+                min="0"
+                value={realises}
+                onChange={(e) => setRealises(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label className="form-field" style={{ flex: "1 1 120px" }}>
+              <span>Reçus (dossiers donnés)</span>
+              <input
+                type="number"
+                min="0"
+                value={recus}
+                onChange={(e) => setRecus(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      <h3>{reportType === "conformite" ? "Rapport de Conformité (texte)" : "Rapport Global WhatsApp (texte)"}</h3>
+      <textarea className="whatsapp-report" readOnly value={activeReport} rows={18} />
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <button type="button" className="btn-primary btn-large" onClick={handleCopy}>
-          {copied ? "Copié !" : "Copier vers le presse-papier"}
+          {copied ? "✓ Rapport copié !" : `Copier ${reportType === "conformite" ? "la Conformité" : "le Rapport Global"}`}
         </button>
         <button
           type="button"
           className="btn-primary btn-large"
           onClick={() => {
-            const url = `https://wa.me/?text=${encodeURIComponent(report)}`;
+            const url = `https://wa.me/?text=${encodeURIComponent(activeReport)}`;
             window.open(url, "_blank");
           }}
         >
