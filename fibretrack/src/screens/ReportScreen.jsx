@@ -1,5 +1,8 @@
-import { useState, useCallback, useEffect } from "react";
-import { generateGlobalReport, generateConformiteReport, generateWhatsAppReport } from "../lib/whatsapp";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { generateGlobalReport, generateConformiteReport } from "../lib/whatsapp";
+import { collectCelprosPhotos } from "../lib/slotPhotos";
+import { buildShareFiles, shareReportWithPhotos, openWhatsAppText } from "../lib/reportShare";
+import { CELPROS_PHOTO_SLOTS } from "./InterventionFormScreen";
 import { ensureInterventionDefaults, getIntervention, saveInterventionLocally, saveIntervention } from "../models/Intervention";
 import {
   generateInterventionPdf,
@@ -19,12 +22,45 @@ import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [data, setData] = useState(ensureInterventionDefaults(intervention));
   const [refreshing, setRefreshing] = useState(false);
+  const [shareFiles, setShareFiles] = useState({ files: [], failed: [], ready: false });
 
   useEffect(() => {
     if (intervention) {
       setData(ensureInterventionDefaults(intervention));
     }
   }, [intervention]);
+
+  // Photos CelPros de cette intervention (ordre CelPros + poteaux), additionnelles exclues
+  const photoEntries = useMemo(() => collectCelprosPhotos(data, CELPROS_PHOTO_SLOTS), [data]);
+
+  // Pré-construction des fichiers : l'appel de partage doit se faire immédiatement au clic
+  useEffect(() => {
+    let cancelled = false;
+    setShareFiles((s) => ({ ...s, ready: false }));
+    buildShareFiles(photoEntries).then((res) => {
+      if (!cancelled) setShareFiles({ ...res, ready: true });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [photoEntries]);
+
+  // Les listes en cache sont "légères" (sans photos) : charger la fiche complète à l'ouverture
+  useEffect(() => {
+    if (!intervention?.id || intervention._fully_loaded) return;
+    let cancelled = false;
+    getIntervention(intervention.id)
+      .then((fresh) => {
+        if (cancelled || !fresh) return;
+        const full = { ...fresh, _fully_loaded: true };
+        saveInterventionLocally(full);
+        setData(ensureInterventionDefaults(full));
+      })
+      .catch((err) => console.warn("Chargement complet du rapport:", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [intervention?.id, intervention?._fully_loaded]);
 
   const handleRefreshReport = useCallback(async () => {
     if (refreshing || !data?.id) return;
@@ -47,6 +83,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [pdfStatus, setPdfStatus] = useState("");
   const [reportStatus, setReportStatus] = useState("");
   const [shareStatus, setShareStatus] = useState("");
+  const [sendStatus, setSendStatus] = useState("");
   const [satStatus, setSatStatus] = useState("");
   const [showFichesModal, setShowFichesModal] = useState(false);
   const [reportType, setReportType] = useState("global");
@@ -231,6 +268,52 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     setLoadingAction(null);
   }
 
+  async function handleSendReportWithPhotos() {
+    if (loadingAction) return;
+    if (!shareFiles.ready) {
+      setSendStatus("Préparation des photos en cours, réessayez dans un instant…");
+      return;
+    }
+    setLoadingAction("sendWithPhotos");
+    const reportLabel = reportType === "conformite" ? "Rapport de Conformité" : "Rapport Global";
+    try {
+      // Copie de sécurité : WhatsApp peut tronquer une légende très longue sous les photos
+      try {
+        await navigator.clipboard.writeText(activeReport);
+      } catch {
+        /* presse-papiers indisponible : sans impact sur le partage */
+      }
+
+      const result = await shareReportWithPhotos({
+        text: activeReport,
+        files: shareFiles.files,
+        title: `${reportLabel} - ${data.nom_client || ""}`.trim(),
+      });
+
+      const missing = shareFiles.failed.length
+        ? ` ⚠️ ${shareFiles.failed.length} photo(s) illisible(s) non jointes : ${shareFiles.failed.map((f) => f.label).join(", ")}.`
+        : "";
+
+      if (result === "shared") {
+        setSendStatus(
+          `✓ ${reportLabel} + ${shareFiles.files.length} photo(s) transmis à WhatsApp. Si le texte semble coupé sous les photos, collez-le (déjà copié).${missing}`
+        );
+      } else if (result === "cancelled") {
+        setSendStatus("");
+      } else {
+        openWhatsAppText(activeReport);
+        setSendStatus(
+          shareFiles.files.length === 0
+            ? "Aucune photo CelPros trouvée pour cette intervention : seul le texte a été envoyé vers WhatsApp."
+            : "Ce navigateur ne peut pas joindre les photos à WhatsApp (utilisez Chrome sur Android/iPhone). Texte ouvert dans WhatsApp ; photos disponibles dans la galerie du téléphone."
+        );
+      }
+    } catch (err) {
+      setSendStatus(`Erreur : ${err.message}`);
+    }
+    setLoadingAction(null);
+  }
+
   return (
     <div className="report-screen">
       <header className="form-header">
@@ -388,20 +471,32 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       <textarea className="whatsapp-report" readOnly value={activeReport} rows={18} />
 
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <button type="button" className="btn-primary btn-large" onClick={handleCopy}>
+        <button type="button" className="btn-secondary btn-large" onClick={handleCopy}>
           {copied ? "✓ Rapport copié !" : `Copier ${reportType === "conformite" ? "la Conformité" : "le Rapport Global"}`}
         </button>
         <button
           type="button"
           className="btn-primary btn-large"
-          onClick={() => {
-            const url = `https://wa.me/?text=${encodeURIComponent(activeReport)}`;
-            window.open(url, "_blank");
-          }}
+          onClick={handleSendReportWithPhotos}
+          disabled={loadingAction === "sendWithPhotos"}
+          style={{ flex: "1 1 260px" }}
         >
-          Envoyer sur WhatsApp
+          {loadingAction === "sendWithPhotos"
+            ? "Ouverture de WhatsApp…"
+            : shareFiles.ready
+              ? `📤 Envoyer sur WhatsApp (rapport + ${shareFiles.files.length} photo${shareFiles.files.length > 1 ? "s" : ""})`
+              : "📤 Préparation des photos…"}
+        </button>
+        <button
+          type="button"
+          className="btn-secondary btn-large"
+          onClick={() => openWhatsAppText(activeReport)}
+          title="Ouvre WhatsApp avec le texte seul (sans photos)"
+        >
+          Texte seul
         </button>
       </div>
+      {sendStatus && <p className="gps-status" style={{ marginTop: 8 }}>{sendStatus}</p>}
 
       <button type="button" className="btn-secondary btn-large" onClick={() => onEdit(intervention)} style={{ marginTop: 12 }}>
         ✏ Modifier cette intervention

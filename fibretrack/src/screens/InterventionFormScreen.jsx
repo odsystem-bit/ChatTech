@@ -37,6 +37,7 @@ import {
 import { parseClientInfo } from "../lib/clientParser";
 import { isInterventionTerminee } from "../lib/interventionFilters";
 import { downloadPhotoFile } from "../lib/photoDownload";
+import { findPhotoForSlot } from "../lib/slotPhotos";
 import {
   IconFlag,
   IconHome,
@@ -946,97 +947,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   // ===== Gestion des Boîtes de Photos CelPros =====
 
   function getPhotoForSlot(slotKey) {
-    if (!slotKey) return null;
-
-    // 1. Recherche par slot ou type direct dans whatsapp_photos (en excluant strictement les photos additionnelles)
-    const direct = whatsappPhotos.find(
-      (p) =>
-        p &&
-        !p.additionnelle &&
-        !p.is_additionnelle &&
-        !p.exclude_celpros &&
-        p.slot !== "additionnelle" &&
-        p.type !== "additionnelle" &&
-        (p.slot === slotKey || p.type === slotKey)
-    );
-    if (direct) return direct;
-
-    // 2. Recherche STRICTE pour photos historiques ou points GPS
-    if (slotKey === "fat") {
-      const fatPt = (data.points_gps || []).find((p) => p && String(p.type).trim().toUpperCase() === "FAT" && p.photo);
-      if (fatPt) {
-        return {
-          id: `gps_fat_${fatPt.numero || 1}`,
-          slot: "fat",
-          type: "fat",
-          label: "Boîtier FAT",
-          url: fatPt.photo,
-          lat: fatPt.lat,
-          lng: fatPt.lng,
-          precision_m: fatPt.precision_m,
-          horodatage: fatPt.horodatage,
-          lieu: fatPt.lieu,
-          from_gps: true,
-        };
-      }
-      // Photo historique nommée exactement "FAT" ou "Boitier FAT" (mais JAMAIS "Mesure FAT" ou "Fibre FAT")
-      const legacyFat = whatsappPhotos.find(
-        (p) =>
-          p &&
-          !p.additionnelle &&
-          !p.is_additionnelle &&
-          !p.exclude_celpros &&
-          p.name &&
-          /^(fat|boitier\s*fat)(\s*\d+)?$/i.test(p.name.trim())
-      );
-      if (legacyFat) return legacyFat;
-    }
-
-    if (slotKey === "ont_sn") {
-      const abonnePt = (data.points_gps || []).find((p) => p && (String(p.type).trim().toUpperCase() === "ABONNÉ" || String(p.type).trim().toUpperCase() === "ONT") && p.photo);
-      if (abonnePt) {
-        return {
-          id: `gps_abonne_${abonnePt.numero || 1}`,
-          slot: "ont_sn",
-          type: "ont_sn",
-          label: "Photo numéro de série",
-          url: abonnePt.photo,
-          lat: abonnePt.lat,
-          lng: abonnePt.lng,
-          precision_m: abonnePt.precision_m,
-          horodatage: abonnePt.horodatage,
-          lieu: abonnePt.lieu,
-          from_gps: true,
-        };
-      }
-      // Photo historique nommée "Abonné" ou "ONT"
-      const legacyOnt = whatsappPhotos.find(
-        (p) =>
-          p &&
-          !p.additionnelle &&
-          !p.is_additionnelle &&
-          !p.exclude_celpros &&
-          p.name &&
-          /^(abonn[eé]|ont|box)(\s*\d+)?$/i.test(p.name.trim())
-      );
-      if (legacyOnt) return legacyOnt;
-    }
-
-    if (slotKey === "scan_fat") {
-      const legacyScan = whatsappPhotos.find(
-        (p) =>
-          p &&
-          !p.additionnelle &&
-          !p.is_additionnelle &&
-          !p.exclude_celpros &&
-          p.name &&
-          /^(image\s*scan\s*fat|scan\s*fat|code[- ]barres?\s*fat)(\s*\d+)?$/i.test(p.name.trim())
-      );
-      if (legacyScan) return legacyScan;
-    }
-
-    // STRICT : Aucun repli par sous-chaîne ou mots-clés flous pour garantir l'étanchéité absolue de chaque catégorie
-    return null;
+    // Logique STRICTE partagée (lib/slotPhotos.js) : aucun repli flou, étanchéité absolue de chaque catégorie
+    return findPhotoForSlot(whatsappPhotos, data.points_gps, slotKey);
   }
 
   function openSlotCamera(slotKey) {
@@ -1120,11 +1032,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setSlotActionFeedback(`✓ Photo "${slotLabel}" enregistrée et sauvegardée sur votre téléphone.`);
 
       // Sauvegarde / téléchargement automatique immédiat sur le téléphone de l'agent
-      try {
-        downloadPhotoFile(newPhoto);
-      } catch (dlErr) {
+      downloadPhotoFile(newPhoto, data.nom_client).catch((dlErr) => {
         console.warn("Auto-sauvegarde sur le téléphone:", dlErr);
-      }
+        setSlotActionFeedback(`⚠️ Photo enregistrée dans l'app, mais non sauvegardée sur le téléphone : ${dlErr.message}`);
+      });
 
       // Si c'est la photo du boîtier FAT, extraction automatique OCR de Référence FAT et MSAN !
       if (slotKey === "fat") {
@@ -1595,11 +1506,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setSlotActionFeedback(`✅ Photo enregistrée et sauvegardée sur votre téléphone pour le Poteau ${poleNum} (${sourceLabel})`);
 
       // Sauvegarde / téléchargement automatique immédiat sur le téléphone de l'agent
-      try {
-        downloadPhotoFile(galleryPhoto);
-      } catch (dlErr) {
+      downloadPhotoFile(galleryPhoto, currentLatestData.nom_client).catch((dlErr) => {
         console.warn("Auto-sauvegarde sur le téléphone:", dlErr);
-      }
+        setSlotActionFeedback(`⚠️ Poteau ${poleNum} enregistré dans l'app, mais non sauvegardé sur le téléphone : ${dlErr.message}`);
+      });
 
       setTimeout(() => setSlotActionFeedback(""), 5000);
     } catch (err) {

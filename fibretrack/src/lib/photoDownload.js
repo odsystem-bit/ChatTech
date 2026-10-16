@@ -5,15 +5,19 @@
 /**
  * Normalise un titre de photo pour en faire un nom de fichier propre
  */
-export function buildPhotoFilename(photo) {
-  const cleanTitle =
-    (photo?.title || photo?.name || photo?.label || "photo_terrain")
+export function buildPhotoFilename(photo, clientName = "") {
+  const slug = (s) =>
+    String(s || "")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-zA-Z0-9_-]/g, "_")
       .replace(/_+/g, "_")
       .replace(/^_+|_+$/g, "")
-      .toLowerCase() || "photo_terrain";
+      .toLowerCase();
+
+  const rawName = String(photo?.name || "").replace(/\.(jpe?g|png|webp)$/i, "");
+  const cleanTitle = slug(photo?.title || photo?.label || rawName) || "photo_terrain";
+  const clientPrefix = slug(clientName).slice(0, 30);
 
   const dateStr = (photo?.horodatage ? new Date(photo.horodatage) : new Date())
     .toISOString()
@@ -24,19 +28,19 @@ export function buildPhotoFilename(photo) {
   if (url.startsWith("data:image/png") || url.includes(".png")) ext = "png";
   else if (url.startsWith("data:image/webp") || url.includes(".webp")) ext = "webp";
 
-  return `${cleanTitle}_${dateStr}.${ext}`;
+  return `${clientPrefix ? `${clientPrefix}_` : ""}${cleanTitle}_${dateStr}.${ext}`;
 }
 
 /**
  * Télécharge une photo sous forme de fichier sur l'appareil de l'utilisateur
  */
-export async function downloadPhotoFile(photo) {
+export async function downloadPhotoFile(photo, clientName = "") {
   const url = photo?.url || photo?.photo || photo?.src;
   if (!url || typeof url !== "string") {
     throw new Error("URL de photo invalide ou manquante");
   }
 
-  const filename = buildPhotoFilename(photo);
+  const filename = buildPhotoFilename(photo, clientName);
 
   // Cas 1 : Data URL ou Blob URL
   if (url.startsWith("data:") || url.startsWith("blob:")) {
