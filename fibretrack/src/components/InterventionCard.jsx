@@ -91,6 +91,16 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
               📶 {intervention.debit_descendant ? `${intervention.debit_descendant}↓` : ""}{intervention.debit_montant ? ` ${intervention.debit_montant}↑` : ""} Mb/s
             </span>
           ) : null}
+
+          {Array.isArray(intervention.videos_terrain) && intervention.videos_terrain.length > 0 ? (
+            <span
+              className="intv-chip"
+              style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", fontWeight: 600 }}
+              title={`${intervention.videos_terrain.length} vidéo(s) terrain enregistrée(s)`}
+            >
+              📹 {intervention.videos_terrain.length} vidéo{intervention.videos_terrain.length > 1 ? "s" : ""}
+            </span>
+          ) : null}
         </div>
 
         <div className="intv-card-footer">

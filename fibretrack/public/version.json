@@ -1,11 +1,11 @@
 {
-  "version": "3.1.1",
-  "buildTime": "2026-10-15T03:07:00Z",
+  "version": "3.3.1",
+  "buildTime": "2026-10-17T11:45:00Z",
   "features": [
-    "Refonte 100% fidèle de la Fiche SBIN Mise en Service (conforme au gabarit Word)",
-    "Repositionnement exact du logo SBIN en haut à gauche et de la bannière biseautée noire à droite",
-    "Grille d'en-tête d'identification avec lignes pointillées et écriture manuscrite bleue",
-    "Restructuration exacte des 3 tableaux : 1- Installation, 2- Vérification offres B2B2G, 3- Interventions & constats",
-    "Signatures Client et Prestataire conformes"
+    "Synchronisation instantanée serveur lors du clic sur les options et types de poteaux (Petit Jean, SBEE, Traversé)",
+    "Règle stricte bandeau vidéo : les vidéos importées restent sans bandeau, les vidéos caméra conservent le bandeau GPS",
+    "Persistance et réconciliation automatique de toutes les vidéos terrain sans perte",
+    "Calcul automatique fidèle des matériaux (crochets calculés avec précision, ONT=1, PTO=1, Piton=1)",
+    "Indicateurs clairs du nombre de vidéos sur l'onglet Photos & Vidéos et les cartes d'intervention"
   ]
 }

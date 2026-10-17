@@ -25,6 +25,7 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
   const dateStr = video.captured_at || video.cree_le || video.horodatage || "";
   const effectiveClient = clientName || video.nom_client || video.clientName || "";
   const effectiveTech = video.ajoute_par || video.technicien || "";
+  const isImported = Boolean(video.is_imported || video.source === "gallery");
 
   const triggerDownload = (downloadUrl, fileName) => {
     const a = document.createElement("a");
@@ -212,8 +213,8 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
             Votre navigateur ne supporte pas la lecture de cette vidéo.
           </video>
 
-          {/* Bandeau de géolocalisation & horodatage collé directement sur la vidéo en bas */}
-          {(video.lat != null || video.lieu || dateStr) && showBanner && (
+          {/* Bandeau de géolocalisation & horodatage collé directement sur la vidéo en bas (vidéos caméra uniquement) */}
+          {!isImported && (video.lat != null || video.lieu || dateStr) && showBanner && (
             <div
               className="video-gps-docked-band"
               style={{
@@ -260,7 +261,7 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
           )}
 
           {/* Bouton discret pour afficher/masquer le bandeau afin de ne pas obstruer la vue */}
-          {(video.lat != null || video.lieu || dateStr) && (
+          {!isImported && (video.lat != null || video.lieu || dateStr) && (
             <button
               type="button"
               onClick={() => setShowBanner((v) => !v)}
@@ -327,52 +328,78 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {/* Bouton principal : Téléchargement avec bandeau GPS gravé */}
-            <button
-              type="button"
-              disabled={isBurning}
-              onClick={() => handleDownloadVideo(true)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                background: isBurning ? "#475569" : "#0284c7",
-                color: "#ffffff",
-                padding: "8px 16px",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                border: "none",
-                cursor: isBurning ? "not-allowed" : "pointer",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
-              }}
-              title="Télécharger la vidéo avec le bandeau GPS et horodatage gravé façon CamScanner"
-            >
-              {isBurning ? "⏳ Incrustation en cours…" : "⬇ Télécharger vidéo (avec bandeau GPS)"}
-            </button>
+            {isImported ? (
+              <button
+                type="button"
+                onClick={() => handleDownloadVideo(false)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  padding: "8px 16px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: "none",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
+                }}
+                title="Télécharger la vidéo originale importée"
+              >
+                ⬇ Télécharger la vidéo
+              </button>
+            ) : (
+              <>
+                {/* Bouton principal : Téléchargement avec bandeau GPS gravé */}
+                <button
+                  type="button"
+                  disabled={isBurning}
+                  onClick={() => handleDownloadVideo(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    background: isBurning ? "#475569" : "#0284c7",
+                    color: "#ffffff",
+                    padding: "8px 16px",
+                    borderRadius: 8,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    cursor: isBurning ? "not-allowed" : "pointer",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
+                  }}
+                  title="Télécharger la vidéo avec le bandeau GPS et horodatage gravé façon CamScanner"
+                >
+                  {isBurning ? "⏳ Incrustation en cours…" : "⬇ Télécharger vidéo (avec bandeau GPS)"}
+                </button>
 
-            {/* Bouton secondaire : Téléchargement brut */}
-            <button
-              type="button"
-              disabled={isBurning}
-              onClick={() => handleDownloadVideo(false)}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                background: "transparent",
-                color: "#94a3b8",
-                padding: "8px 12px",
-                borderRadius: 8,
-                fontSize: 12,
-                fontWeight: 500,
-                border: "1px solid #334155",
-                cursor: isBurning ? "not-allowed" : "pointer",
-              }}
-              title="Télécharger le fichier original sans bandeau"
-            >
-              Fichier brut
-            </button>
+                {/* Bouton secondaire : Téléchargement brut */}
+                <button
+                  type="button"
+                  disabled={isBurning}
+                  onClick={() => handleDownloadVideo(false)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: "transparent",
+                    color: "#94a3b8",
+                    padding: "8px 12px",
+                    borderRadius: 8,
+                    fontSize: 12,
+                    fontWeight: 500,
+                    border: "1px solid #334155",
+                    cursor: isBurning ? "not-allowed" : "pointer",
+                  }}
+                  title="Télécharger le fichier original sans bandeau"
+                >
+                  Fichier brut
+                </button>
+              </>
+            )}
           </div>
 
           {onDelete && (

@@ -1701,6 +1701,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       return next;
     });
 
+    flushServerSync().catch(() => {});
+
     setSaveStatus("✓ Poteau ajouté");
     setSlotActionFeedback(`➕ Poteau ${nextNum} ajouté`);
     setTimeout(() => setSlotActionFeedback(""), 4000);
@@ -1800,6 +1802,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       saveInterventionLocally(next);
       return next;
     });
+
+    flushServerSync().catch(() => {});
   }
 
   async function handlePolePhotoSelected(e) {
@@ -1945,6 +1949,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
       markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
       setSaveStatus("✓ Poteau enregistré");
+      flushServerSync().catch(() => {});
       const sourceLabel = posResult?.source === "exif" ? "EXIF photo (très haute précision)" : (lat != null ? `±${(precision_m || 10).toFixed(1)} m` : "sans GPS");
       setSlotActionFeedback(`✅ Photo enregistrée et sauvegardée sur votre téléphone pour le Poteau ${poleNum} (${sourceLabel})`);
 
@@ -2181,10 +2186,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   // ===== Handlers du module Vidéo Terrain =====
-  const handleVideoFileChange = async (e) => {
+  const handleVideoFileChange = async (e, source = "camera") => {
     const rawFiles = Array.from(e.target.files || []);
     e.target.value = "";
     if (rawFiles.length === 0) return;
+
+    const isImported = source === "gallery";
 
     // Détermination immédiate des coordonnées initiales disponibles (0ms)
     const currentLatestData = dataRef.current || data;
@@ -2228,6 +2235,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           captured_at: horodatage,
           ajoute_par: currentUser || currentLatestData.nom_technicien || "",
           status: "local",
+          is_imported: isImported,
+          source: source,
         },
       };
     });
@@ -2290,10 +2299,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           technicien: video.ajoute_par,
         };
 
-        // Miniature rapide avec bandeau GPS incrusté en bas (style GPS Map Camera)
+        // Miniature : bandeau GPS uniquement pour les vidéos capturées à la caméra (les importées restent sans bandeau)
         let thumbResult = null;
         try {
-          thumbResult = await generateVideoThumbnail(file, 0.3, bannerInfo);
+          thumbResult = await generateVideoThumbnail(file, 0.3, isImported ? null : bannerInfo);
         } catch (thumbErr) {
           console.warn("Échec génération miniature:", thumbErr);
         }
@@ -2334,6 +2343,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             thumbnailBase64: thumbUrl,
             duration: dur,
             label: video.label,
+            isImported,
+            source,
           });
 
           if (uploaded && uploaded.url) {
@@ -2652,7 +2663,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         </div>
       )}
 
-      <Tabs tabs={TABS.filter((t) => !t.hidden)} activeTab={activeTab} onChange={setActiveTab} />
+      <Tabs
+        tabs={TABS.filter((t) => !t.hidden).map((t) => {
+          if (t.id === "photos") {
+            const vCount = (videosTerrain || []).length;
+            return {
+              ...t,
+              label: vCount > 0 ? `📸 Photos & Vidéos (${vCount})` : "📸 Photos & Vidéos",
+            };
+          }
+          return t;
+        })}
+        activeTab={activeTab}
+        onChange={setActiveTab}
+      />
 
       {/* Hidden file inputs permanently mounted in DOM across all tabs */}
       <input
@@ -2706,7 +2730,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         accept="video/*"
         capture="environment"
         style={{ display: "none" }}
-        onChange={handleVideoFileChange}
+        onChange={(e) => handleVideoFileChange(e, "camera")}
       />
       <input
         ref={videoGalleryInputRef}
@@ -2714,7 +2738,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         accept="video/*"
         multiple
         style={{ display: "none" }}
-        onChange={handleVideoFileChange}
+        onChange={(e) => handleVideoFileChange(e, "gallery")}
       />
 
       <div className="tab-content">

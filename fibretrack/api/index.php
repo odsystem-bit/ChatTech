@@ -430,6 +430,8 @@ try {
         if ($row) {
           $currVideos = json_decode($row['videos_terrain'] ?? '[]', true);
           if (!is_array($currVideos)) $currVideos = [];
+          $isImported = (!empty($_POST['is_imported']) && ($_POST['is_imported'] === 'true' || $_POST['is_imported'] === '1' || $_POST['is_imported'] === true));
+          $srcType = trim((string)($_POST['source'] ?? ($isImported ? 'gallery' : 'camera')));
           $found = false;
           foreach ($currVideos as &$cv) {
             if (!empty($cv['id']) && $cv['id'] === $mediaId) {
@@ -437,6 +439,8 @@ try {
               if ($thumbUrl) $cv['thumbnail_url'] = $thumbUrl;
               $cv['size'] = $fileSize;
               $cv['duration'] = (float)($_POST['duration'] ?? 0);
+              $cv['is_imported'] = $isImported;
+              $cv['source'] = $srcType;
               $found = true;
               break;
             }
@@ -456,6 +460,8 @@ try {
               'horodatage' => $capturedAt,
               'captured_at' => $capturedAt,
               'ajoute_par' => $user['nom'] ?? 'Technicien',
+              'is_imported' => $isImported,
+              'source' => $srcType,
             ];
           }
           $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ?');
@@ -769,6 +775,35 @@ try {
       $r['whatsapp_photos'] = json_decode($r['whatsapp_photos'] ?? '[]', true) ?? [];
       $r['updated_at'] = (string)($r['modifie_le'] ?? '');
       normalizeInterventionTypes($r);
+      if (empty($r['videos_terrain']) || !is_array($r['videos_terrain'])) {
+        try {
+          $mStmt = db()->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain') ORDER BY captured_at ASC");
+          $mStmt->execute([$id]);
+          $medias = $mStmt->fetchAll();
+          if (!empty($medias)) {
+            $vids = [];
+            foreach ($medias as $m) {
+              $fullPath = __DIR__ . '/' . ltrim($m['file_path'], '/');
+              $sz = (int)@filesize($fullPath);
+              $vids[] = [
+                'id' => $m['id'],
+                'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
+                'thumbnail_url' => '',
+                'size' => $sz,
+                'duration' => 0,
+                'label' => 'Vidéo terrain',
+                'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
+                'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
+                'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
+                'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                'captured_at' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                'ajoute_par' => $m['added_by'] ?? 'Technicien',
+              ];
+            }
+            $r['videos_terrain'] = $vids;
+          }
+        } catch (Exception $e) {}
+      }
       echo json_encode($r);
       break;
 
@@ -1008,7 +1043,9 @@ try {
             }
           }
         }
-      } elseif (!empty($d['id'])) {
+      }
+
+      if (!empty($d['id'])) {
         try {
           $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain')");
           $mStmt->execute([$d['id']]);
@@ -1017,11 +1054,12 @@ try {
             $existingIds = array_filter(array_column($incomingVideos, 'id'));
             foreach ($medias as $m) {
               if (!in_array($m['id'], $existingIds, true)) {
+                $fullPath = __DIR__ . '/' . ltrim($m['file_path'], '/');
                 $incomingVideos[] = [
                   'id' => $m['id'],
                   'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
                   'thumbnail_url' => '',
-                  'size' => 0,
+                  'size' => (int)@filesize($fullPath),
                   'duration' => 0,
                   'label' => 'Vidéo terrain',
                   'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
@@ -1029,7 +1067,7 @@ try {
                   'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
                   'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
                   'captured_at' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                  'ajoute_par' => $m['added_by'] ?? '',
+                  'ajoute_par' => $m['added_by'] ?? 'Technicien',
                 ];
               }
             }

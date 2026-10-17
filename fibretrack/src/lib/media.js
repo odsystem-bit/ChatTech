@@ -35,7 +35,7 @@ export async function listInterventionMedia(interventionId) {
  * @param {string} [params.label]
  * @returns {Promise<{id: string, path: string, url: string, thumbnail_url: string, size: number, duration: number, label: string}>}
  */
-export async function uploadInterventionMedia({ interventionId, type, file, latitude, longitude, precisionM, capturedAt, thumbnailBase64, duration, label }) {
+export async function uploadInterventionMedia({ interventionId, type, file, latitude, longitude, precisionM, capturedAt, thumbnailBase64, duration, label, isImported, source }) {
   const form = new FormData();
   form.append("intervention_id", interventionId);
   form.append("type", type);
@@ -46,6 +46,8 @@ export async function uploadInterventionMedia({ interventionId, type, file, lati
   if (thumbnailBase64) form.append("thumbnail_base64", thumbnailBase64);
   if (duration != null) form.append("duration", String(duration));
   if (label) form.append("label", label);
+  if (isImported !== undefined) form.append("is_imported", isImported ? "1" : "0");
+  if (source) form.append("source", source);
   const filename = file.name || (type === "video" ? "media.mp4" : "media.jpg");
   form.append("file", file, filename);
 
