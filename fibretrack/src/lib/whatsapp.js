@@ -288,6 +288,16 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
     `*Puissance PTO: ${fmtPower(d.puissance_pto_dbm)}*`,
     `*MAC: ${cleanMac}*`,
     `*SN : ${cleanSn}*`,
+    ...(d.debit_descendant || d.debit_montant || d.debit_ping
+      ? [
+          `*Débit Descendant (Wi-Fi) : ${d.debit_descendant || "-"} Mb/s*`,
+          `*Débit Montant (Wi-Fi) : ${d.debit_montant || "-"} Mb/s*`,
+          `*Latence / Ping (Wi-Fi) : ${d.debit_ping || "-"} ms*`,
+        ]
+      : []),
+    ...(Array.isArray(d.videos_terrain) && d.videos_terrain.length > 0
+      ? [`*Vidéos Terrain : ${fmt2(d.videos_terrain.length)} vidéo(s)*`]
+      : []),
     `*Nombre de poteaux armés : ${fmt2(nbArmes)}*`,
     `*Nombre de poteaux traversés : ${fmt2(nbTraverses)}*`,
     `*Nombre de poteaux implantés: ${fmt2(nbImplantes)}*`,
@@ -408,9 +418,11 @@ export function generateConformiteReport(intervention) {
 
   const sbeePoles = poteauxTraverses.filter(isSbeePole);
   const pjPoles = poteauxTraverses.filter(isPetitJeanPole);
+  const otherTraverses = poteauxTraverses.filter((p) => !isSbeePole(p) && !isPetitJeanPole(p));
 
   const countSbee = sbeePoles.length || (poteauxTraverses.length > 0 && pjPoles.length === 0 ? poteauxTraverses.length : 0);
   const countPj = pjPoles.length;
+  const countOther = otherTraverses.length;
 
   const abonnePt = pts.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()));
   const fatPt = pts.find((p) => p && String(p.type || "").toLowerCase() === "fat");
@@ -474,10 +486,20 @@ export function generateConformiteReport(intervention) {
     `Poteaux SBEE : ${fmt2(countSbee)}`,
     ``,
     `${countPj > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPj)}`,
+    ...(countOther > 0 ? [``, `Autres poteaux : ${fmt2(countOther)}`] : []),
     ``,
     `Poteaux implantés : ${fmt2(nbImplantes)}`,
     ``,
     `Poteaux armés : ${fmt2(nbArmes)}`,
+    ...(d.debit_descendant || d.debit_montant || d.debit_ping
+      ? [
+          ``,
+          `Débit Wi-Fi : ${d.debit_descendant || "-"} Mb/s (Desc.) / ${d.debit_montant || "-"} Mb/s (Mont.) / ${d.debit_ping || "-"} ms (Ping)`,
+        ]
+      : []),
+    ...(Array.isArray(d.videos_terrain) && d.videos_terrain.length > 0
+      ? [``, `Vidéos terrain : ${fmt2(d.videos_terrain.length)} vidéo(s)`]
+      : []),
   ];
 
   // Liste GPS poteaux SBEE
@@ -487,6 +509,19 @@ export function generateConformiteReport(intervention) {
     lignes.push(`GPS poteaux SBEE :`);
     lignes.push(``);
     displaySbee.forEach((p, idx) => {
+      const num = p.numero || idx + 1;
+      const lat = p.lat ?? p.latitude;
+      const lng = p.lng ?? p.longitude;
+      lignes.push(`- PT${num} : ${lat}, ${lng}`);
+    });
+  }
+
+  // Liste GPS autres poteaux
+  if (otherTraverses.length > 0) {
+    lignes.push(``);
+    lignes.push(`GPS autres poteaux :`);
+    lignes.push(``);
+    otherTraverses.forEach((p, idx) => {
       const num = p.numero || idx + 1;
       const lat = p.lat ?? p.latitude;
       const lng = p.lng ?? p.longitude;
@@ -522,6 +557,19 @@ export function generateConformiteReport(intervention) {
       const lat = p.lat ?? p.latitude;
       const lng = p.lng ?? p.longitude;
       lignes.push(`- PT${num} : ${lat}, ${lng}`);
+    });
+  }
+
+  // Liste GPS poteaux implantés
+  if (poteauxImplantes.length > 0) {
+    lignes.push(``);
+    lignes.push(`GPS poteaux implantés :`);
+    lignes.push(``);
+    poteauxImplantes.forEach((p, idx) => {
+      const num = p.numero || idx + 1;
+      const lat = p.lat ?? p.latitude;
+      const lng = p.lng ?? p.longitude;
+      lignes.push(`- Poteau (Implanté) ${num} : ${lat}, ${lng}`);
     });
   }
 

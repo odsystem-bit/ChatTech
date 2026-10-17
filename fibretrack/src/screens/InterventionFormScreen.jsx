@@ -2080,120 +2080,136 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   // ===== Handlers du module Vidéo Terrain =====
   const handleVideoFileChange = async (e) => {
-    const file = e.target.files?.[0];
+    const rawFiles = Array.from(e.target.files || []);
     e.target.value = "";
-    if (!file) return;
+    if (rawFiles.length === 0) return;
 
+    // Récupérer les coordonnées GPS actuelles de l'intervention ou du navigateur
+    const lat = data.latitude ?? null;
+    const lng = data.longitude ?? null;
+    const precisionM = data.precision_m ?? 10;
+    const lieu = [data.adresse_zone, data.quartier, data.ville].filter(Boolean).join(", ");
+    const clientName = data.nom_client || data.nom_dossier || "Client";
+    const baseCount = (videosTerrain || []).length;
+    const horodatage = new Date().toISOString();
+
+    // 1. CRÉATION ET INJECTION INSTANTANÉE DANS LE STATE (< 30ms)
+    // L'utilisateur voit toutes ses vidéos apparaître TOUT DE SUITE au même moment.
+    const newItemsWithFiles = rawFiles.map((file, idx) => {
+      const videoNum = baseCount + idx + 1;
+      const localId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+      const localUrl = URL.createObjectURL(file);
+      return {
+        file,
+        video: {
+          id: localId,
+          url: localUrl,
+          thumbnail_url: "",
+          label: `Vidéo Terrain #${videoNum} - ${clientName}`,
+          lieu: lieu || "",
+          duration: 0,
+          size: file.size,
+          original_size: file.size,
+          ratio: "100%",
+          lat,
+          lng,
+          precision_m: precisionM,
+          cree_le: horodatage,
+          captured_at: horodatage,
+          ajoute_par: currentUser || data.nom_technicien || "",
+          status: "local",
+        },
+      };
+    });
+
+    const immediateNewVideos = newItemsWithFiles.map((item) => item.video);
+    const updatedVideos = [...(videosTerrain || []), ...immediateNewVideos];
+    setVideosTerrain(updatedVideos);
+    update("videos_terrain", updatedVideos);
+    saveInterventionLocally({ ...data, videos_terrain: updatedVideos });
+    setVideoStatus(`⚡ ${rawFiles.length} vidéo(s) ajoutée(s) instantanément.`);
     setVideoProcessing(true);
-    setVideoProgress({ pct: 5, msg: "Initialisation et analyse de la vidéo..." });
-    setVideoStatus("");
+    setVideoProgress({ pct: 15, msg: `Génération des miniatures avec bandeau GPS pour ${rawFiles.length} vidéo(s)…` });
 
+    // 2. Traitement d'arrière-plan non-bloquant : miniature avec bandeau GPS et upload serveur
     try {
-      // 1. Détection GPS pour localisation de la vidéo
-      let videoGps = null;
-      try {
-        videoGps = await acquireBestPosition(3500);
-      } catch (err) {
-        console.warn("GPS pour vidéo indisponible:", err);
-      }
-      const lat = videoGps?.lat ?? data.latitude ?? null;
-      const lng = videoGps?.lng ?? data.longitude ?? null;
-      const precisionM = videoGps?.accuracy ?? null;
+      for (let i = 0; i < newItemsWithFiles.length; i++) {
+        const { file, video } = newItemsWithFiles[i];
+        const bannerInfo = {
+          type: video.label,
+          lieu: video.lieu,
+          lat: video.lat,
+          lng: video.lng,
+          precision_m: video.precision_m || 10,
+          horodatage: video.captured_at,
+        };
 
-      // 1b. Géocodage de l'adresse et préparation du bandeau
-      let lieu = "";
-      if (lat != null && lng != null) {
+        // Miniature rapide avec bandeau GPS incrusté en bas (style GPS Map Camera)
+        let thumbResult = null;
         try {
-          lieu = await reverseGeocode(lat, lng);
-        } catch (geoErr) {
-          console.warn("Géocodage adresse indisponible:", geoErr);
+          thumbResult = await generateVideoThumbnail(file, 0.3, bannerInfo);
+        } catch (thumbErr) {
+          console.warn("Échec génération miniature:", thumbErr);
+        }
+
+        const thumbUrl = thumbResult?.thumbnailDataUrl || "";
+        const dur = thumbResult?.duration || 0;
+
+        // Mise à jour de la miniature locale
+        setVideosTerrain((prev) => {
+          const next = prev.map((v) =>
+            v.id === video.id
+              ? { ...v, thumbnail_url: thumbUrl || v.thumbnail_url, duration: dur || v.duration }
+              : v
+          );
+          update("videos_terrain", next);
+          saveInterventionLocally({ ...data, videos_terrain: next });
+          return next;
+        });
+
+        // Téléversement sécurisé vers le serveur en tâche de fond
+        try {
+          const uploaded = await uploadInterventionMedia({
+            interventionId: data.id,
+            type: "video",
+            file,
+            latitude: video.lat,
+            longitude: video.lng,
+            precisionM: video.precision_m,
+            capturedAt: video.captured_at,
+            thumbnailBase64: thumbUrl,
+            duration: dur,
+            label: video.label,
+          });
+
+          if (uploaded && uploaded.url) {
+            setVideosTerrain((prev) => {
+              const next = prev.map((v) =>
+                v.id === video.id
+                  ? {
+                      ...v,
+                      id: uploaded.id || v.id,
+                      url: uploaded.url,
+                      thumbnail_url: uploaded.thumbnail_url || v.thumbnail_url,
+                      status: "synced",
+                    }
+                  : v
+              );
+              update("videos_terrain", next);
+              saveInterventionLocally({ ...data, videos_terrain: next });
+              return next;
+            });
+          }
+        } catch (uploadErr) {
+          console.warn("Upload distant différé (vidéo conservée localement):", uploadErr);
         }
       }
-      if (!lieu && (data.adresse_zone || data.quartier || data.ville)) {
-        lieu = [data.adresse_zone, data.quartier, data.ville].filter(Boolean).join(", ");
-      }
 
-      const horodatage = new Date().toISOString();
-      const videoNum = (videosTerrain || []).length + 1;
-      const clientName = data.nom_client || data.nom_dossier || "Client";
-      const bannerInfo = {
-        type: `Vidéo Terrain #${videoNum} - ${clientName}`,
-        lieu: lieu || "",
-        lat,
-        lng,
-        precision_m: precisionM || 10,
-        horodatage,
-      };
-
-      // 2. Compression vidéo intelligente et incrustation du bandeau GPS
-      setVideoProgress({ pct: 15, msg: "Incrustation du bandeau GPS et compression (720p)…" });
-      const compResult = await compressVideo(file, {
-        maxDimension: 720,
-        targetBitrate: 850_000,
-        fps: 24,
-        bannerInfo,
-        onProgress: (pct, msg) => {
-          setVideoProgress({ pct: Math.min(88, pct), msg });
-        },
-      });
-
-      // 3. Téléversement sur le serveur
-      setVideoProgress({ pct: 90, msg: "Enregistrement sécurisé sur le serveur…" });
-      let uploadedMedia = null;
-      try {
-        uploadedMedia = await uploadInterventionMedia({
-          interventionId: data.id,
-          type: "video",
-          file: compResult.blob,
-          latitude: lat,
-          longitude: lng,
-          precisionM,
-          capturedAt: horodatage,
-          thumbnailBase64: compResult.thumbnailDataUrl,
-          duration: compResult.duration,
-          label: bannerInfo.type,
-        });
-      } catch (uploadErr) {
-        console.warn("Upload vidéo échoué (mode hors-ligne ou réseau faible):", uploadErr);
-      }
-
-      // 4. Construction de l'objet vidéo
-      const videoId = uploadedMedia?.id || crypto.randomUUID();
-      const videoUrl = uploadedMedia?.url || URL.createObjectURL(compResult.blob);
-      const thumbUrl = uploadedMedia?.thumbnail_url || compResult.thumbnailDataUrl;
-
-      const newVideo = {
-        id: videoId,
-        url: videoUrl,
-        thumbnail_url: thumbUrl,
-        label: bannerInfo.type,
-        lieu: bannerInfo.lieu,
-        duration: compResult.duration,
-        size: compResult.compressedSize,
-        original_size: compResult.originalSize,
-        ratio: compResult.ratio,
-        lat,
-        lng,
-        precision_m: precisionM,
-        cree_le: horodatage,
-        captured_at: horodatage,
-        ajoute_par: currentUser || data.nom_technicien || "",
-      };
-
-      const nextVideos = [...videosTerrain, newVideo];
-      setVideosTerrain(nextVideos);
-      update("videos_terrain", nextVideos);
       flushServerSync().catch(() => {});
-
-      const savings = compResult.originalSize > compResult.compressedSize
-        ? ` (compressée de ${formatFileSize(compResult.originalSize)} à ${formatFileSize(compResult.compressedSize)}, ${compResult.ratio})`
-        : ` (${formatFileSize(compResult.compressedSize)})`;
-
-      setVideoStatus(`✅ Vidéo terrain #${nextVideos.length} enregistrée avec succès${savings} !`);
-      setTimeout(() => setVideoStatus(""), 9000);
+      setVideoStatus(`✅ ${rawFiles.length} vidéo(s) terrain prête(s) avec bandeau de localisation !`);
+      setTimeout(() => setVideoStatus(""), 7000);
     } catch (err) {
-      console.error("Erreur traitement vidéo:", err);
-      setVideoStatus(`❌ Erreur vidéo : ${err.message || "Échec de traitement"}`);
+      console.warn("Erreur pipeline vidéo arrière-plan:", err);
     } finally {
       setVideoProcessing(false);
       setVideoProgress({ pct: 0, msg: "" });
@@ -2541,6 +2557,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         ref={videoGalleryInputRef}
         type="file"
         accept="video/*"
+        multiple
         style={{ display: "none" }}
         onChange={handleVideoFileChange}
       />

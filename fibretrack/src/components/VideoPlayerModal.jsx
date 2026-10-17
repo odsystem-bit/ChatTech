@@ -1,7 +1,9 @@
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { formatFileSize, formatDuration } from "../lib/videoCompression";
 
 export default function VideoPlayerModal({ video, onClose, onDelete }) {
+  const [showBanner, setShowBanner] = useState(true);
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Escape") onClose();
@@ -98,7 +100,7 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
           </button>
         </div>
 
-        {/* Lecteur vidéo */}
+        {/* Lecteur vidéo avec bandeau de localisation incrusté au bas de la vidéo */}
         <div
           style={{
             position: "relative",
@@ -126,50 +128,75 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
           >
             Votre navigateur ne supporte pas la lecture de cette vidéo.
           </video>
-        </div>
 
-        {/* Bandeau de localisation & Coordonnées GPS (style GPS Map Camera) */}
-        {(video.lat != null || video.lieu || dateStr) && (
-          <div
-            className="video-gps-banner-box"
-            style={{
-              padding: "12px 18px",
-              background: "#1e293b",
-              borderTop: "1px solid #334155",
-              fontSize: 12.5,
-              lineHeight: 1.5,
-              display: "flex",
-              flexDirection: "column",
-              gap: 3,
-            }}
-          >
-            <div style={{ fontWeight: 700, color: "#38bdf8", fontSize: 13.5, display: "flex", alignItems: "center", gap: 6 }}>
-              <span>📍</span>
-              <span>{label}</span>
-            </div>
-            {video.lieu && (
-              <div style={{ color: "#e2e8f0" }}>
-                <strong>Lieu :</strong> {video.lieu}
+          {/* Bandeau de géolocalisation & horodatage collé directement sur la vidéo en bas */}
+          {(video.lat != null || video.lieu || dateStr) && showBanner && (
+            <div
+              className="video-gps-docked-band"
+              style={{
+                position: "absolute",
+                bottom: 0,
+                left: 0,
+                right: 0,
+                background: "linear-gradient(to top, rgba(0, 0, 0, 0.88) 0%, rgba(0, 0, 0, 0.65) 75%, transparent 100%)",
+                padding: "24px 14px 10px 14px",
+                pointerEvents: "none",
+                zIndex: 6,
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                borderTop: "1px solid rgba(255, 255, 255, 0.15)",
+                textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontWeight: 800, color: "#38bdf8", fontSize: 13 }}>
+                  📍 {label}
+                </span>
+                <span style={{ fontSize: 11, color: "#e2e8f0" }}>
+                  📅 {new Date(dateStr || Date.now()).toLocaleString("fr-FR")}
+                </span>
               </div>
-            )}
-            {video.lat != null && video.lng != null && (
-              <div style={{ color: "#facc15", fontFamily: "monospace", fontSize: 12 }}>
-                🌐 <strong>Coordonnées GPS :</strong> Lat: {Number(video.lat).toFixed(6)} | Lng: {Number(video.lng).toFixed(6)}
-                {video.precision_m != null && ` (Précision: ±${Number(video.precision_m).toFixed(1)} m)`}
-              </div>
-            )}
-            <div style={{ color: "#94a3b8", fontSize: 11.5 }}>
-              📅 <strong>Date & Heure :</strong> {new Date(dateStr || Date.now()).toLocaleString("fr-FR", {
-                year: "numeric",
-                month: "2-digit",
-                day: "2-digit",
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
+              {video.lieu && (
+                <div style={{ fontSize: 11.5, color: "#f8fafc", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  🏠 {video.lieu}
+                </div>
+              )}
+              {video.lat != null && video.lng != null && (
+                <div style={{ fontSize: 11.5, color: "#facc15", fontFamily: "monospace", fontWeight: 700 }}>
+                  🌐 Lat: {Number(video.lat).toFixed(6)} | Lng: {Number(video.lng).toFixed(6)}
+                  {video.precision_m != null && ` (±${Number(video.precision_m).toFixed(1)} m)`}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )}
+
+          {/* Bouton discret pour afficher/masquer le bandeau afin de ne pas obstruer la vue */}
+          {(video.lat != null || video.lieu || dateStr) && (
+            <button
+              type="button"
+              onClick={() => setShowBanner((v) => !v)}
+              title={showBanner ? "Masquer le bandeau de localisation" : "Afficher le bandeau de localisation"}
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                background: "rgba(0, 0, 0, 0.65)",
+                color: "#ffffff",
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                borderRadius: 20,
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                zIndex: 7,
+                backdropFilter: "blur(4px)",
+              }}
+            >
+              {showBanner ? "👁️ Masquer bandeau" : "👁️ Afficher bandeau"}
+            </button>
+          )}
+        </div>
 
         {/* Barre d'actions du bas */}
         <div

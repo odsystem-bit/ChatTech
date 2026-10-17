@@ -83,6 +83,7 @@ function getIntervention($id) {
   $r['materiel_pose'] = json_decode($r['materiel_pose'] ?? '{}', true);
   $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true);
   $r['whatsapp_photos'] = json_decode($r['whatsapp_photos'] ?? '[]', true);
+  $r['videos_terrain'] = json_decode($r['videos_terrain'] ?? '[]', true);
   $r['port_disponible'] = (int)$r['port_disponible'];
   $r['client_confirme_emplacement'] = (bool)$r['client_confirme_emplacement'];
   $r['remise_equipement_ok'] = (bool)$r['remise_equipement_ok'];
@@ -545,6 +546,12 @@ function generateRapportPDF($d) {
     ['SN / ONT', $d['sn'] ?? ''],
     ['Offre souscrite', $d['offre_souscrite'] ?? ''],
   ];
+  if (!empty($d['debit_descendant'])) $tech[] = ['Debit Descendant (Wi-Fi)', $d['debit_descendant'] . ' Mb/s'];
+  if (!empty($d['debit_montant'])) $tech[] = ['Debit Montant (Wi-Fi)', $d['debit_montant'] . ' Mb/s'];
+  if (!empty($d['debit_ping'])) $tech[] = ['Latence / Ping (Wi-Fi)', $d['debit_ping'] . ' ms'];
+  if (!empty($d['videos_terrain']) && is_array($d['videos_terrain'])) {
+    $tech[] = ['Videos Terrain', count($d['videos_terrain']) . ' video(s)'];
+  }
   foreach ($tech as $row) {
     $pdf->drawRect($margin, $y, 70, 6);
     $pdf->drawRect($margin + 70, $y, $contentW - 70, 6);

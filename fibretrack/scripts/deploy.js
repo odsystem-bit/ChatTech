@@ -94,7 +94,7 @@ conn.on('ready', () => {
 
     walkAndUpload(distDir, remoteBase)
       .then(async () => {
-        const apiFiles = ['index.php', 'pdf.php', 'excel_hebdo.php', 'excel_hebdo_simple.php', 'excel_export.php'];
+        const apiFiles = ['index.php', 'pdf.php', 'excel_hebdo.php', 'excel_hebdo_simple.php', 'excel_export.php', '.htaccess', '.user.ini'];
         await ensureRemoteDir(`${remoteBase}/api`);
         for (const apiFile of apiFiles) {
           const localPath = path.join(projectRoot, 'api', apiFile);
