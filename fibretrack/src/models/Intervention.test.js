@@ -553,17 +553,17 @@ test("Dynamic pole changes recalculate crochets unless overridden manually", () 
     ],
   };
 
-  // 2 linear + 1 piton = (2*2) + 1 = 5
+  // 1 FAT * 1 + 1 linear * 2 + 1 piton = 1 + 2 + 1 = 4
   let defaulted = ensureInterventionDefaults(intv);
-  assert.equal(defaulted.materiel_pose.crochets, 5);
+  assert.equal(defaulted.materiel_pose.crochets, 4);
 
-  // Add 2 more poles = 4 linear + 1 piton = (4*2) + 1 = 9
+  // Add 2 more poles = 1 FAT + 3 linear + 1 piton = 1 + 6 + 1 = 8
   intv.points_gps.push(
     { id: "p3", type: "Poteau", numero: 3 },
     { id: "p4", type: "Poteau", numero: 4 }
   );
   defaulted = ensureInterventionDefaults(intv);
-  assert.equal(defaulted.materiel_pose.crochets, 9);
+  assert.equal(defaulted.materiel_pose.crochets, 8);
 
   // Manual override: user sets crochets to 12
   intv._crochets_manual = true;

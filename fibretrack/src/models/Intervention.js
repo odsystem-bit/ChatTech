@@ -245,8 +245,8 @@ export function ensureInterventionDefaults(data) {
       deduplicatedPoles[existingIdx] = {
         ...existing,
         ...candidate,
-        type_poteau: existing.type_poteau || candidate.type_poteau || existing.proprietaire || candidate.proprietaire || "",
-        proprietaire: existing.proprietaire || candidate.proprietaire || existing.type_poteau || candidate.type_poteau || "",
+        type_poteau: candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "",
+        proprietaire: candidate.proprietaire || candidate.type_poteau || existing.proprietaire || existing.type_poteau || "",
         photo: existing.photo || candidate.photo || "",
         lat: existing.lat ?? candidate.lat ?? null,
         lng: existing.lng ?? candidate.lng ?? null,

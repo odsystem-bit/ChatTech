@@ -838,22 +838,25 @@
   function findAllUploadContainers(root = (typeof document !== "undefined" ? document : null)) {
     if (!root) return [];
     const list = [];
-    const seen = new Set();
+    const seenContainers = new Set();
+    const seenInputs = new Set();
 
     // 1. Tous les input[type="file"]
     const fileInputs = Array.from(root.querySelectorAll('input[type="file"]'));
     for (const input of fileInputs) {
+      if (seenInputs.has(input)) continue;
+      seenInputs.add(input);
       const parent = input.closest ? input.closest(".upload-box, .dropzone, [class*='upload'], [class*='photo'], [class*='drop'], div") : input.parentElement;
       const targetParent = parent || input.parentElement;
-      if (targetParent && !seen.has(targetParent)) {
-        seen.add(targetParent);
+      if (targetParent && !seenContainers.has(targetParent)) {
+        seenContainers.add(targetParent);
         list.push({ container: targetParent, input });
       }
     }
 
     // 2. Toutes les zones en pointillés avec texte "photo" ou "importer"
     const dashedBoxes = Array.from(root.querySelectorAll("div, label, section")).filter((el) => {
-      if (seen.has(el)) return false;
+      if (seenContainers.has(el)) return false;
       const txt = (el.innerText || "").toLowerCase();
       const hasPhotoKeyword = txt.includes("photo") || txt.includes("importer") || txt.includes("appareil photo");
       const isCard = (el.clientWidth || 0) > 120 && (el.clientHeight || 0) > 60;
@@ -861,9 +864,11 @@
     });
 
     for (const box of dashedBoxes) {
-      if (!seen.has(box)) {
-        seen.add(box);
+      if (!seenContainers.has(box)) {
+        seenContainers.add(box);
         const input = findFileInputForContainer(box);
+        if (input && seenInputs.has(input)) continue;
+        if (input) seenInputs.add(input);
         list.push({ container: box, input });
       }
     }
@@ -882,9 +887,15 @@
     const missingPhotos = [];
     const unmatchedSlots = [];
     const assignedPhotoSources = new Set();
+    const processedInputs = new Set();
+    const missingInputs = new Set();
 
     for (const slot of uploadSlots) {
       const input = slot.input || findFileInputForContainer(slot.container);
+      if (input && (processedInputs.has(input) || missingInputs.has(input))) {
+        continue;
+      }
+
       const rule = identifyPhotoContainer(slot.container, input);
       if (!rule) {
         unmatchedSlots.push({
@@ -896,12 +907,14 @@
 
       const photoInfo = rule.getPhoto(interventionData);
       if (!photoInfo || !photoInfo.src) {
-        // La case existe dans CelPros mais aucune photo n'a été prise pour ce slot dans FibreTrack
+        // La case existe dans CelPros mais aucune photo n'a été prise pour ce slot dans FibreTrack :
+        // Marquer strictement comme manquante et NE JAMAIS laisser une autre photo s'y injecter
         missingPhotos.push({
           slot: rule.key,
           label: rule.label,
           celprosLabel: rule.celprosLabel || rule.label,
         });
+        if (input) missingInputs.add(input);
         markContainerMissing(slot.container, rule.label);
         continue;
       }
@@ -916,8 +929,13 @@
       if (!file) continue;
 
       if (input) {
+        if (missingInputs.has(input) || processedInputs.has(input)) {
+          continue;
+        }
+
         const ok = injectFileIntoInput(input, file, slot.container);
         if (ok) {
+          processedInputs.add(input);
           assignedPhotoSources.add(photoInfo.src);
           injectedDetails.push({
             slot: rule.key,
@@ -939,8 +957,8 @@
       }
     }
 
-    // Injection spécifique pour les poteaux si présents dans Step 4
-    const polesInjected = await handlePoteauxPhotos(interventionData, root);
+    // Injection spécifique pour les poteaux si présents dans Step 4 (en protégeant les slots manquants)
+    const polesInjected = await handlePoteauxPhotos(interventionData, root, missingInputs, processedInputs);
     injectedDetails.push(...polesInjected);
 
     return {
@@ -1330,6 +1348,11 @@
       const containerText = (container?.innerText || container?.textContent || "").toLowerCase();
       if (isForbiddenForPoles(containerText)) continue;
 
+      // Protection stricte : ne jamais recycler une case expressément marquée comme photo absente
+      if (container && container.querySelector && container.querySelector(".chaptech-photo-missing-badge")) {
+        continue;
+      }
+
       // Vérifier si l'input se situe après le titre "Poteaux" dans le document
       let isAfterHeader = false;
       if (poteauxTitle && typeof poteauxTitle.compareDocumentPosition === "function") {
@@ -1343,9 +1366,9 @@
         isAfterHeader = true;
       }
 
-      const isExplicitPole = idName.includes("poteau") || containerText.includes("poteau") || containerText.includes("appui");
+      const isExplicitPole = idName.includes("poteau") || containerText.includes("poteau") || containerText.includes("appui") || idName.includes("pole") || containerText.includes("pole");
 
-      if (isAfterHeader || isExplicitPole) {
+      if (isExplicitPole || (isAfterHeader && !isForbiddenForPoles(containerText))) {
         const row = (typeof inp.closest === "function" ? inp.closest(".row, .form-row, [class*='row'], .card-body, .col-12, [class*='item']") : null) || container?.parentElement || container;
         poleSlots.push({
           input: inp,
@@ -1429,7 +1452,7 @@
   }
 
   // Gère l'ajout et l'injection des photos de poteaux géolocalisés et "Autre poteau" (uniquement si elles existent)
-  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null)) {
+  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null), missingInputs = new Set(), processedInputs = new Set()) {
     const details = [];
     if (!root || !interventionData) return details;
 
@@ -1448,7 +1471,7 @@
 
     // Cas 1 : Si un input file unique avec attribut multiple existe déjà dans la section
     const existingSlots = getPoleSlots();
-    const multipleSlot = existingSlots.find((s) => s.input && s.input.multiple);
+    const multipleSlot = existingSlots.find((s) => s.input && s.input.multiple && !missingInputs.has(s.input) && !processedInputs.has(s.input));
     if (multipleSlot) {
       const poleFiles = [];
       for (let i = 0; i < maxPoles; i++) {
@@ -1462,6 +1485,7 @@
           multipleSlot.input.files = dt.files;
           multipleSlot.input.dispatchEvent(new Event("input", { bubbles: true }));
           multipleSlot.input.dispatchEvent(new Event("change", { bubbles: true }));
+          processedInputs.add(multipleSlot.input);
           for (let i = 0; i < poleFiles.length; i++) {
             details.push({
               slot: allPoles[i].isAutrePoteau ? `autre_poteau_${i + 1}` : `poteau_${allPoles[i].numero || i + 1}`,
@@ -1506,14 +1530,19 @@
         }
       }
 
-      // Sélectionner le slot correspondant
-      const targetSlot = slots[i] || slots.find((s) => !s.input.files || s.input.files.length === 0);
+      // Sélectionner le slot correspondant : jamais un input manquant ni déjà injecté
+      const targetSlot = slots[i] || slots.find((s) => s.input && !missingInputs.has(s.input) && !processedInputs.has(s.input) && (!s.input.files || s.input.files.length === 0));
       if (targetSlot && targetSlot.input) {
+        if (missingInputs.has(targetSlot.input) || processedInputs.has(targetSlot.input)) {
+          continue;
+        }
+
         const file = await srcToFile(pole.src, pole.name);
         if (file) {
           const container = targetSlot.container;
           const ok = injectFileIntoInput(targetSlot.input, file, container);
           if (ok) {
+            processedInputs.add(targetSlot.input);
             // Renseigner automatiquement les coordonnées GPS
             injectPoleCoordinates(targetSlot, pole);
 

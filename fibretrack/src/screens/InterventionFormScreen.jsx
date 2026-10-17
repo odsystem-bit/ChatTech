@@ -372,14 +372,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   function handlePortChange(v) {
     const computed = computeAvailablePorts(v);
     markDirty("port", "ports_disponibles", "port_disponible");
-    setData((prev) => ({
-      ...prev,
-      port: v,
-      ports_disponibles: computed.ports_disponibles,
-      port_disponible: computed.port_disponible,
-      modifie_par: currentUser,
-      modifie_le: new Date().toISOString(),
-    }));
+    setData((prev) => {
+      const next = {
+        ...prev,
+        port: v,
+        ports_disponibles: computed.ports_disponibles,
+        port_disponible: computed.port_disponible,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+      };
+      dataRef.current = next;
+      saveInterventionLocally(next);
+      return next;
+    });
   }
 
   function togglePortDisponible(port) {
@@ -919,6 +924,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         markDirty("pto_qte");
       }
 
+      dataRef.current = next;
       saveInterventionLocally(next);
       return next;
     });
@@ -935,6 +941,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         materiel_pose: nextMp,
       };
       markDirty("materiel_pose.crochets", "_crochets_manual");
+      dataRef.current = next;
       saveInterventionLocally(next);
       return next;
     });
@@ -1689,6 +1696,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         };
         markDirty("materiel_pose.crochets");
       }
+      dataRef.current = next;
       saveInterventionLocally(next);
       return next;
     });
@@ -1788,6 +1796,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         };
         markDirty("materiel_pose.crochets");
       }
+      dataRef.current = next;
       saveInterventionLocally(next);
       return next;
     });

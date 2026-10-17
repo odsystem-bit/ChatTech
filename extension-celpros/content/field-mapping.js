@@ -52,7 +52,11 @@
   // Helper pour compter les poteaux SBEE réels
   function countSbeePoles(data) {
     const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const sbee = list.filter((p) => p && normalizeText(p.type).includes("poteau") && normalizeText(p.type_poteau || p.proprietaire).includes("sbee")).length;
+    const sbee = list.filter((p) => {
+      if (!p || !normalizeText(p.type).includes("poteau")) return false;
+      const desc = normalizeText(`${p.type_poteau || ""} ${p.proprietaire || ""} ${p.sous_type || ""} ${p.nom || ""} ${p.description || ""}`);
+      return desc.includes("sbee");
+    }).length;
     if (sbee > 0) return String(sbee);
     const mp = data?.materiel_pose || {};
     const count = Number(mp.poteau_sbee_non_arme || 0) + Number(mp.poteau_sbee_arme || 0) + Number(mp.poteau_sbee || 0);
@@ -63,7 +67,11 @@
   // Helper pour compter les poteaux Petit Jean réels
   function countPetitJeanPoles(data) {
     const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
-    const pj = list.filter((p) => p && normalizeText(p.type).includes("poteau") && (normalizeText(p.type_poteau || p.proprietaire).includes("petit") || normalizeText(p.type_poteau || p.proprietaire).includes("jean"))).length;
+    const pj = list.filter((p) => {
+      if (!p || !normalizeText(p.type).includes("poteau")) return false;
+      const desc = normalizeText(`${p.type_poteau || ""} ${p.proprietaire || ""} ${p.sous_type || ""} ${p.nom || ""} ${p.description || ""}`);
+      return desc.includes("petit") || desc.includes("jean") || desc.includes("pj");
+    }).length;
     if (pj > 0) return String(pj);
     const mp = data?.materiel_pose || {};
     const count = Number(mp.poteau_petit_jean || mp.poteau_pj || mp.petit_jean || 0);
@@ -1377,6 +1385,10 @@
         /^lineaire_m$/i,
         /^lineairem$/i,
         /^lineaire$/i,
+        /^lineaire_?total/i,
+        /^lineaire_?deploye/i,
+        /^metrage_?lineaire/i,
+        /^metrage_?total/i,
         /^longueurlineaire$/i,
         /^longueurcable$/i,
         /^distance$/i,
@@ -1386,10 +1398,14 @@
         "lineaire fibre",
         "lineaire m",
         "lineaire",
+        "lineaire total deploye",
+        "lineaire total",
+        "lineaire deploye",
         "longueur de cable",
         "longueur cable",
         "distance m",
         "metrage total",
+        "metrage lineaire",
       ],
       valueExtractor: (data) => {
         if (data?.lineaire_m !== undefined && data?.lineaire_m !== null && data?.lineaire_m !== "") {
@@ -1424,12 +1440,18 @@
         /^nbpoteauxtraverses$/i,
         /^poteauxtraverses$/i,
         /^nbtraverses$/i,
+        /^nb_?poteaux$/i,
+        /^poteaux_?traverses$/i,
+        /^poteaux$/i,
       ],
       labelKeywords: [
         "poteaux traverses",
         "nb poteaux traverses",
         "nombre de poteaux traverses",
         "poteaux traverses count",
+        "nombre de poteaux",
+        "nb poteaux",
+        "poteaux",
       ],
       valueExtractor: (data) => {
         if (data?.nb_poteaux_traverses !== undefined && data?.nb_poteaux_traverses !== null && data?.nb_poteaux_traverses !== "") {
@@ -1437,7 +1459,7 @@
           if (!isNaN(n) && n > 0) return String(n);
         }
         const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
-        const count = pts.filter((p) => p && p.type === "Poteau" && (p.traverse !== undefined ? Boolean(p.traverse) : p.sous_type !== "Implanté")).length;
+        const count = pts.filter((p) => p && normalizeText(p.type).includes("poteau") && (p.traverse !== undefined ? Boolean(p.traverse) : p.sous_type !== "Implanté")).length;
         if (count > 0) return String(count);
         return "";
       },
@@ -2636,6 +2658,7 @@
         /^poteaux$/i,
         /^field_poteauxutilises?/i,
         /^field_nbpoteauxutilises?/i,
+        /^nb_?poteaux$/i,
       ],
       labelKeywords: [
         "combien de poteaux utilises",
@@ -2644,6 +2667,8 @@
         "nombre de poteaux utilises",
         "nb poteaux utilises",
         "total poteaux",
+        "nombre de poteaux",
+        "nb poteaux",
         "poteaux",
       ],
       valueExtractor: (data) => {
@@ -2687,8 +2712,8 @@
       label: "Nombre de poteaux SBEE utilisés",
       category: "Accessoires",
       type: "number",
-      attrPatterns: [/^poteaux_?sbee/i, /^sbee/i],
-      labelKeywords: ["nombre de poteaux sbee utilises", "poteaux sbee utilises", "poteaux sbee", "sbee utilises"],
+      attrPatterns: [/^poteaux_?sbee/i, /^sbee/i, /^poteaux_?sbee_?utilises?/i],
+      labelKeywords: ["nombre de poteaux sbee utilises", "poteaux sbee utilises", "poteaux sbee", "sbee utilises", "sbee"],
       valueExtractor: (data) => countSbeePoles(data),
     },
 
@@ -2702,8 +2727,22 @@
       label: "Nombre de poteaux Petit Jean utilisés",
       category: "Accessoires",
       type: "number",
-      attrPatterns: [/^poteaux_?petit_?jean/i, /^petit_?jean/i],
-      labelKeywords: ["nombre de poteaux petit jean utilises", "poteaux petit jean", "petit jean utilises", "petit jean"],
+      attrPatterns: [
+        /^poteaux_?petit_?jean/i,
+        /^petit_?jean/i,
+        /^poteaux_?pj/i,
+        /^pj_?utilises?/i,
+      ],
+      labelKeywords: [
+        "nombre de poteaux petit jean utilises",
+        "poteaux petit jean utilises",
+        "nombre de poteaux petit jean",
+        "poteaux petit jean",
+        "petit jean utilises",
+        "petit jean",
+        "poteaux pj",
+        "pj",
+      ],
       valueExtractor: (data) => countPetitJeanPoles(data),
     },
 

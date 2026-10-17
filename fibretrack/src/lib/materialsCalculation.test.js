@@ -42,16 +42,16 @@ test("calculateMaterials - Calcul dynamique sur ajout et suppression de poteau",
     nb_poteaux_traverses: 2,
   };
 
-  // 2 linéaires + 1 piton = (2*2) + 1 = 5
-  assert.equal(calculateMaterials(base).crochets, 5);
+  // 1 FAT * 1 + 1 lin * 2 + 1 piton = 1 + 2 + 1 = 4 crochets (usage réel terrain)
+  assert.equal(calculateMaterials(base).crochets, 4);
 
-  // Ajout d'un 3e poteau linéaire : (3*2) + 1 = 7
+  // Ajout d'un 3e poteau (1 FAT + 2 lin) : 1 + (2*2) + 1 = 6
   base.nb_poteaux_traverses = 3;
-  assert.equal(calculateMaterials(base).crochets, 7);
+  assert.equal(calculateMaterials(base).crochets, 6);
 
-  // Suppression pour revenir à 1 seul linéaire : (1*2) + 1 = 3
+  // Suppression pour revenir à 1 seul poteau (le poteau FAT) : 1 + 0 + 1 = 2
   base.nb_poteaux_traverses = 1;
-  assert.equal(calculateMaterials(base).crochets, 3);
+  assert.equal(calculateMaterials(base).crochets, 2);
 });
 
 test("calculateMaterials - Respecte les modifications manuelles de l'utilisateur", () => {
@@ -75,13 +75,19 @@ test("calculateMaterials - Respecte les modifications manuelles de l'utilisateur
   assert.equal(result.otp, 2, "La modification manuelle de l'OTP doit être respectée");
 });
 
-test("calculateMaterials - Intervention vide (0 poteaux) : pas de crochet tant que non insérés", () => {
-  const empty = {
-    fat_ref: "FAT-01", // La présence de la boîte FAT seule ne doit PAS inventer de crochet
+test("calculateMaterials - FAT seul (placé sur son poteau) : 1 FAT + 1 piton = 2 crochets", () => {
+  const withFat = {
+    fat_ref: "FAT-01",
   };
-  const result = calculateMaterials(empty);
-  assert.equal(result.crochets, 0, "0 poteau inséré = 0 crochet");
+  const result = calculateMaterials(withFat);
+  assert.equal(result.crochets, 2, "Le FAT est sur un poteau (1 crochet) + 1 piton = 2 crochets");
   assert.equal(result.piton, 1, "Piton par défaut = 1");
   assert.equal(result.pto, 1, "PTO par défaut = 1");
   assert.equal(result.otp, 1, "ONT par défaut = 1");
+});
+
+test("calculateMaterials - Intervention totalement vierge (0 poteaux, sans FAT) : 0 crochet", () => {
+  const blank = {};
+  const result = calculateMaterials(blank);
+  assert.equal(result.crochets, 0, "0 poteau et 0 FAT = 0 crochet");
 });

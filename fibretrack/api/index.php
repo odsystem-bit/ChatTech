@@ -1094,7 +1094,7 @@ try {
         $incomingMat = $mergedMat;
       }
       if ($patchMode && in_array('points_gps', $changedFields, true)) {
-        $serverByIdOrHoro = [];
+        $serverPoints = [];
         $deletedPoints = array_fill_keys($d['deleted_points'] ?? [], true);
         foreach (json_decode($existing['points_gps'] ?? '[]', true) ?? [] as $point) {
           $idKey = $point['id'] ?? '';
@@ -1102,8 +1102,10 @@ try {
           if (($idKey !== '' && isset($deletedPoints[$idKey])) || ($horoKey !== '' && isset($deletedPoints[$horoKey]))) {
             continue;
           }
-          $itemKey = $idKey !== '' ? $idKey : ($horoKey !== '' ? $horoKey : uniqid());
-          $serverByIdOrHoro[$itemKey] = $point;
+          $cat = strtolower(trim((string)($point['type'] ?? '')));
+          $num = !empty($point['numero']) ? (int)$point['numero'] : 0;
+          $key = $idKey !== '' ? $idKey : ($cat === 'poteau' && $num > 0 ? "poteau_{$num}" : ($cat === 'fat' ? 'fat' : ($cat === 'abonne' || $cat === 'abonné' ? 'abonne' : ($horoKey !== '' ? $horoKey : uniqid()))));
+          $serverPoints[$key] = $point;
         }
         foreach ($incomingGps as $point) {
           $idKey = $point['id'] ?? '';
@@ -1111,10 +1113,21 @@ try {
           if (($idKey !== '' && isset($deletedPoints[$idKey])) || ($horoKey !== '' && isset($deletedPoints[$horoKey]))) {
             continue;
           }
-          $itemKey = $idKey !== '' ? $idKey : ($horoKey !== '' ? $horoKey : uniqid());
-          $serverByIdOrHoro[$itemKey] = array_merge($serverByIdOrHoro[$itemKey] ?? [], $point);
+          $cat = strtolower(trim((string)($point['type'] ?? '')));
+          $num = !empty($point['numero']) ? (int)$point['numero'] : 0;
+          $key = $idKey !== '' ? $idKey : ($cat === 'poteau' && $num > 0 ? "poteau_{$num}" : ($cat === 'fat' ? 'fat' : ($cat === 'abonne' || $cat === 'abonné' ? 'abonne' : ($horoKey !== '' ? $horoKey : uniqid()))));
+
+          if (!isset($serverPoints[$key]) && $cat === 'poteau' && $num > 0) {
+            foreach ($serverPoints as $k => $oldPt) {
+              if (strtolower(trim((string)($oldPt['type'] ?? ''))) === 'poteau' && (int)($oldPt['numero'] ?? 0) === $num) {
+                $key = $k;
+                break;
+              }
+            }
+          }
+          $serverPoints[$key] = array_merge($serverPoints[$key] ?? [], $point);
         }
-        $incomingGps = array_values($serverByIdOrHoro);
+        $incomingGps = array_values($serverPoints);
       }
       if ($patchMode && in_array('whatsapp_photos', $changedFields, true)) {
         $deletedPhotos = array_fill_keys($d['deleted_whatsapp_photos'] ?? [], true);
