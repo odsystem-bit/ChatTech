@@ -432,6 +432,18 @@ export function toLightIntervention(intv) {
     videos_terrain,
     ...light
   } = intv;
+
+  // Conserver les vidéos terrain dans l'objet léger en allégeant seulement les data: URLs base64 lourdes
+  if (Array.isArray(videos_terrain)) {
+    light.videos_terrain = videos_terrain.map((v) => {
+      if (!v) return v;
+      const thumb = (v.thumbnail_url && !v.thumbnail_url.startsWith("data:image")) ? v.thumbnail_url : "";
+      return { ...v, thumbnail_url: thumb };
+    });
+  } else {
+    light.videos_terrain = [];
+  }
+
   return light;
 }
 
@@ -631,6 +643,17 @@ export function saveInterventionLocally(intervention) {
             defaulted.points_gps = [...defaulted.points_gps, ...localOnly];
           }
         }
+
+        // Protéger les vidéos terrain existantes contre un écrasement accidentel lors d'une mise à jour partielle
+        if ((!defaulted.videos_terrain || defaulted.videos_terrain.length === 0) && Array.isArray(existing.videos_terrain) && existing.videos_terrain.length > 0) {
+          defaulted.videos_terrain = existing.videos_terrain;
+        } else if (Array.isArray(defaulted.videos_terrain) && Array.isArray(existing.videos_terrain) && existing.videos_terrain.length > 0) {
+          const incomingIds = new Set(defaulted.videos_terrain.map((v) => v?.id).filter(Boolean));
+          const localOnly = existing.videos_terrain.filter((v) => v && v.id && !incomingIds.has(v.id));
+          if (localOnly.length > 0) {
+            defaulted.videos_terrain = [...defaulted.videos_terrain, ...localOnly];
+          }
+        }
       }
 
       if (!defaulted.signature_client && existing.signature_client) {
@@ -745,6 +768,15 @@ export async function getIntervention(id) {
             const unsyncedPhotos = local.whatsapp_photos.filter((p) => p && p.id && !remotePhotoIds.has(p.id) && !deletedPhotoIds.has(p.id));
             if (unsyncedPhotos.length > 0) {
               finalIntv.whatsapp_photos = [...(finalIntv.whatsapp_photos || []), ...unsyncedPhotos];
+            }
+          }
+
+          // Préserver les vidéos locales non encore synchronisées
+          if (Array.isArray(local.videos_terrain) && local.videos_terrain.length > 0) {
+            const remoteVideoIds = new Set((finalIntv.videos_terrain || []).map((v) => v?.id).filter(Boolean));
+            const unsyncedVideos = local.videos_terrain.filter((v) => v && v.id && !remoteVideoIds.has(v.id));
+            if (unsyncedVideos.length > 0) {
+              finalIntv.videos_terrain = [...(finalIntv.videos_terrain || []), ...unsyncedVideos];
             }
           }
         }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ensureInterventionDefaults, createEmptyIntervention } from "./Intervention.js";
+import { ensureInterventionDefaults, createEmptyIntervention, toLightIntervention, saveInterventionLocally, getStoredIntervention } from "./Intervention.js";
 
 test("ensureInterventionDefaults initializes empty intervention with 0 poles", () => {
   const empty = ensureInterventionDefaults(null);
@@ -578,6 +578,80 @@ test("Dynamic pole changes recalculate crochets unless overridden manually", () 
   assert.equal(defaulted.materiel_pose.crochets, 12, "Manual override must NOT be overwritten dynamically");
 });
 
+test("toLightIntervention retains videos_terrain metadata while stripping heavy base64 data URLs", () => {
+  const intv = {
+    id: "video-intv-1",
+    nom_client: "Client Video",
+    whatsapp_photos: [{ id: "p1", url: "data:image/jpeg;base64,heavyphoto..." }],
+    videos_terrain: [
+      {
+        id: "vid-1",
+        url: "https://fibretrack.mantota.com/api/uploads/videos/video1.mp4",
+        thumbnail_url: "https://fibretrack.mantota.com/api/uploads/videos/video1_thumb.jpg",
+        duration: 15,
+        size: 2400000,
+        lat: 6.3702,
+        lng: 2.4291,
+        precision_m: 6.5,
+      },
+      {
+        id: "vid-2-local",
+        url: "blob:http://localhost:5173/vid2",
+        thumbnail_url: "data:image/jpeg;base64,veryheavythumbnail...",
+        duration: 8,
+        size: 1200000,
+        lat: 6.3705,
+        lng: 2.4295,
+        precision_m: 8.0,
+      },
+    ],
+  };
 
+  const light = toLightIntervention(intv);
+  assert.equal(light.whatsapp_photos, undefined, "Photos heavy base64 must be stripped");
+  assert.ok(Array.isArray(light.videos_terrain), "videos_terrain must be retained in light intervention");
+  assert.equal(light.videos_terrain.length, 2);
+  assert.equal(light.videos_terrain[0].id, "vid-1");
+  assert.equal(light.videos_terrain[0].url, "https://fibretrack.mantota.com/api/uploads/videos/video1.mp4");
+  assert.equal(light.videos_terrain[0].thumbnail_url, "https://fibretrack.mantota.com/api/uploads/videos/video1_thumb.jpg");
+  assert.equal(light.videos_terrain[0].lat, 6.3702);
+  assert.equal(light.videos_terrain[1].id, "vid-2-local");
+  assert.equal(light.videos_terrain[1].thumbnail_url, "", "Base64 data URL thumbnail must be lightened");
+});
 
+test("saveInterventionLocally preserves existing videos_terrain when saving a partial/light object", () => {
+  const testId = "video-partial-save-test";
+  const initial = {
+    id: testId,
+    nom_client: "Client Test Video",
+    _fully_loaded: true,
+    videos_terrain: [
+      {
+        id: "vid-persistent-1",
+        url: "https://fibretrack.mantota.com/api/uploads/videos/v1.mp4",
+        duration: 12,
+        lat: 6.368,
+        lng: 2.421,
+      },
+    ],
+  };
+  saveInterventionLocally(initial);
 
+  // Sauvegarde d'un objet light (ex: changement de statut depuis la liste avec _fully_loaded: false et videos_terrain vide)
+  const partial = {
+    id: testId,
+    nom_client: "Client Test Video",
+    statut: "termine",
+    _fully_loaded: false,
+    videos_terrain: [],
+  };
+  saveInterventionLocally(partial);
+
+  const stored = getStoredIntervention(testId);
+  assert.ok(stored);
+  assert.equal(stored.statut, "termine");
+  assert.ok(Array.isArray(stored.videos_terrain));
+  assert.equal(stored.videos_terrain.length, 1, "videos_terrain must NOT be wiped by a partial update");
+  assert.equal(stored.videos_terrain[0].id, "vid-persistent-1");
+  assert.equal(stored.videos_terrain[0].lat, 6.368);
+});

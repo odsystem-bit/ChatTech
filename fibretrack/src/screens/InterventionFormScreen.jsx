@@ -2171,12 +2171,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     e.target.value = "";
     if (rawFiles.length === 0) return;
 
-    // Récupérer les coordonnées GPS actuelles de l'intervention ou du navigateur
-    const lat = data.latitude ?? null;
-    const lng = data.longitude ?? null;
-    const precisionM = data.precision_m ?? 10;
-    const lieu = [data.adresse_zone, data.quartier, data.ville].filter(Boolean).join(", ");
-    const clientName = data.nom_client || data.nom_dossier || "Client";
+    // Détermination immédiate des coordonnées initiales disponibles (0ms)
+    const currentLatestData = dataRef.current || data;
+    const fallbackBaseCoords = {
+      lat: currentLatestData.latitude || (Array.isArray(currentLatestData.points_gps) ? currentLatestData.points_gps.find((p) => p?.lat != null)?.lat : null) || currentLatestData.latitude_fat || null,
+      lng: currentLatestData.longitude || (Array.isArray(currentLatestData.points_gps) ? currentLatestData.points_gps.find((p) => p?.lng != null)?.lng : null) || currentLatestData.longitude_fat || null,
+      precision_m: 15,
+    };
+
+    const initialLat = fallbackBaseCoords.lat;
+    const initialLng = fallbackBaseCoords.lng;
+    const initialPrecision = fallbackBaseCoords.precision_m;
+    let lieu = [currentLatestData.adresse_zone, currentLatestData.quartier, currentLatestData.ville].filter(Boolean).join(", ");
+    const clientName = currentLatestData.nom_client || currentLatestData.nom_dossier || "Client";
     const baseCount = (videosTerrain || []).length;
     const horodatage = new Date().toISOString();
 
@@ -2199,12 +2206,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           size: file.size,
           original_size: file.size,
           ratio: "100%",
-          lat,
-          lng,
-          precision_m: precisionM,
+          lat: initialLat,
+          lng: initialLng,
+          precision_m: initialPrecision,
           cree_le: horodatage,
           captured_at: horodatage,
-          ajoute_par: currentUser || data.nom_technicien || "",
+          ajoute_par: currentUser || currentLatestData.nom_technicien || "",
           status: "local",
         },
       };
@@ -2214,22 +2221,58 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const updatedVideos = [...(videosTerrain || []), ...immediateNewVideos];
     setVideosTerrain(updatedVideos);
     update("videos_terrain", updatedVideos);
-    saveInterventionLocally({ ...data, videos_terrain: updatedVideos });
+    saveInterventionLocally({ ...currentLatestData, videos_terrain: updatedVideos });
     setVideoStatus(`⚡ ${rawFiles.length} vidéo(s) ajoutée(s) instantanément.`);
     setVideoProcessing(true);
-    setVideoProgress({ pct: 15, msg: `Génération des miniatures avec bandeau GPS pour ${rawFiles.length} vidéo(s)…` });
+    setVideoProgress({ pct: 15, msg: `📡 Acquisition GPS haute précision et analyse de la vidéo…` });
 
-    // 2. Traitement d'arrière-plan non-bloquant : miniature avec bandeau GPS et upload serveur
+    // 2. Traitement d'arrière-plan : acquisition GPS haute précision, bandeau et upload serveur
     try {
+      // A. Résolution active de la position GPS en direct (smartphone ou fallback)
+      let posResult = null;
+      try {
+        posResult = await acquireBestPosition(rawFiles[0], fallbackBaseCoords);
+      } catch (gpsErr) {
+        console.warn("Échec acquireBestPosition vidéo:", gpsErr);
+      }
+
+      const activeLat = posResult?.lat ?? initialLat;
+      const activeLng = posResult?.lng ?? initialLng;
+      const activePrecision = posResult?.precision_m ?? initialPrecision;
+
+      // Si le lieu est vide et qu'on a des coordonnées, tenter un géocodage inversé de zone
+      if (!lieu && activeLat != null && activeLng != null) {
+        try {
+          const zoneInfo = await reverseGeocodeZone(activeLat, activeLng);
+          if (zoneInfo?.label) {
+            lieu = zoneInfo.label;
+          }
+        } catch {}
+      }
+
+      // Mettre à jour les coordonnées réelles de l'intervention si elles n'existaient pas
+      if (activeLat != null && activeLng != null) {
+        if (!currentLatestData.latitude) update("latitude", activeLat);
+        if (!currentLatestData.longitude) update("longitude", activeLng);
+      }
+
+      // B. Génération des miniatures avec bandeau GPS et upload serveur
       for (let i = 0; i < newItemsWithFiles.length; i++) {
         const { file, video } = newItemsWithFiles[i];
+        video.lat = activeLat;
+        video.lng = activeLng;
+        video.precision_m = activePrecision;
+        if (lieu) video.lieu = lieu;
+
         const bannerInfo = {
+          client: video.nom_client,
           type: video.label,
           lieu: video.lieu,
           lat: video.lat,
           lng: video.lng,
           precision_m: video.precision_m || 10,
           horodatage: video.captured_at,
+          technicien: video.ajoute_par,
         };
 
         // Miniature rapide avec bandeau GPS incrusté en bas (style GPS Map Camera)
@@ -2243,15 +2286,23 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         const thumbUrl = thumbResult?.thumbnailDataUrl || "";
         const dur = thumbResult?.duration || 0;
 
-        // Mise à jour de la miniature locale
+        // Mise à jour de la miniature locale et des coordonnées réelles
         setVideosTerrain((prev) => {
           const next = prev.map((v) =>
             v.id === video.id
-              ? { ...v, thumbnail_url: thumbUrl || v.thumbnail_url, duration: dur || v.duration }
+              ? {
+                  ...v,
+                  lat: activeLat,
+                  lng: activeLng,
+                  precision_m: activePrecision,
+                  lieu: lieu || v.lieu,
+                  thumbnail_url: thumbUrl || v.thumbnail_url,
+                  duration: dur || v.duration,
+                }
               : v
           );
           update("videos_terrain", next);
-          saveInterventionLocally({ ...data, videos_terrain: next });
+          saveInterventionLocally({ ...dataRef.current, videos_terrain: next });
           return next;
         });
 
@@ -2284,7 +2335,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   : v
               );
               update("videos_terrain", next);
-              saveInterventionLocally({ ...data, videos_terrain: next });
+              saveInterventionLocally({ ...dataRef.current, videos_terrain: next });
               return next;
             });
           }

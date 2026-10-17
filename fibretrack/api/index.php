@@ -414,12 +414,58 @@ try {
       }
     }
 
-    $capturedAt = !empty($_POST['captured_at']) ? date('Y-m-d H:i:s', strtotime($_POST['captured_at'])) : null;
+    $capturedAt = !empty($_POST['captured_at']) ? date('Y-m-d H:i:s', strtotime($_POST['captured_at'])) : date('Y-m-d H:i:s');
     $stmt = db()->prepare('INSERT INTO intervention_media (id, intervention_id, type, file_path, latitude, longitude, precision_m, captured_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
     $stmt->execute([$mediaId, $interventionId, $type, $relativePath, $_POST['latitude'] ?? null, $_POST['longitude'] ?? null, $_POST['precision_m'] ?? null, $capturedAt, $user['nom']]);
 
     $fullUrl = 'https://fibretrack.mantota.com/api/' . $relativePath;
     $fileSize = (int)@filesize(__DIR__ . '/' . $relativePath);
+
+    // Mettre à jour immédiatement la colonne videos_terrain dans interventions pour zéro perte
+    if ($type === 'video') {
+      try {
+        $vStmt = db()->prepare('SELECT videos_terrain FROM interventions WHERE id = ? FOR UPDATE');
+        $vStmt->execute([$interventionId]);
+        $row = $vStmt->fetch();
+        if ($row) {
+          $currVideos = json_decode($row['videos_terrain'] ?? '[]', true);
+          if (!is_array($currVideos)) $currVideos = [];
+          $found = false;
+          foreach ($currVideos as &$cv) {
+            if (!empty($cv['id']) && $cv['id'] === $mediaId) {
+              $cv['url'] = $fullUrl;
+              if ($thumbUrl) $cv['thumbnail_url'] = $thumbUrl;
+              $cv['size'] = $fileSize;
+              $cv['duration'] = (float)($_POST['duration'] ?? 0);
+              $found = true;
+              break;
+            }
+          }
+          unset($cv);
+          if (!$found) {
+            $currVideos[] = [
+              'id' => $mediaId,
+              'url' => $fullUrl,
+              'thumbnail_url' => $thumbUrl,
+              'size' => $fileSize,
+              'duration' => (float)($_POST['duration'] ?? 0),
+              'label' => trim((string)($_POST['label'] ?? 'Vidéo terrain')),
+              'lat' => (!empty($_POST['latitude']) && is_numeric($_POST['latitude'])) ? (float)$_POST['latitude'] : null,
+              'lng' => (!empty($_POST['longitude']) && is_numeric($_POST['longitude'])) ? (float)$_POST['longitude'] : null,
+              'precision_m' => (!empty($_POST['precision_m']) && is_numeric($_POST['precision_m'])) ? (float)$_POST['precision_m'] : null,
+              'horodatage' => $capturedAt,
+              'captured_at' => $capturedAt,
+              'ajoute_par' => $user['nom'] ?? 'Technicien',
+            ];
+          }
+          $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ?');
+          $upStmt->execute([json_encode($currVideos), $interventionId]);
+        }
+      } catch (Exception $e) {
+        error_log("media_upload videos_terrain sync error: " . $e->getMessage());
+      }
+    }
+
     echo json_encode([
       'ok' => true,
       'id' => $mediaId,
@@ -469,7 +515,7 @@ try {
       echo json_encode(['error' => 'Média requis']);
       return;
     }
-    $stmt = db()->prepare('SELECT file_path, added_by FROM intervention_media WHERE id = ?');
+    $stmt = db()->prepare('SELECT file_path, added_by, intervention_id FROM intervention_media WHERE id = ?');
     $stmt->execute([$mediaId]);
     $media = $stmt->fetch();
     if (!$media) {
@@ -494,6 +540,27 @@ try {
     if (is_file($thumbPath)) @unlink($thumbPath);
     $delete = db()->prepare('DELETE FROM intervention_media WHERE id = ?');
     $delete->execute([$mediaId]);
+
+    // Nettoyer également de la colonne videos_terrain de l'intervention
+    $intvId = $media['intervention_id'] ?? '';
+    if ($intvId) {
+      try {
+        $vStmt = db()->prepare('SELECT videos_terrain FROM interventions WHERE id = ? FOR UPDATE');
+        $vStmt->execute([$intvId]);
+        $row = $vStmt->fetch();
+        if ($row) {
+          $currVideos = json_decode($row['videos_terrain'] ?? '[]', true);
+          if (is_array($currVideos)) {
+            $filtered = array_values(array_filter($currVideos, fn($v) => !empty($v['id']) && $v['id'] !== $mediaId));
+            $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ?');
+            $upStmt->execute([json_encode($filtered), $intvId]);
+          }
+        }
+      } catch (Exception $e) {
+        error_log("media_delete videos_terrain sync error: " . $e->getMessage());
+      }
+    }
+
     echo json_encode(['ok' => true]);
     return;
   }
@@ -527,7 +594,7 @@ try {
         appreciation_satisfaction_libre, travaux_conformes, emplacement_valide,
         travail_propre, service_teste, service_fonctionne, explications_donnees,
         recommanderait, accepte_recontact, qualite, delais, professionnalisme,
-        nom_client_declaration, remarque_libre, whatsapp_photos, modifie_par, modifie_le, modifie_le AS updated_at
+        nom_client_declaration, remarque_libre, whatsapp_photos, videos_terrain, modifie_par, modifie_le, modifie_le AS updated_at
         FROM interventions ORDER BY date DESC');
       $rows = $stmt->fetchAll();
       foreach ($rows as &$r) {
@@ -564,7 +631,7 @@ try {
         appreciation_satisfaction_libre, travaux_conformes, emplacement_valide,
         travail_propre, service_teste, service_fonctionne, explications_donnees,
         recommanderait, accepte_recontact, qualite, delais, professionnalisme,
-        nom_client_declaration, remarque_libre, whatsapp_photos, modifie_par, modifie_le AS updated_at
+        nom_client_declaration, remarque_libre, whatsapp_photos, videos_terrain, modifie_par, modifie_le AS updated_at
         FROM interventions WHERE id = ?');
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       $stmt->execute([$id]);
@@ -889,7 +956,7 @@ try {
           unset($ph);
         }
       } elseif (!empty($d['id'])) {
-        $mStmt = $pdo->prepare('SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ?');
+        $mStmt = $pdo->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type NOT IN ('video', 'video_terrain')");
         $mStmt->execute([$d['id']]);
         $medias = $mStmt->fetchAll();
         if (!empty($medias)) {
@@ -907,6 +974,67 @@ try {
             ];
           }
         }
+      }
+
+      // --- videos_terrain : restaurer les vidéos serveur si vide ou fusionner ---
+      $incomingVideos = $d['videos_terrain'] ?? [];
+      if (!is_array($incomingVideos)) $incomingVideos = [];
+      $isVideosDirty = ($changedFields !== null && in_array('videos_terrain', $changedFields, true));
+
+      if ($existing) {
+        $serverVideos = json_decode($existing['videos_terrain'] ?? '[]', true);
+        if (!is_array($serverVideos)) $serverVideos = [];
+
+        if (empty($incomingVideos) && !$isVideosDirty) {
+          $incomingVideos = $serverVideos;
+        } else {
+          $serverById = [];
+          foreach ($serverVideos as $v) {
+            if (!empty($v['id'])) $serverById[$v['id']] = $v;
+          }
+          foreach ($incomingVideos as &$v) {
+            if (empty($v['url']) && !empty($v['id']) && isset($serverById[$v['id']])) {
+              $v['url'] = $serverById[$v['id']]['url'] ?? '';
+            }
+            if (empty($v['thumbnail_url']) && !empty($v['id']) && isset($serverById[$v['id']])) {
+              $v['thumbnail_url'] = $serverById[$v['id']]['thumbnail_url'] ?? '';
+            }
+          }
+          unset($v);
+          $incomingIds = array_filter(array_column($incomingVideos, 'id'));
+          foreach ($serverVideos as $sv) {
+            if (!empty($sv['id']) && !in_array($sv['id'], $incomingIds, true)) {
+              $incomingVideos[] = $sv;
+            }
+          }
+        }
+      } elseif (!empty($d['id'])) {
+        try {
+          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain')");
+          $mStmt->execute([$d['id']]);
+          $medias = $mStmt->fetchAll();
+          if (!empty($medias)) {
+            $existingIds = array_filter(array_column($incomingVideos, 'id'));
+            foreach ($medias as $m) {
+              if (!in_array($m['id'], $existingIds, true)) {
+                $incomingVideos[] = [
+                  'id' => $m['id'],
+                  'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
+                  'thumbnail_url' => '',
+                  'size' => 0,
+                  'duration' => 0,
+                  'label' => 'Vidéo terrain',
+                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
+                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
+                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
+                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                  'captured_at' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                  'ajoute_par' => $m['added_by'] ?? '',
+                ];
+              }
+            }
+          }
+        } catch (Exception $e) {}
       }
 
       // --- signatures : garder la serveur si l'entrante est vide ---
