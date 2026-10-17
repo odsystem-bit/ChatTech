@@ -2193,6 +2193,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           url: localUrl,
           thumbnail_url: "",
           label: `Vidéo Terrain #${videoNum} - ${clientName}`,
+          nom_client: clientName,
           lieu: lieu || "",
           duration: 0,
           size: file.size,
@@ -2471,6 +2472,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     try {
       const res = await downloadAllPhotosAsZip(selected, data.nom_client, {
         interventionId: data.id,
+        videos: videosTerrain || [],
         onProgress: (_curr, _tot, msg) => setWhatsappStatus(msg),
       });
       setWhatsappStatus(`✓ Dossier '${res.folderName}' (${res.count} photos) téléchargé dans vos Téléchargements !`);
@@ -5030,6 +5032,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       {activeViewingVideo && (
         <VideoPlayerModal
           video={activeViewingVideo}
+          clientName={data.nom_client || data.nom_dossier}
           onClose={() => setActiveViewingVideo(null)}
           onDelete={handleDeleteVideo}
         />

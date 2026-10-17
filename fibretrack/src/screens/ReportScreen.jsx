@@ -492,6 +492,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       const res = await downloadAllPhotosAsZip(targetList, data.nom_client, {
         reportText: activeReport,
         interventionId: data.id,
+        videos: data.videos_terrain || [],
         onProgress: (_curr, _tot, msg) => setDownloadProgressText(msg),
       });
       setSendStatus(`✓ Dossier '${res.folderName}' (${res.count} photos) téléchargé dans vos Téléchargements !`);
@@ -1344,6 +1345,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
       {activeViewingVideo && (
         <VideoPlayerModal
           video={activeViewingVideo}
+          clientName={data.nom_client || data.nom_dossier}
           onClose={() => setActiveViewingVideo(null)}
         />
       )}

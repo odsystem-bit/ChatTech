@@ -140,11 +140,45 @@ async function fetchPhotoData(photo) {
 }
 
 /**
+ * Récupère le binaire d'une vidéo pour inclusion dans le dossier ZIP client
+ */
+async function fetchVideoData(video) {
+  if (!video) return null;
+  if (video.file instanceof Blob || video.file instanceof File) {
+    try {
+      const arrayBuffer = await video.file.arrayBuffer();
+      const ext = video.file.name ? video.file.name.split(".").pop() : "mp4";
+      return { arrayBuffer, ext };
+    } catch {}
+  }
+  const url = video.url || video.src;
+  if (!url || typeof url !== "string") return null;
+
+  if (url.startsWith("data:")) {
+    const comma = url.indexOf(",");
+    if (comma !== -1) {
+      return { base64: url.slice(comma + 1), ext: "mp4" };
+    }
+  }
+
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const arrayBuffer = await resp.arrayBuffer();
+    const ext = url.includes(".webm") ? "webm" : "mp4";
+    return { arrayBuffer, ext };
+  } catch (err) {
+    console.warn("[photoDownload] Impossible de récupérer la vidéo :", url, err);
+    return null;
+  }
+}
+
+/**
  * Télécharge TOUTES les photos sélectionnées dans une archive ZIP organisée
  * portant le nom exact du client (ex: Photos_DOSSIER_AKUAVI_ARLETTE.zip)
  */
 export async function downloadAllPhotosAsZip(photos, clientName = "", options = {}) {
-  const { onProgress, reportText, interventionId } = options;
+  const { onProgress, reportText, interventionId, videos = [] } = options;
   if (!Array.isArray(photos) || photos.length === 0) {
     throw new Error("Aucune photo à télécharger.");
   }
@@ -153,7 +187,8 @@ export async function downloadAllPhotosAsZip(photos, clientName = "", options = 
   const zip = new JSZip();
   const folder = zip.folder(clientFolder);
 
-  if (onProgress) onProgress(0, photos.length, `Préparation du dossier ${clientFolder}…`);
+  const totalCount = photos.length + (Array.isArray(videos) ? videos.length : 0);
+  if (onProgress) onProgress(0, totalCount, `Préparation du dossier ${clientFolder}…`);
 
   let addedCount = 0;
   const usedFilenames = new Set();
@@ -161,7 +196,7 @@ export async function downloadAllPhotosAsZip(photos, clientName = "", options = 
   for (let i = 0; i < photos.length; i++) {
     const p = photos[i];
     if (onProgress) {
-      onProgress(i + 1, photos.length, `Traitement de la photo ${i + 1}/${photos.length}…`);
+      onProgress(i + 1, totalCount, `Traitement de la photo ${i + 1}/${photos.length}…`);
     }
 
     let relName = getStructuredPhotoName(p, i);
@@ -185,6 +220,39 @@ export async function downloadAllPhotosAsZip(photos, clientName = "", options = 
     }
   }
 
+  // Si des vidéos de terrain sont présentes, les inclure dans un sous-dossier Videos_Terrain/
+  if (Array.isArray(videos) && videos.length > 0) {
+    const videoFolder = folder.folder("Videos_Terrain");
+    for (let j = 0; j < videos.length; j++) {
+      const vid = videos[j];
+      const videoNum = String(j + 1).padStart(2, "0");
+      const cleanLabel = (vid.label || vid.name || `Video_${videoNum}`)
+        .replace(/[^a-zA-Z0-9_-]/g, "_")
+        .replace(/_+/g, "_");
+
+      if (onProgress) {
+        onProgress(photos.length + j + 1, totalCount, `Ajout de la vidéo terrain ${j + 1}/${videos.length}…`);
+      }
+
+      if (vid.stampedBlob) {
+        const ext = vid.stampedExt || "mp4";
+        videoFolder.file(`${videoNum}_${cleanLabel}_GPS.${ext}`, vid.stampedBlob);
+        addedCount++;
+      } else {
+        const vidData = await fetchVideoData(vid);
+        if (vidData) {
+          if (vidData.base64) {
+            videoFolder.file(`${videoNum}_${cleanLabel}.${vidData.ext || "mp4"}`, vidData.base64, { base64: true });
+            addedCount++;
+          } else if (vidData.arrayBuffer) {
+            videoFolder.file(`${videoNum}_${cleanLabel}.${vidData.ext || "mp4"}`, vidData.arrayBuffer);
+            addedCount++;
+          }
+        }
+      }
+    }
+  }
+
   // Si un texte de rapport est fourni, l'inclure directement dans le dossier client
   if (reportText && typeof reportText === "string" && reportText.trim()) {
     folder.file("Rapport_Intervention.txt", reportText.trim());
@@ -193,7 +261,7 @@ export async function downloadAllPhotosAsZip(photos, clientName = "", options = 
   if (addedCount === 0) {
     // Si toutes les images ont échoué au fetch local (ex: CORS), repli sur le serveur
     if (interventionId) {
-      if (onProgress) onProgress(photos.length, photos.length, "Téléchargement depuis le serveur…");
+      if (onProgress) onProgress(totalCount, totalCount, "Téléchargement depuis le serveur…");
       const serverZipUrl = `https://fibretrack.mantota.com/api/index.php?action=download_photos_zip&id=${encodeURIComponent(interventionId)}`;
       window.location.href = serverZipUrl;
       return { success: true, count: photos.length, filename: `Photos_${clientFolder}.zip`, viaServer: true };
