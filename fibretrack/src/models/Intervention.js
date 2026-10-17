@@ -344,18 +344,8 @@ export function ensureInterventionDefaults(data) {
     ? poleItems.filter((p) => Boolean(p.arme)).length
     : Number(data.nb_poteaux_armes ?? 0);
 
-  // Calcul et initialisation des matériaux (Piton: 1, PTO: 1, OTP/ONT: 1, Crochets auto-calculés)
-  const calc = calculateMaterials({ ...data, points_gps: pointsGps });
+  // Initialisation des matériaux par défaut (Piton: 1, PTO: 1, ONT: 1, Crochets calculés à l'insertion des poteaux)
   const rawMp = (data.materiel_pose && typeof data.materiel_pose === "object") ? { ...data.materiel_pose } : {};
-  const isCrochetsManual = Boolean(data._crochets_manual || data._crochets_manuelle);
-
-  if (!isCrochetsManual) {
-    rawMp.crochets = calc.crochets;
-  } else if (rawMp.crochets !== undefined && rawMp.crochets !== null && rawMp.crochets !== "") {
-    rawMp.crochets = Number(rawMp.crochets);
-  } else {
-    rawMp.crochets = calc.crochets;
-  }
 
   // Piton : 1 obligatoire par client
   if (rawMp.piton === undefined || rawMp.piton === null || rawMp.piton === "") {
@@ -380,6 +370,17 @@ export function ensureInterventionDefaults(data) {
 
   rawMp.ont = baseOnt;
   delete rawMp.otp; // Nettoyage strict : aucun OTP dans materiel_pose
+
+  const calc = calculateMaterials({ ...data, points_gps: pointsGps, materiel_pose: rawMp });
+  const isCrochetsManual = Boolean(data._crochets_manual || data._crochets_manuelle);
+
+  if (!isCrochetsManual) {
+    rawMp.crochets = calc.crochets;
+  } else if (rawMp.crochets !== undefined && rawMp.crochets !== null && rawMp.crochets !== "") {
+    rawMp.crochets = Number(rawMp.crochets);
+  } else {
+    rawMp.crochets = calc.crochets;
+  }
 
   return {
     ...empty,

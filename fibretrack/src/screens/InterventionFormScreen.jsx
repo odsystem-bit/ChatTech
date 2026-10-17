@@ -901,6 +901,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         dirtyFieldsRef.current.add("_crochets_manual");
       }
 
+      if (designation === "piton" && !prev._crochets_manual) {
+        const calc = calculateMaterials(next);
+        nextMp.crochets = calc.crochets;
+        markDirty("materiel_pose.crochets");
+      }
+
       if (designation === "ont" || designation === "otp") {
         nextMp.ont = numQte;
         delete nextMp.otp;
@@ -3180,7 +3186,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                         </div>
                       ) : (
                         <p style={{ margin: "6px 0 14px", fontSize: 11, color: "var(--text-muted)" }}>
-                          💡 Calcul automatique : <strong>{materialsCalc.formula}</strong> (Piton : 1, PTO : 1, ONT : 1 par défaut). Modifiable manuellement à tout moment.
+                          💡 Calcul automatique : <strong>{materialsCalc.formula}</strong> (Poteau lin. = 2 crochets, Poteau FAT = 1 crochet, Piton = 1 crochet • PTO : 1, ONT : 1 par défaut). Modifiable manuellement à tout moment.
                         </p>
                       )}
                     </>

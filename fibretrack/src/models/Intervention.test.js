@@ -523,21 +523,21 @@ test("Default materials rules: empty intervention defaults to piton=1, pto=1, on
   assert.equal(defaulted.ont_qte, 1, "ont_qte doit être 1");
 });
 
-test("Automatic calculation: 4 linear poles + 1 FAT pole/point = 9 crochets, 1 piton, 1 ONT, 1 PTO", () => {
+test("Automatic calculation: 4 linear poles + 1 FAT pole + 1 piton = 10 crochets, 1 piton, 1 ONT, 1 PTO", () => {
   const intv = {
     id: "intv-calc-test",
     nom_client: "Client Test Calcul",
     points_gps: [
-      { id: "fat1", type: "FAT", lat: 6.36, lng: 2.42 },
-      { id: "p1", type: "Poteau", numero: 1, traverse: true },
+      { id: "p1", type: "Poteau", numero: 1, sous_type: "Poteau FAT" },
       { id: "p2", type: "Poteau", numero: 2, traverse: true },
       { id: "p3", type: "Poteau", numero: 3, traverse: true },
       { id: "p4", type: "Poteau", numero: 4, traverse: true },
+      { id: "p5", type: "Poteau", numero: 5, traverse: true },
     ],
   };
 
   const defaulted = ensureInterventionDefaults(intv);
-  assert.equal(defaulted.materiel_pose.crochets, 9, "4 lin * 2 + 1 FAT * 1 = 9 crochets");
+  assert.equal(defaulted.materiel_pose.crochets, 10, "4 lin * 2 + 1 FAT * 1 + 1 piton * 1 = 10 crochets");
   assert.equal(defaulted.materiel_pose.piton, 1, "1 piton obligatoire");
   assert.equal(defaulted.materiel_pose.pto, 1, "1 PTO par défaut");
   assert.equal(defaulted.materiel_pose.ont, 1, "1 ONT par défaut (pas d'OTP)");
@@ -548,17 +548,16 @@ test("Dynamic pole changes recalculate crochets unless overridden manually", () 
   const intv = {
     id: "intv-dynamic",
     points_gps: [
-      { id: "fat1", type: "FAT" },
       { id: "p1", type: "Poteau", numero: 1 },
       { id: "p2", type: "Poteau", numero: 2 },
     ],
   };
 
-  // 2 linear + 1 FAT = (2*2) + 1 = 5
+  // 2 linear + 1 piton = (2*2) + 1 = 5
   let defaulted = ensureInterventionDefaults(intv);
   assert.equal(defaulted.materiel_pose.crochets, 5);
 
-  // Add 2 more poles = 4 linear + 1 FAT = 9
+  // Add 2 more poles = 4 linear + 1 piton = (4*2) + 1 = 9
   intv.points_gps.push(
     { id: "p3", type: "Poteau", numero: 3 },
     { id: "p4", type: "Poteau", numero: 4 }
