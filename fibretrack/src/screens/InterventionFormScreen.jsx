@@ -2100,12 +2100,38 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       const lng = videoGps?.lng ?? data.longitude ?? null;
       const precisionM = videoGps?.accuracy ?? null;
 
-      // 2. Compression vidéo intelligente
-      setVideoProgress({ pct: 15, msg: "Compression de la vidéo (720p optimisé)…" });
+      // 1b. Géocodage de l'adresse et préparation du bandeau
+      let lieu = "";
+      if (lat != null && lng != null) {
+        try {
+          lieu = await reverseGeocode(lat, lng);
+        } catch (geoErr) {
+          console.warn("Géocodage adresse indisponible:", geoErr);
+        }
+      }
+      if (!lieu && (data.adresse_zone || data.quartier || data.ville)) {
+        lieu = [data.adresse_zone, data.quartier, data.ville].filter(Boolean).join(", ");
+      }
+
+      const horodatage = new Date().toISOString();
+      const videoNum = (videosTerrain || []).length + 1;
+      const clientName = data.nom_client || data.nom_dossier || "Client";
+      const bannerInfo = {
+        type: `Vidéo Terrain #${videoNum} - ${clientName}`,
+        lieu: lieu || "",
+        lat,
+        lng,
+        precision_m: precisionM || 10,
+        horodatage,
+      };
+
+      // 2. Compression vidéo intelligente et incrustation du bandeau GPS
+      setVideoProgress({ pct: 15, msg: "Incrustation du bandeau GPS et compression (720p)…" });
       const compResult = await compressVideo(file, {
         maxDimension: 720,
         targetBitrate: 850_000,
         fps: 24,
+        bannerInfo,
         onProgress: (pct, msg) => {
           setVideoProgress({ pct: Math.min(88, pct), msg });
         },
@@ -2122,10 +2148,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           latitude: lat,
           longitude: lng,
           precisionM,
-          capturedAt: new Date().toISOString(),
+          capturedAt: horodatage,
           thumbnailBase64: compResult.thumbnailDataUrl,
           duration: compResult.duration,
-          label: `Vidéo terrain #${videosTerrain.length + 1}`,
+          label: bannerInfo.type,
         });
       } catch (uploadErr) {
         console.warn("Upload vidéo échoué (mode hors-ligne ou réseau faible):", uploadErr);
@@ -2140,7 +2166,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         id: videoId,
         url: videoUrl,
         thumbnail_url: thumbUrl,
-        label: `Vidéo terrain #${videosTerrain.length + 1}`,
+        label: bannerInfo.type,
+        lieu: bannerInfo.lieu,
         duration: compResult.duration,
         size: compResult.compressedSize,
         original_size: compResult.originalSize,
@@ -2148,7 +2175,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         lat,
         lng,
         precision_m: precisionM,
-        cree_le: new Date().toISOString(),
+        cree_le: horodatage,
+        captured_at: horodatage,
         ajoute_par: currentUser || data.nom_technicien || "",
       };
 
@@ -3899,7 +3927,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           fontWeight: 600,
                           padding: "2px 6px",
                           borderRadius: 4,
-                          maxWidth: "85%",
+                          maxWidth: "70%",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
@@ -3907,6 +3935,25 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       >
                         {video.label || `Vidéo #${idx + 1}`}
                       </span>
+
+                      {(video.lat != null || video.lieu) && (
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: 6,
+                            right: 6,
+                            background: "rgba(15, 23, 42, 0.75)",
+                            color: "#facc15",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                          }}
+                          title={video.lieu || (video.lat ? `${video.lat.toFixed(5)}, ${video.lng.toFixed(5)}` : "GPS")}
+                        >
+                          📍 GPS
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

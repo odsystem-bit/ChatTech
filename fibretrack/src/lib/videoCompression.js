@@ -31,12 +31,86 @@ export function formatDuration(seconds) {
 }
 
 /**
+ * Incruste un bandeau de géolocalisation et horodatage façon "GPS Map Camera"
+ * sur le canvas (identique au bandeau des photos d'intervention).
+ *
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {number} width Largeur du canvas
+ * @param {number} height Hauteur du canvas
+ * @param {Object} info
+ * @param {string} info.type Ex: "Vidéo Terrain #1 - Nom Client"
+ * @param {string} [info.lieu] Ex: "Cotonou, Littoral, Bénin"
+ * @param {number} [info.lat]
+ * @param {number} [info.lng]
+ * @param {number} [info.precision_m]
+ * @param {string|number} [info.horodatage]
+ * @param {string} [info.warning]
+ */
+export function drawGpsBannerOnCanvas(ctx, width, height, info) {
+  if (!info) return;
+
+  const dateStr = new Date(info.horodatage || Date.now()).toLocaleString("fr-FR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const hasGps = typeof info.lat === "number" && typeof info.lng === "number" && !isNaN(info.lat) && !isNaN(info.lng);
+
+  const lines = [
+    info.type || "Vidéo Terrain",
+    info.lieu ? `Lieu: ${info.lieu}` : null,
+    hasGps ? `Lat: ${Number(info.lat).toFixed(6)}  Lng: ${Number(info.lng).toFixed(6)}` : null,
+    hasGps
+      ? `Précision: ±${Number(info.precision_m || 10).toFixed(1)} m - ${dateStr}`
+      : `Horodatage: ${dateStr}`,
+    !hasGps && info.warning ? `⚠️ ${info.warning}` : null,
+  ].filter(Boolean);
+
+  const minDim = Math.min(width, height);
+  const fontSize = Math.max(13, Math.round(minDim * 0.034));
+  const lineGap = fontSize * 1.35;
+  const pad = fontSize * 0.65;
+  const bandHeight = pad * 2 + lineGap * lines.length;
+
+  ctx.save();
+  // Fond noir semi-transparent (façon GPS Map Camera)
+  ctx.fillStyle = "rgba(0, 0, 0, 0.70)";
+  ctx.fillRect(0, height - bandHeight, width, bandHeight);
+
+  // Bordure supérieure subtile
+  ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+  ctx.fillRect(0, height - bandHeight, width, 1.5);
+
+  ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+  ctx.textBaseline = "top";
+
+  let y = height - bandHeight + pad;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (i === 0) {
+      ctx.fillStyle = "#38bdf8"; // Titre cyan
+    } else if (hasGps && line.startsWith("Lat:")) {
+      ctx.fillStyle = "#facc15"; // Coordonnées GPS jaune doré
+    } else {
+      ctx.fillStyle = "#ffffff"; // Blanc
+    }
+    ctx.fillText(line, pad, y);
+    y += lineGap;
+  }
+  ctx.restore();
+}
+
+/**
  * Génère une miniature (poster JPEG léger) depuis un fichier vidéo ou une URL.
  * @param {File|Blob|string} videoSource
  * @param {number} seekTime
+ * @param {Object} [bannerInfo] Informations GPS pour incrustation du bandeau
  * @returns {Promise<{ thumbnailDataUrl: string, duration: number, width: number, height: number }>}
  */
-export function generateVideoThumbnail(videoSource, seekTime = 1.0) {
+export function generateVideoThumbnail(videoSource, seekTime = 1.0, bannerInfo = null) {
   return new Promise((resolve, reject) => {
     const isUrl = typeof videoSource === "string";
     const objectUrl = isUrl ? videoSource : URL.createObjectURL(videoSource);
@@ -82,7 +156,11 @@ export function generateVideoThumbnail(videoSource, seekTime = 1.0) {
         const ctx = canvas.getContext("2d");
         ctx.drawImage(video, 0, 0, tw, th);
 
-        const thumbnailDataUrl = canvas.toDataURL("image/jpeg", 0.75);
+        if (bannerInfo) {
+          drawGpsBannerOnCanvas(ctx, tw, th, bannerInfo);
+        }
+
+        const thumbnailDataUrl = canvas.toDataURL("image/jpeg", 0.78);
         const duration = Math.round(video.duration || 0);
 
         cleanup();
@@ -148,20 +226,21 @@ export async function compressVideo(file, options = {}) {
     targetBitrate = 900_000,
     fps = 24,
     onProgress = () => {},
+    bannerInfo = null,
   } = options;
 
-  onProgress(5, "Analyse du fichier vidéo…");
+  onProgress(5, "Analyse du fichier vidéo et préparation du bandeau GPS…");
 
-  // Extraction rapide de la miniature et des métadonnées initiales
+  // Extraction rapide de la miniature et des métadonnées initiales (avec incrustation du bandeau)
   let thumbInfo;
   try {
-    thumbInfo = await generateVideoThumbnail(file, 0.8);
+    thumbInfo = await generateVideoThumbnail(file, 0.8, bannerInfo);
   } catch {
     thumbInfo = { thumbnailDataUrl: "", duration: 0, width: 640, height: 360 };
   }
 
-  // Si le fichier est déjà très léger (<= 2 Mo), on ne le recompresse pas
-  if (file.size <= 2 * 1024 * 1024) {
+  // Si le fichier est déjà très léger (<= 2 Mo) ET qu'aucun bandeau GPS n'est demandé, pas de re-compression
+  if (file.size <= 2 * 1024 * 1024 && !bannerInfo) {
     onProgress(100, "Vidéo déjà légère (pas de compression nécessaire).");
     return {
       blob: file,
@@ -305,13 +384,13 @@ export async function compressVideo(file, options = {}) {
           const ext = selectedMime.includes("mp4") ? "mp4" : "webm";
           const compressedBlob = new Blob(chunks, { type: selectedMime });
 
-          // Ne conserver le fichier compressé que s'il est plus petit que l'original
-          const isBetter = compressedBlob.size > 0 && compressedBlob.size < file.size;
+          // Si un bandeau GPS a été incrusté ou si le fichier est plus léger, conserver le flux encodé
+          const isBetter = compressedBlob.size > 0 && (compressedBlob.size < file.size || !!bannerInfo);
           const finalBlob = isBetter ? compressedBlob : file;
           const finalSize = finalBlob.size;
           const ratioPercent = Math.round((finalSize / file.size) * 100);
 
-          onProgress(100, `Compression terminée (-${100 - ratioPercent}%)`);
+          onProgress(100, `Vidéo finalisée avec bandeau de localisation (${ratioPercent}%)`);
 
           resolve({
             blob: finalBlob,
@@ -325,15 +404,18 @@ export async function compressVideo(file, options = {}) {
         };
 
         const totalDuration = video.duration || 1;
-        onProgress(10, "Compression vidéo en cours…");
+        onProgress(10, "Incrustation bandeau GPS et compression vidéo…");
 
-        // Boucle de rendu des images sur le canvas
+        // Boucle de rendu des images sur le canvas avec bandeau de localisation
         const renderLoop = () => {
           if (ended) return;
           ctx.drawImage(video, 0, 0, tw, th);
+          if (bannerInfo) {
+            drawGpsBannerOnCanvas(ctx, tw, th, bannerInfo);
+          }
           const current = video.currentTime;
           const pct = Math.min(96, Math.max(10, Math.round((current / totalDuration) * 90) + 10));
-          onProgress(pct, `Compression vidéo en cours… (${pct}%)`);
+          onProgress(pct, `Incrustation bandeau GPS et compression… (${pct}%)`);
           animId = requestAnimationFrame(renderLoop);
         };
 

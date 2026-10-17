@@ -750,6 +750,43 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
                       🎬
                     </div>
                   )}
+                  <span
+                    style={{
+                      position: "absolute",
+                      top: 4,
+                      left: 4,
+                      background: "rgba(0,0,0,0.65)",
+                      color: "#fff",
+                      fontSize: 9.5,
+                      fontWeight: 600,
+                      padding: "1px 5px",
+                      borderRadius: 3,
+                      maxWidth: "70%",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {vid.label || `Vidéo #${vidIdx + 1}`}
+                  </span>
+                  {(vid.lat != null || vid.lieu) && (
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: 4,
+                        right: 4,
+                        background: "rgba(15, 23, 42, 0.75)",
+                        color: "#facc15",
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: "1px 4px",
+                        borderRadius: 3,
+                      }}
+                      title={vid.lieu || (vid.lat ? `${vid.lat.toFixed(5)}, ${vid.lng.toFixed(5)}` : "GPS")}
+                    >
+                      📍 GPS
+                    </span>
+                  )}
                   <div
                     style={{
                       position: "absolute",

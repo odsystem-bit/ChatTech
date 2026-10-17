@@ -128,6 +128,49 @@ export default function VideoPlayerModal({ video, onClose, onDelete }) {
           </video>
         </div>
 
+        {/* Bandeau de localisation & Coordonnées GPS (style GPS Map Camera) */}
+        {(video.lat != null || video.lieu || dateStr) && (
+          <div
+            className="video-gps-banner-box"
+            style={{
+              padding: "12px 18px",
+              background: "#1e293b",
+              borderTop: "1px solid #334155",
+              fontSize: 12.5,
+              lineHeight: 1.5,
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
+          >
+            <div style={{ fontWeight: 700, color: "#38bdf8", fontSize: 13.5, display: "flex", alignItems: "center", gap: 6 }}>
+              <span>📍</span>
+              <span>{label}</span>
+            </div>
+            {video.lieu && (
+              <div style={{ color: "#e2e8f0" }}>
+                <strong>Lieu :</strong> {video.lieu}
+              </div>
+            )}
+            {video.lat != null && video.lng != null && (
+              <div style={{ color: "#facc15", fontFamily: "monospace", fontSize: 12 }}>
+                🌐 <strong>Coordonnées GPS :</strong> Lat: {Number(video.lat).toFixed(6)} | Lng: {Number(video.lng).toFixed(6)}
+                {video.precision_m != null && ` (Précision: ±${Number(video.precision_m).toFixed(1)} m)`}
+              </div>
+            )}
+            <div style={{ color: "#94a3b8", fontSize: 11.5 }}>
+              📅 <strong>Date & Heure :</strong> {new Date(dateStr || Date.now()).toLocaleString("fr-FR", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Barre d'actions du bas */}
         <div
           style={{
