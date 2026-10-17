@@ -1,4 +1,5 @@
 import { getApiAuthHeaders, getApiCode } from "./Account.js";
+import { calculateMaterials } from "../lib/materialsCalculation.js";
 
 // Modèle de données "Intervention" - synchronisé avec le backend MySQL.
 // Toutes les interventions sont partagées entre tous les techniciens.
@@ -343,12 +344,58 @@ export function ensureInterventionDefaults(data) {
     ? poleItems.filter((p) => Boolean(p.arme)).length
     : Number(data.nb_poteaux_armes ?? 0);
 
+  // Calcul et initialisation des matériaux (Piton: 1, PTO: 1, OTP/ONT: 1, Crochets auto-calculés)
+  const calc = calculateMaterials({ ...data, points_gps: pointsGps });
+  const rawMp = (data.materiel_pose && typeof data.materiel_pose === "object") ? { ...data.materiel_pose } : {};
+  const isCrochetsManual = Boolean(data._crochets_manual || data._crochets_manuelle);
+
+  if (!isCrochetsManual) {
+    rawMp.crochets = calc.crochets;
+  } else if (rawMp.crochets !== undefined && rawMp.crochets !== null && rawMp.crochets !== "") {
+    rawMp.crochets = Number(rawMp.crochets);
+  } else {
+    rawMp.crochets = calc.crochets;
+  }
+
+  // Piton : 1 obligatoire par client
+  if (rawMp.piton === undefined || rawMp.piton === null || rawMp.piton === "") {
+    rawMp.piton = 1;
+  } else {
+    rawMp.piton = Number(rawMp.piton);
+  }
+
+  // PTO : 1 par défaut
+  if (rawMp.pto === undefined || rawMp.pto === null || rawMp.pto === "") {
+    rawMp.pto = (data.pto_qte !== undefined && data.pto_qte !== null && data.pto_qte !== "") ? Number(data.pto_qte) : 1;
+  } else {
+    rawMp.pto = Number(rawMp.pto);
+  }
+
+  // OTP / ONT : 1 par défaut
+  const baseOnt = (rawMp.ont !== undefined && rawMp.ont !== null && rawMp.ont !== "")
+    ? Number(rawMp.ont)
+    : ((rawMp.otp !== undefined && rawMp.otp !== null && rawMp.otp !== "")
+      ? Number(rawMp.otp)
+      : (data.ont_qte !== undefined && data.ont_qte !== null && data.ont_qte !== "" ? Number(data.ont_qte) : 1));
+
+  if (rawMp.otp === undefined || rawMp.otp === null || rawMp.otp === "") {
+    rawMp.otp = baseOnt;
+  } else {
+    rawMp.otp = Number(rawMp.otp);
+  }
+
+  if (rawMp.ont === undefined || rawMp.ont === null || rawMp.ont === "") {
+    rawMp.ont = baseOnt;
+  } else {
+    rawMp.ont = Number(rawMp.ont);
+  }
+
   return {
     ...empty,
     ...data,
     points_gps: pointsGps,
     whatsapp_photos: Array.isArray(data.whatsapp_photos) ? data.whatsapp_photos : [],
-    materiel_pose: (data.materiel_pose && typeof data.materiel_pose === "object") ? data.materiel_pose : {},
+    materiel_pose: rawMp,
     depart_m: Number(data.depart_m ?? 0),
     arrivee_m: Number(data.arrivee_m ?? 0),
     lineaire_m: Number(data.lineaire_m ?? 0),
@@ -360,7 +407,9 @@ export function ensureInterventionDefaults(data) {
     nb_poteaux_traverses: computedTraverses,
     nb_poteaux_implantes: computedImplantes,
     nb_poteaux_armes: computedArmes,
-    pto_qte: Number(data.pto_qte ?? 0),
+    pto_qte: Number(data.pto_qte !== undefined && data.pto_qte !== null ? data.pto_qte : rawMp.pto),
+    ont_qte: Number(data.ont_qte !== undefined && data.ont_qte !== null ? data.ont_qte : rawMp.ont),
+    _crochets_manual: isCrochetsManual,
     latitude_fat: data.latitude_fat ?? (pointsGps.find((p) => p && String(p.type || "").toUpperCase() === "FAT")?.lat ?? ""),
     longitude_fat: data.longitude_fat ?? (pointsGps.find((p) => p && String(p.type || "").toUpperCase() === "FAT")?.lng ?? ""),
     latitude: data.latitude ?? (pointsGps.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()))?.lat ?? ""),
@@ -787,12 +836,19 @@ export function createEmptyIntervention(technicien, initialNom = "") {
     nb_poteaux_implantes: 0,
     nb_poteaux_armes: 0,
 
-    materiel_pose: {},
+    materiel_pose: {
+      crochets: 0,
+      piton: 1,
+      pto: 1,
+      otp: 1,
+      ont: 1,
+    },
 
     points_gps: [],
 
     ont_sn: "",
-    pto_qte: 0,
+    pto_qte: 1,
+    ont_qte: 1,
     repeteur_wifi_qte: 0,
     emplacement_ont: "",
     client_confirme_emplacement: false,

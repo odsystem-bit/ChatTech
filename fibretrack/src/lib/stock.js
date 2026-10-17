@@ -160,6 +160,9 @@ export function getDesignations() {
  */
 export function findExistingDesignation(nameInput) {
   const target = normalize(nameInput);
+  if (target === "otp" || target === "otp / ont" || target === "ont / otp" || target === "box" || target === "modem") {
+    return "ont";
+  }
   return getDesignations().find((d) => normalize(d) === target) ?? null;
 }
 
@@ -188,10 +191,19 @@ export async function decrementStock(designationInput, quantite) {
 
 /**
  * Déduit plusieurs désignations à partir des quantités posées sur une intervention.
+ * Fusionne strictement OTP et ONT pour ne jamais déduire deux fois le même équipement.
  */
 export async function applyInterventionToStock(materielPose) {
   const stock = getCached();
-  for (const [designationInput, quantite] of Object.entries(materielPose)) {
+  const normalizedPose = { ...(materielPose || {}) };
+
+  if ("otp" in normalizedPose || "ont" in normalizedPose) {
+    const ontQty = Math.max(Number(normalizedPose.ont || 0), Number(normalizedPose.otp || 0));
+    delete normalizedPose.otp;
+    normalizedPose.ont = ontQty;
+  }
+
+  for (const [designationInput, quantite] of Object.entries(normalizedPose)) {
     if (!quantite) continue;
     const designation = resolveOrCreateDesignation(designationInput);
     const newQte = (stock[designation] ?? 0) - quantite;

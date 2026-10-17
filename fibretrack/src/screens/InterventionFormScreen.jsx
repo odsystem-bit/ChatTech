@@ -38,6 +38,7 @@ import {
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
 import { isInterventionTerminee } from "../lib/interventionFilters";
+import { calculateMaterials } from "../lib/materialsCalculation.js";
 import { downloadPhotoFile, downloadAllPhotosAsZip } from "../lib/photoDownload";
 import { findPhotoForSlot } from "../lib/slotPhotos";
 import {
@@ -183,7 +184,7 @@ export const CELPROS_PHOTO_SLOTS = [
 const OFFRES = ["Fibre Pro", "Pro Max", "Pro Mega", "Office Max", "Office Mega"];
 const _NIVEAUX = ["Très satisfait", "Satisfait", "Peu satisfait", "Insatisfait"];
 const TYPES_POINT = ["Poteau", "Chambre", "FAT", "Abonné", "Autre"];
-const SOUS_TYPES_POTEAU = ["Traversé", "Armé", "Implanté"];
+const SOUS_TYPES_POTEAU = ["Traversé", "Poteau FAT", "Armé", "Implanté"];
 const _PORTS_DISPONIBLES = Array.from({ length: 8 }, (_, index) => `Port ${index + 1}`);
 const PROPRIETAIRES_SUGGERES = ["SBEE", "Petit Jean"];
 
@@ -193,6 +194,8 @@ const MATERIEL_STANDARD = [
   { key: "crochets", label: "Crochets" },
   { key: "susp", label: "Suspente (Susp)" },
   { key: "piton", label: "Piton" },
+  { key: "pto", label: "PTO" },
+  { key: "otp", label: "OTP / ONT" },
   { key: "closer", label: "Closer" },
   { key: "rp1", label: "RP1", hidden: true },
   { key: "traverse_13t", label: "Traverse 13T" },
@@ -800,6 +803,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   function commitPoint() {
     const isPoteau = resolvedType === "Poteau";
+    const isFatPole = isPoteau && (sousType === "Poteau FAT" || sousType.toLowerCase().includes("fat"));
     const point = {
       id: crypto.randomUUID(),
       type: resolvedType,
@@ -807,14 +811,25 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         sous_type: sousType,
         proprietaire: proprietaire.trim(),
         type_poteau: proprietaire.trim(),
-        traverse: sousType !== "Implanté",
+        traverse: sousType !== "Implanté" && !isFatPole,
         implante: sousType === "Implanté",
         arme: sousType === "Armé",
+        is_poteau_fat: isFatPole,
       } : {}),
       ...pendingCapture,
       ajoute_par: currentUser,
     };
-    update("points_gps", [...data.points_gps, point]);
+    const nextPoints = [...data.points_gps, point];
+    update("points_gps", nextPoints);
+
+    if (!data._crochets_manual) {
+      const calc = calculateMaterials({ ...data, points_gps: nextPoints });
+      const nextMp = {
+        ...(data.materiel_pose || {}),
+        crochets: calc.crochets,
+      };
+      update("materiel_pose", nextMp);
+    }
 
     // Also add the photo to the terrain gallery (hors rapport)
     if (pendingCapture.photo) {
@@ -872,16 +887,52 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   function updateMateriel(designation, qte) {
+    const numQte = Math.max(0, Number(qte) || 0);
     markDirty(`materiel_pose.${designation}`);
     setData((prev) => {
+      const nextMp = { ...prev.materiel_pose, [designation]: numQte };
       const next = {
         ...prev,
-        materiel_pose: { ...prev.materiel_pose, [designation]: Number(qte) },
+        materiel_pose: nextMp,
       };
+
+      if (designation === "crochets") {
+        next._crochets_manual = true;
+        dirtyFieldsRef.current.add("_crochets_manual");
+      }
+
+      if (designation === "otp" || designation === "ont") {
+        nextMp.otp = numQte;
+        nextMp.ont = numQte;
+        next.ont_qte = numQte;
+        markDirty("materiel_pose.otp", "materiel_pose.ont", "ont_qte");
+      }
+
+      if (designation === "pto") {
+        next.pto_qte = numQte;
+        markDirty("pto_qte");
+      }
+
       saveInterventionLocally(next);
       return next;
     });
     setSaveStatus("✓ Enregistré");
+  }
+
+  function resetCrochetsToAuto() {
+    setData((prev) => {
+      const calc = calculateMaterials(prev);
+      const nextMp = { ...prev.materiel_pose, crochets: calc.crochets };
+      const next = {
+        ...prev,
+        _crochets_manual: false,
+        materiel_pose: nextMp,
+      };
+      markDirty("materiel_pose.crochets", "_crochets_manual");
+      saveInterventionLocally(next);
+      return next;
+    });
+    setSaveStatus("✓ Calcul automatique des crochets rétabli");
   }
 
   function handleAddMateriel(e) {
@@ -1624,6 +1675,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         modifie_le: new Date().toISOString(),
         _fully_loaded: true,
       };
+      if (!prev._crochets_manual) {
+        const calc = calculateMaterials(next);
+        next.materiel_pose = {
+          ...(prev.materiel_pose || {}),
+          crochets: calc.crochets,
+        };
+        markDirty("materiel_pose.crochets");
+      }
       saveInterventionLocally(next);
       return next;
     });
@@ -1675,10 +1734,22 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       updatedPole.proprietaire = optionValue;
     }
 
-    if (updatedPole.implante) updatedPole.sous_type = "Implanté";
-    else if (updatedPole.arme) updatedPole.sous_type = "Armé";
-    else if (updatedPole.traverse) updatedPole.sous_type = "Traversé";
-    else updatedPole.sous_type = "Poteau";
+    if (optionKey === "is_poteau_fat") {
+      updatedPole.is_poteau_fat = Boolean(optionValue);
+      if (updatedPole.is_poteau_fat) {
+        updatedPole.sous_type = "Poteau FAT";
+        updatedPole.traverse = false;
+      } else {
+        updatedPole.sous_type = updatedPole.implante ? "Implanté" : updatedPole.arme ? "Armé" : "Traversé";
+        updatedPole.traverse = updatedPole.sous_type !== "Implanté";
+      }
+    } else {
+      if (updatedPole.implante) updatedPole.sous_type = "Implanté";
+      else if (updatedPole.arme) updatedPole.sous_type = "Armé";
+      else if (updatedPole.traverse) updatedPole.sous_type = "Traversé";
+      else if (updatedPole.is_poteau_fat) updatedPole.sous_type = "Poteau FAT";
+      else updatedPole.sous_type = "Poteau";
+    }
 
     if (poleIdx >= 0) {
       list[poleIdx] = updatedPole;
@@ -1703,6 +1774,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         modifie_le: new Date().toISOString(),
         _fully_loaded: true,
       };
+      if (!prev._crochets_manual) {
+        const calc = calculateMaterials(next);
+        next.materiel_pose = {
+          ...(prev.materiel_pose || {}),
+          crochets: calc.crochets,
+        };
+        markDirty("materiel_pose.crochets");
+      }
       saveInterventionLocally(next);
       return next;
     });
@@ -1927,6 +2006,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
         _fully_loaded: true,
       };
+      if (!prev._crochets_manual) {
+        const calc = calculateMaterials(next);
+        next.materiel_pose = {
+          ...(prev.materiel_pose || {}),
+          crochets: calc.crochets,
+        };
+        markDirty("materiel_pose.crochets");
+      }
       saveInterventionLocally(next);
       dataRef.current = next;
       flushServerSync().catch(() => {});
@@ -2975,35 +3062,77 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 </div>
 
                 <h4 style={{ margin: "16px 0 10px", fontSize: 14 }}>Matériel standard</h4>
-                <div className="materiel-grid">
-                  {MATERIEL_STANDARD.filter((m) => !m.hidden).map(({ key, label }) => (
-                    <div key={key} className="materiel-card-stepper">
-                      <span className="materiel-label">{label}</span>
-                      <div className="stepper-controls">
-                        <button
-                          type="button"
-                          className="btn-step"
-                          onClick={() => updateMateriel(key, Math.max(0, (Number(data.materiel_pose[key]) || 0) - 1))}
-                        >
-                          -
-                        </button>
-                        <input
-                          type="number"
-                          min="0"
-                          value={data.materiel_pose[key] ?? 0}
-                          onChange={(e) => updateMateriel(key, Math.max(0, Number(e.target.value) || 0))}
-                        />
-                        <button
-                          type="button"
-                          className="btn-step"
-                          onClick={() => updateMateriel(key, (Number(data.materiel_pose[key]) || 0) + 1)}
-                        >
-                          +
-                        </button>
+                {(() => {
+                  const materialsCalc = calculateMaterials(data);
+                  return (
+                    <>
+                      <div className="materiel-grid">
+                        {MATERIEL_STANDARD.filter((m) => !m.hidden).map(({ key, label }) => {
+                          const isCrochets = key === "crochets";
+                          const isManualCrochets = isCrochets && Boolean(data._crochets_manual);
+                          const val = data.materiel_pose[key] ?? (isCrochets ? materialsCalc.crochets : 0);
+
+                          return (
+                            <div
+                              key={key}
+                              className="materiel-card-stepper"
+                              style={isCrochets ? { border: isManualCrochets ? "1.5px solid #f59e0b" : "1.5px solid #0284c7" } : {}}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", gap: 4 }}>
+                                <span className="materiel-label">{label}</span>
+                                {isCrochets && (
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: isManualCrochets ? "#fef3c7" : "#e0f2fe", color: isManualCrochets ? "#b45309" : "#0369a1" }}>
+                                    {isManualCrochets ? "Manuel" : "Auto"}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="stepper-controls">
+                                <button
+                                  type="button"
+                                  className="btn-step"
+                                  onClick={() => updateMateriel(key, Math.max(0, (Number(val) || 0) - 1))}
+                                >
+                                  -
+                                </button>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={val}
+                                  onChange={(e) => updateMateriel(key, Math.max(0, Number(e.target.value) || 0))}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn-step"
+                                  onClick={() => updateMateriel(key, (Number(val) || 0) + 1)}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  ))}
-                </div>
+
+                      {data._crochets_manual ? (
+                        <div style={{ margin: "8px 0 14px", padding: "8px 12px", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, fontSize: 12, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                          <span>⚠️ Nombre de crochets modifié manuellement (<strong>{data.materiel_pose?.crochets}</strong>). Calcul suggéré : <strong>{materialsCalc.crochets}</strong> ({materialsCalc.formula}).</span>
+                          <button
+                            type="button"
+                            className="btn-secondary"
+                            style={{ padding: "4px 8px", fontSize: 11, cursor: "pointer" }}
+                            onClick={resetCrochetsToAuto}
+                          >
+                            🔄 Rétablir calcul auto
+                          </button>
+                        </div>
+                      ) : (
+                        <p style={{ margin: "6px 0 14px", fontSize: 11, color: "var(--text-muted)" }}>
+                          💡 Calcul automatique : <strong>{materialsCalc.formula}</strong> (Piton : 1, PTO : 1, OTP : 1 par défaut). Modifiable manuellement à tout moment.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
 
                 <h4 style={{ margin: "18px 0 8px", fontSize: 14 }}>Autre matériel (facultatif)</h4>
                 <form className="stock-form-modern" onSubmit={handleAddMateriel}>
@@ -3546,14 +3675,16 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     const lieu = wa?.lieu ?? pt?.lieu;
                     const horo = wa?.horodatage ?? pt?.horodatage;
 
-                    const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (pt.sous_type !== "Implanté");
+                    const isFatPole = Boolean(pt.is_poteau_fat || String(pt.sous_type || "").toLowerCase().includes("fat"));
+                    const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (!isFatPole && pt.sous_type !== "Implanté");
                     const isImplante = Boolean(pt.implante);
                     const isArme = Boolean(pt.arme);
                     const typePoteau = pt.type_poteau || pt.proprietaire || "";
 
                     const charBadges = [];
                     if (typePoteau) charBadges.push(typePoteau);
-                    if (isTraverse) charBadges.push("Traversé");
+                    if (isFatPole) charBadges.push("Poteau FAT");
+                    else if (isTraverse) charBadges.push("Traversé (Linéaire)");
                     if (isImplante) charBadges.push("Implanté");
                     if (isArme) charBadges.push("Armé");
                     const charTitle = charBadges.join(" • ") || "Poteau";
@@ -3603,10 +3734,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                 <div className="pole-pills-group">
                                   <button
                                     type="button"
-                                    className={`pill-btn ${isTraverse ? "active" : ""}`}
+                                    className={`pill-btn ${isTraverse && !isFatPole ? "active" : ""}`}
                                     onClick={() => handlePoleOptionChange(poleNum, "traverse", !isTraverse)}
                                   >
-                                    {isTraverse ? "✓ Traversée" : "Traversée"}
+                                    {isTraverse && !isFatPole ? "✓ Traversée" : "Traversée"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${isFatPole ? "active" : ""}`}
+                                    style={isFatPole ? { background: "#0284c7", color: "#fff", borderColor: "#0284c7" } : {}}
+                                    onClick={() => handlePoleOptionChange(poleNum, "is_poteau_fat", !isFatPole)}
+                                  >
+                                    {isFatPole ? "✓ Poteau FAT" : "Poteau FAT"}
                                   </button>
                                   <button
                                     type="button"
@@ -4407,6 +4546,14 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           _deleted_point_ids: Array.from(deletedGpsPointIdsRef.current),
                           _fully_loaded: true,
                         };
+                        if (!data._crochets_manual) {
+                          const calc = calculateMaterials(nextData);
+                          nextData.materiel_pose = {
+                            ...(data.materiel_pose || {}),
+                            crochets: calc.crochets,
+                          };
+                          markDirty("materiel_pose.crochets");
+                        }
                         setData(nextData);
                         dataRef.current = nextData;
                         saveInterventionLocally(nextData);

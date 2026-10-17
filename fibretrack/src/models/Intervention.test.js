@@ -510,5 +510,74 @@ test("saveInterventionLocally with _fully_loaded: true permanently deletes photo
   assert.equal(fatPhoto.url, "data:image/jpeg;base64,newfatimg");
 });
 
+test("Default materials rules: empty intervention defaults to piton=1, pto=1, otp=1, ont=1, crochets=0", () => {
+  const intv = createEmptyIntervention("Technicien");
+  const defaulted = ensureInterventionDefaults(intv);
+
+  assert.equal(defaulted.materiel_pose.piton, 1, "Piton doit être 1");
+  assert.equal(defaulted.materiel_pose.pto, 1, "PTO doit être 1");
+  assert.equal(defaulted.materiel_pose.otp, 1, "OTP doit être 1");
+  assert.equal(defaulted.materiel_pose.ont, 1, "ONT doit être 1");
+  assert.equal(defaulted.materiel_pose.crochets, 0, "0 poteau = 0 crochet");
+  assert.equal(defaulted.pto_qte, 1, "pto_qte doit être 1");
+  assert.equal(defaulted.ont_qte, 1, "ont_qte doit être 1");
+});
+
+test("Automatic calculation: 4 linear poles + 1 FAT pole/point = 9 crochets, 1 piton, 1 OTP, 1 PTO", () => {
+  const intv = {
+    id: "intv-calc-test",
+    nom_client: "Client Test Calcul",
+    points_gps: [
+      { id: "fat1", type: "FAT", lat: 6.36, lng: 2.42 },
+      { id: "p1", type: "Poteau", numero: 1, traverse: true },
+      { id: "p2", type: "Poteau", numero: 2, traverse: true },
+      { id: "p3", type: "Poteau", numero: 3, traverse: true },
+      { id: "p4", type: "Poteau", numero: 4, traverse: true },
+    ],
+  };
+
+  const defaulted = ensureInterventionDefaults(intv);
+  assert.equal(defaulted.materiel_pose.crochets, 9, "4 lin * 2 + 1 FAT * 1 = 9 crochets");
+  assert.equal(defaulted.materiel_pose.piton, 1, "1 piton obligatoire");
+  assert.equal(defaulted.materiel_pose.pto, 1, "1 PTO par défaut");
+  assert.equal(defaulted.materiel_pose.otp, 1, "1 OTP par défaut");
+  assert.equal(defaulted.materiel_pose.ont, 1, "1 ONT par défaut");
+});
+
+test("Dynamic pole changes recalculate crochets unless overridden manually", () => {
+  const intv = {
+    id: "intv-dynamic",
+    points_gps: [
+      { id: "fat1", type: "FAT" },
+      { id: "p1", type: "Poteau", numero: 1 },
+      { id: "p2", type: "Poteau", numero: 2 },
+    ],
+  };
+
+  // 2 linear + 1 FAT = (2*2) + 1 = 5
+  let defaulted = ensureInterventionDefaults(intv);
+  assert.equal(defaulted.materiel_pose.crochets, 5);
+
+  // Add 2 more poles = 4 linear + 1 FAT = 9
+  intv.points_gps.push(
+    { id: "p3", type: "Poteau", numero: 3 },
+    { id: "p4", type: "Poteau", numero: 4 }
+  );
+  defaulted = ensureInterventionDefaults(intv);
+  assert.equal(defaulted.materiel_pose.crochets, 9);
+
+  // Manual override: user sets crochets to 12
+  intv._crochets_manual = true;
+  intv.materiel_pose = { ...defaulted.materiel_pose, crochets: 12 };
+  defaulted = ensureInterventionDefaults(intv);
+  assert.equal(defaulted.materiel_pose.crochets, 12, "Manual override must be preserved");
+
+  // Even if we add another pole, manual override is kept
+  intv.points_gps.push({ id: "p5", type: "Poteau", numero: 5 });
+  defaulted = ensureInterventionDefaults(intv);
+  assert.equal(defaulted.materiel_pose.crochets, 12, "Manual override must NOT be overwritten dynamically");
+});
+
+
 
 

@@ -2,6 +2,8 @@
 // 1. Rapport Global WhatsApp : Structure officielle complète avec puces en gras (*...*)
 // 2. Rapport de Conformité : Structure épurée conforme aux audits terrain
 
+import { calculateMaterials } from "./materialsCalculation.js";
+
 function cleanStr(s) {
   return s == null ? "" : String(s).trim();
 }
@@ -249,9 +251,13 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
     return "00";
   };
 
-  const ontQte = mp.ont ?? d.ont_qte ?? (d.sn || d.ont_livre ? 1 : 1);
+  const ontQte = mp.ont ?? mp.otp ?? d.ont_qte ?? (d.sn || d.ont_livre ? 1 : 1);
   const ptoQte = mp.pto ?? d.pto_qte ?? 1;
   const jarretiereQte = mp.jarretiere ?? (d.jarretiere ? 1 : 1);
+  const pitonQte = mp.piton !== undefined && mp.piton !== null && mp.piton !== "" ? mp.piton : 1;
+  const crochetsQte = mp.crochets !== undefined && mp.crochets !== null && mp.crochets !== ""
+    ? mp.crochets
+    : calculateMaterials(d).crochets;
 
   const cleanNomClient = cleanStr(d.nom_client);
   const cleanLigne = cleanStr(d.telephone_ligne || d.numero_ligne || d.telephone_fixe);
@@ -305,9 +311,9 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
     `*PTO: ${fmt2(ptoQte)}*`,
     `*Jarretière: ${fmt2(jarretiereQte)}*`,
     `*Pince:${val("pince")}*`,
-    `*Crochets:${val("crochets")}*`,
+    `*Crochets:${fmt2(crochetsQte)}*`,
     `*Susp: ${val("susp")}*`,
-    `*Piton: ${val("piton")}*`,
+    `*Piton: ${fmt2(pitonQte)}*`,
     `*Cheville: ${val("cheville")}*`,
     `*Connecteur: ${val("connecteur")}*`,
     `*Closer: ${val("closer")}*`,

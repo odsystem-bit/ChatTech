@@ -43,6 +43,9 @@ function canonicalDesignation($designation) {
     'ont box' => 'ont',
     'box ont' => 'ont',
     'routeur ont' => 'ont',
+    'otp' => 'ont',
+    'otp / ont' => 'ont',
+    'ont / otp' => 'ont',
     'pto fibre' => 'pto',
     'prise pto' => 'pto',
   ];
@@ -53,6 +56,13 @@ function buildTotalMaterielPose(array $d): array {
   $incomingMat = $d['materiel_pose'] ?? [];
   if (is_object($incomingMat)) $incomingMat = (array)$incomingMat;
   if (!is_array($incomingMat)) $incomingMat = [];
+
+  // Déduplication stricte OTP / ONT pour éviter tout double décompte de stock
+  if (isset($incomingMat['otp']) || isset($incomingMat['ont'])) {
+    $ontVal = max((int)($incomingMat['ont'] ?? 0), (int)($incomingMat['otp'] ?? 0));
+    unset($incomingMat['otp']);
+    $incomingMat['ont'] = $ontVal;
+  }
 
   $total = [];
   foreach ($incomingMat as $rawDesig => $qty) {
