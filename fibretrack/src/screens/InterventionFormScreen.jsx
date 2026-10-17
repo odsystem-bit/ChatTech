@@ -3455,9 +3455,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                             <span className="zoom-hint-chip">🔍 Agrandir</span>
                           </div>
 
-                          {slot.hasOcr && (data.fat_ref || data.msan) && (
+                          {slot.key === "fat" && (data.fat_ref || data.msan) && (
                             <div className="fat-ocr-detected-chip">
                               <span>⚡ FAT : <strong>{data.fat_ref || "N/A"}</strong> | MSAN : <strong>{data.msan || "N/A"}</strong></span>
+                            </div>
+                          )}
+
+                          {slot.key === "mesure_fat" && data.puissance_fat_dbm && Number(data.puissance_fat_dbm) !== 0 && (
+                            <div className="fat-ocr-detected-chip">
+                              <span>⚡ Puissance optique FAT : <strong>{data.puissance_fat_dbm} dBm</strong></span>
+                            </div>
+                          )}
+
+                          {slot.key === "mesure_pto" && data.puissance_pto_dbm && Number(data.puissance_pto_dbm) !== 0 && (
+                            <div className="fat-ocr-detected-chip">
+                              <span>⚡ Puissance optique PTO : <strong>{data.puissance_pto_dbm} dBm</strong></span>
+                            </div>
+                          )}
+
+                          {(slot.key === "debit_wifi" || slot.key === "debit_cable") && (data.debit_descendant || data.debit_montant) && (
+                            <div className="fat-ocr-detected-chip">
+                              <span>📶 Débit détecté : <strong>↓ {data.debit_descendant || "-"} Mb/s</strong> | <strong>↑ {data.debit_montant || "-"} Mb/s</strong></span>
                             </div>
                           )}
 
