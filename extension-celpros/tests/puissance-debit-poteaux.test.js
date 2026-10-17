@@ -383,3 +383,72 @@ test("Test débit Wi-Fi - Renseignement automatique des 3 cases (Montant, Descen
   assert.equal(inputPing.value, "18.99", "Ping doit être renseigné");
 });
 
+test("Section Poteaux - Injection ordonnée stricte (Poteau 1, Poteau 2...) et coordonnées GPS respectives", async () => {
+  const root = new MockElement("div", { className: "form-step-4" });
+  const cardRattachement = new MockElement("div", { className: "card" });
+  
+  const poteauxBlock = new MockElement("div", { className: "col-12" });
+  const headerRow = new MockElement("div", { className: "d-flex justify-content-between" });
+  const title = new MockElement("span", { innerText: "Poteaux" });
+  const addBtn = new MockElement("button", { innerText: "+", className: "btn btn-sm" });
+  headerRow.appendChild(title);
+  headerRow.appendChild(addBtn);
+
+  const slotsContainer = new MockElement("div", { className: "poteaux-slots-list" });
+  poteauxBlock.appendChild(headerRow);
+  poteauxBlock.appendChild(slotsContainer);
+  cardRattachement.appendChild(poteauxBlock);
+  root.appendChild(cardRattachement);
+
+  const createdCoordInputs = [];
+  let slotIndex = 0;
+  addBtn._clickHandler = () => {
+    slotIndex++;
+    const slotWrap = new MockElement("div", { className: "upload-box" });
+    const fileInput = new MockElement("input", {
+      type: "file",
+      id: `field_poteau_${slotIndex}`,
+      name: `poteau_${slotIndex}`,
+    });
+    const coordInput = new MockElement("input", {
+      type: "text",
+      id: `field_poteau_gps_${slotIndex}`,
+      placeholder: "Coordonnées GPS",
+    });
+    createdCoordInputs.push(coordInput);
+    slotWrap.appendChild(fileInput);
+    slotWrap.appendChild(coordInput);
+    slotsContainer.appendChild(slotWrap);
+  };
+
+  // Données avec Poteaux non ordonnés au départ dans points_gps + Autre poteau
+  const data = {
+    latitude: 6.380000,
+    longitude: 2.610000,
+    points_gps: [
+      { type: "Poteau", numero: 2, lat: 6.386111, lng: 2.614222, photo: "data:image/jpeg;base64,ZHVtbXky" },
+      { type: "Poteau", numero: 1, lat: 6.385448, lng: 2.612959, photo: "data:image/jpeg;base64,ZHVtbXkx" },
+    ],
+    whatsapp_photos: [
+      { slot: "autre_poteau", name: "autre_poteau_1.jpg", lat: 6.387333, lng: 2.615444, url: "data:image/jpeg;base64,ZHVtbXkz" },
+    ],
+  };
+
+  const res = await PhotoFiller.fillPhotosOnPage(data, root);
+  assert.ok(res.success);
+  assert.equal(res.details.length, 3, "Les 3 poteaux doivent être injectés");
+
+  // Vérification de l'ordre strict : Poteau 1 d'abord, puis Poteau 2, puis Autre Poteau
+  assert.equal(res.details[0].label, "Poteau 1");
+  assert.equal(res.details[0].fileName, "poteau_1.jpg");
+  assert.equal(createdCoordInputs[0].value, "6.385448, 2.612959", "Coordonnées GPS de Poteau 1 exactes");
+
+  assert.equal(res.details[1].label, "Poteau 2");
+  assert.equal(res.details[1].fileName, "poteau_2.jpg");
+  assert.equal(createdCoordInputs[1].value, "6.386111, 2.614222", "Coordonnées GPS de Poteau 2 exactes");
+
+  assert.equal(res.details[2].label, "Autre Poteau 1");
+  assert.equal(res.details[2].fileName, "autre_poteau_1.jpg");
+  assert.equal(createdCoordInputs[2].value, "6.387333, 2.615444", "Coordonnées GPS de Autre Poteau 1 exactes");
+});
+

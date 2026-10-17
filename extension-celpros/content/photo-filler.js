@@ -957,7 +957,10 @@
   // Injecte une valeur textuelle ou numérique avec déclenchement d'événements réactifs
   function setNativeFieldValue(element, value) {
     if (!element || value === null || value === undefined || value === "") return false;
-    let stringValue = String(value).replace(",", ".").trim();
+    let stringValue = String(value).trim();
+    if (/^-?\d+,\d+$/.test(stringValue)) {
+      stringValue = stringValue.replace(",", ".");
+    }
     if (element.value === stringValue) return true;
 
     try {
@@ -1080,58 +1083,89 @@
     }
   }
 
-  // Cherche le conteneur englobant de la section Poteaux dans CelPros (Étape 4)
-  function findPoteauxSection(root) {
+  // Déclenche un clic hautement compatible avec Angular et les navigateurs modernes
+  function robustClick(el) {
+    if (!el) return false;
+    const target = (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
+    try {
+      if (typeof target.focus === "function") target.focus();
+      const mouseOpts = { bubbles: true, cancelable: true, view: typeof window !== "undefined" ? window : null };
+      if (typeof PointerEvent !== "undefined") {
+        try { target.dispatchEvent(new PointerEvent("pointerdown", mouseOpts)); } catch {}
+      }
+      try { target.dispatchEvent(new MouseEvent("mousedown", mouseOpts)); } catch {}
+      if (typeof PointerEvent !== "undefined") {
+        try { target.dispatchEvent(new PointerEvent("pointerup", mouseOpts)); } catch {}
+      }
+      try { target.dispatchEvent(new MouseEvent("mouseup", mouseOpts)); } catch {}
+      try { target.dispatchEvent(new MouseEvent("click", mouseOpts)); } catch {}
+      if (typeof target.click === "function") {
+        target.click();
+      }
+      return true;
+    } catch {
+      try {
+        if (typeof target.click === "function") target.click();
+        return true;
+      } catch {}
+    }
+    return false;
+  }
+
+  // Cherche l'élément titre/libellé de la section Poteaux dans CelPros (Étape 4)
+  function findPoteauxTitle(root) {
     if (!root) return null;
     const candidates = Array.from(root.querySelectorAll("h1, h2, h3, h4, h5, h6, strong, b, div, span, p, label, section"));
 
     // 1. Chercher un élément dont le libellé mentionne explicitement "Poteaux" ou "Appuis"
-    let headerEl = null;
     for (const el of candidates) {
       if (el.children && el.children.length > 3) continue;
       const txt = (el.innerText || el.textContent || "").trim();
       if (/^(?:poteaux|poteaux travers[eé]s|appuis|appuis a[eé]riens)$/i.test(txt) ||
           (/poteaux/i.test(txt) && /max\s*10/i.test(txt))) {
-        headerEl = el;
-        break;
+        return el;
       }
     }
 
-    if (!headerEl) {
-      for (const el of candidates) {
-        if (el.children && el.children.length > 3) continue;
-        const txt = (el.innerText || el.textContent || "").trim();
-        if (/\bpoteaux\b/i.test(txt) && !/travers|implant|arm/i.test(txt) && txt.length < 60) {
-          headerEl = el;
-          break;
-        }
+    // 2. Recherche textuelle ciblée
+    for (const el of candidates) {
+      if (el.children && el.children.length > 3) continue;
+      const txt = (el.innerText || el.textContent || "").trim();
+      if (/\bpoteaux\b/i.test(txt) && !/travers|implant|arm|nombre|nb/i.test(txt) && txt.length < 50) {
+        return el;
       }
     }
 
-    if (!headerEl) return null;
-
-    // Remonter vers le conteneur englobant de la section Poteaux
-    let container = headerEl;
-    while (container && container !== root) {
-      const parent = container.parentElement;
-      if (!parent) break;
-      const parentText = (parent.innerText || parent.textContent || "").toLowerCase();
-      if (parentText.includes("max 10") || parentText.includes("appuyez sur +") || parent.querySelector("button, [role='button'], i.fa-plus, [class*='plus']")) {
-        container = parent;
-        if (container.classList && (container.classList.contains("row") || container.classList.contains("form-group") || container.classList.contains("col-12") || container.classList.contains("card") || container.tagName === "SECTION" || container.tagName === "FIELDSET")) {
-          break;
-        }
-      } else {
-        break;
+    // 3. Fallback sur le texte d'aide "appuyez sur + pour ajouter (max 10)"
+    for (const el of candidates) {
+      const txt = (el.innerText || el.textContent || "").trim();
+      if (/appuyez sur \+ pour ajouter/i.test(txt) || /max\s*10/i.test(txt)) {
+        return el;
       }
     }
 
-    return container;
+    return null;
+  }
+
+  // Cherche le conteneur englobant de la section Poteaux dans CelPros (Étape 4)
+  function findPoteauxSection(root) {
+    const titleEl = findPoteauxTitle(root);
+    if (!titleEl) return null;
+
+    // Remonter vers le conteneur englobant (la carte "Rattachement" ou le groupe englobant)
+    if (typeof titleEl.closest === "function") {
+      const card = titleEl.closest(".card, section, fieldset, .form-section, form, div.col-12");
+      if (card) return card;
+    }
+    return titleEl.parentElement?.parentElement || titleEl.parentElement || root;
   }
 
   // Cherche le bouton '+' pour ajouter un nouveau poteau dans CelPros
   function findAddPoleButton(container, root) {
-    const areas = [container, root].filter(Boolean);
+    const titleEl = findPoteauxTitle(container || root);
+    const headerRow = titleEl ? (titleEl.closest ? (titleEl.closest(".d-flex, .row, [class*='row'], div") || titleEl.parentElement) : titleEl.parentElement) : null;
+    const areas = [headerRow, container, root].filter(Boolean);
+
     for (const area of areas) {
       const candidates = Array.from(area.querySelectorAll("button, a, [role='button'], .btn, i, span, svg"));
       for (const el of candidates) {
@@ -1140,96 +1174,301 @@
         const title = (el.getAttribute("title") || "").toLowerCase();
         const cls = (el.className || (typeof el.className === "string" ? el.className : "")).toLowerCase();
 
-        if (txt === "+" || /^(?:\+[\s\w]*|ajouter|ajouter un poteau|add)$/i.test(txt)) {
-          return el.closest("button, a, [role='button']") || el;
+        if (txt === "+" || /^(?:\+\s*|\+[\s\w]*|ajouter|ajouter un poteau|add)$/i.test(txt)) {
+          return (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
         }
         if (aria.includes("ajouter") || aria.includes("add") || aria.includes("plus") ||
             title.includes("ajouter") || title.includes("add") || title.includes("plus")) {
-          return el.closest("button, a, [role='button']") || el;
+          return (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
         }
-        if (cls.includes("fa-plus") || cls.includes("btn-plus") || cls.includes("plus-icon") || cls.includes("add-btn")) {
-          return el.closest("button, a, [role='button']") || el;
+        if (cls.includes("fa-plus") || cls.includes("btn-plus") || cls.includes("plus-icon") || cls.includes("add-btn") || cls.includes("fa-plus-circle")) {
+          return (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
         }
       }
     }
     return null;
   }
 
-  // Gère l'ajout et l'injection des photos de poteaux géolocalisés et "Autre poteau" (uniquement si elles existent)
-  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null)) {
-    const details = [];
-    if (!root) return details;
-
-    const polePhotos = [];
-    // 1. Poteaux issus du relevé GPS
+  // Récupère et ordonne rigoureusement tous les poteaux à injecter :
+  // 1) "Photos de poteaux géolocalisés (CelPros)" triées par numéro (Poteau 1, Poteau 2, ...)
+  // 2) "Autres poteaux" situés dans "Boîte à Photos CelPros"
+  function collectAllPoles(interventionData) {
+    const poles = [];
+    const assignedSources = new Set();
     const pts = Array.isArray(interventionData?.points_gps) ? interventionData.points_gps : [];
+    const wa = getEligibleWhatsappPhotos(interventionData);
+
+    // 1. Photos de poteaux géolocalisés (CelPros)
+    // Extraire tous les numéros présents (1, 2, 3...)
+    const poleNums = new Set();
     for (const p of pts) {
-      if (p && normalizeText(p.type).includes("poteau")) {
-        const src = getPhotoSource(p.photo);
-        if (src && !polePhotos.some((existing) => existing.src === src)) {
-          polePhotos.push({ src, name: `poteau_${p.numero || polePhotos.length + 1}.jpg` });
+      if (p && (p.type === "Poteau" || normalizeText(p.type).includes("poteau"))) {
+        const n = Number(p.numero);
+        if (!isNaN(n) && n > 0) poleNums.add(n);
+      }
+    }
+    for (const p of wa) {
+      const slot = String(p?.slot || "").toLowerCase();
+      const m = slot.match(/^poteau_?(\d+)$/);
+      if (m) {
+        const n = Number(m[1]);
+        if (!isNaN(n) && n > 0) poleNums.add(n);
+      }
+    }
+
+    // Tri strict croissant : Poteau 1, Poteau 2, Poteau 3...
+    const sortedNums = Array.from(poleNums).sort((a, b) => a - b);
+    for (const num of sortedNums) {
+      const gpsPoint = pts.find(
+        (p) => p && (p.type === "Poteau" || normalizeText(p.type).includes("poteau")) && Number(p.numero) === num
+      );
+      const waPhoto = wa.find((p) => {
+        const slot = String(p?.slot || "").toLowerCase();
+        return slot === `poteau_${num}` || slot === `poteau${num}`;
+      });
+
+      const src = getPhotoSource(gpsPoint?.photo) || getPhotoSource(waPhoto?.url) || getPhotoSource(waPhoto?.photo) || getPhotoSource(gpsPoint);
+      if (!src || assignedSources.has(src)) continue;
+
+      const lat = gpsPoint?.lat ?? waPhoto?.lat ?? interventionData?.latitude ?? null;
+      const lng = gpsPoint?.lng ?? waPhoto?.lng ?? interventionData?.longitude ?? null;
+      const precision_m = gpsPoint?.precision_m ?? waPhoto?.precision_m ?? null;
+
+      assignedSources.add(src);
+      poles.push({
+        src,
+        name: `poteau_${num}.jpg`,
+        label: `Poteau ${num}`,
+        numero: num,
+        lat,
+        lng,
+        precision_m,
+        isAutrePoteau: false,
+      });
+    }
+
+    // Points GPS Poteau sans numéro explicite (fallback)
+    for (const p of pts) {
+      if (p && (p.type === "Poteau" || normalizeText(p.type).includes("poteau"))) {
+        const n = Number(p.numero);
+        if (isNaN(n) || n <= 0) {
+          const src = getPhotoSource(p.photo) || getPhotoSource(p);
+          if (src && !assignedSources.has(src)) {
+            assignedSources.add(src);
+            const fallbackNum = poles.length + 1;
+            poles.push({
+              src,
+              name: `poteau_${fallbackNum}.jpg`,
+              label: `Poteau ${fallbackNum}`,
+              numero: fallbackNum,
+              lat: p.lat ?? interventionData?.latitude ?? null,
+              lng: p.lng ?? interventionData?.longitude ?? null,
+              precision_m: p.precision_m ?? null,
+              isAutrePoteau: false,
+            });
+          }
         }
       }
     }
 
-    // 2. Photos du dossier "Autre poteau" de FibreTrack
-    const wa = getEligibleWhatsappPhotos(interventionData);
+    // 2. "Autres poteaux" situés dans "Boîte à Photos CelPros"
+    const autresPoles = [];
     for (const p of wa) {
       const src = getPhotoSource(p);
-      if (!src) continue;
+      if (!src || assignedSources.has(src)) continue;
+
+      const slot = String(p?.slot || "").toLowerCase();
+      const type = String(p?.type || "").toLowerCase();
       const desc = getPhotoDescription(p);
-      const slot = String(p.slot || "").toLowerCase();
-      const type = String(p.type || "").toLowerCase();
-      if (slot === "autre_poteau" || slot.startsWith("autre_poteau") || type === "autre_poteau" || desc.includes("autre poteau") || desc.includes("poteau")) {
-        if (!polePhotos.some((existing) => existing.src === src)) {
-          polePhotos.push({ src, name: `${p.name ? normalizeText(p.name) : (slot.startsWith("autre_poteau") ? slot : "poteau")}.jpg` });
-        }
+
+      if (slot === "autre_poteau" || slot.startsWith("autre_poteau") || type === "autre_poteau" || desc.includes("autre poteau")) {
+        autresPoles.push(p);
       }
     }
 
-    if (!polePhotos.length) return details;
+    autresPoles.forEach((p, idx) => {
+      const src = getPhotoSource(p);
+      if (!src || assignedSources.has(src)) return;
+      assignedSources.add(src);
 
-    // Détection de la section Poteaux
-    const section = findPoteauxSection(root);
-    if (!section) return details;
+      const lat = p.lat ?? interventionData?.latitude ?? null;
+      const lng = p.lng ?? interventionData?.longitude ?? null;
+      const precision_m = p.precision_m ?? null;
+      const autreIdx = idx + 1;
+
+      poles.push({
+        src,
+        name: `autre_poteau_${autreIdx}.jpg`,
+        label: `Autre Poteau ${autreIdx}`,
+        numero: null,
+        lat,
+        lng,
+        precision_m,
+        isAutrePoteau: true,
+      });
+    });
+
+    return poles;
+  }
+
+  // Récupère tous les slots d'upload dédiés aux poteaux sur CelPros (Étape 4)
+  function findExistingPoleSlots(card, poteauxTitle) {
+    if (!card) return [];
 
     const isForbiddenForPoles = (txt) => {
       return /c[aâ]ble|interne|externe|fat|pto|scan|mesure|d[eé]bit|wifi|contrat|combin[eé]|abonn[eé]|ont|box/i.test(txt);
     };
 
-    const maxPoles = Math.min(10, polePhotos.length);
-    const addBtn = findAddPoleButton(section, root);
+    const fileInputs = Array.from(card.querySelectorAll('input[type="file"]'));
+    const poleSlots = [];
 
-    // Fonction de récupération de tous les inputs de fichiers non interdits dans la section
-    const getPoleInputs = () => {
-      return Array.from(section.querySelectorAll('input[type="file"]')).filter((inp) => {
-        const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.className || ""}`.toLowerCase();
-        return !isForbiddenForPoles(idName);
-      });
-    };
+    for (const inp of fileInputs) {
+      const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.className || ""}`.toLowerCase();
+      if (isForbiddenForPoles(idName)) continue;
+
+      const container = (typeof inp.closest === "function" ? inp.closest(".upload-box, [class*='upload'], .dropzone, div") : null) || inp.parentElement;
+      const containerText = (container?.innerText || container?.textContent || "").toLowerCase();
+      if (isForbiddenForPoles(containerText)) continue;
+
+      // Vérifier si l'input se situe après le titre "Poteaux" dans le document
+      let isAfterHeader = false;
+      if (poteauxTitle && typeof poteauxTitle.compareDocumentPosition === "function") {
+        try {
+          const pos = poteauxTitle.compareDocumentPosition(inp);
+          isAfterHeader = Boolean(pos & 4); // Node.DOCUMENT_POSITION_FOLLOWING = 4
+        } catch {
+          isAfterHeader = true;
+        }
+      } else {
+        isAfterHeader = true;
+      }
+
+      const isExplicitPole = idName.includes("poteau") || containerText.includes("poteau") || containerText.includes("appui");
+
+      if (isAfterHeader || isExplicitPole) {
+        const row = (typeof inp.closest === "function" ? inp.closest(".row, .form-row, [class*='row'], .card-body, .col-12, [class*='item']") : null) || container?.parentElement || container;
+        poleSlots.push({
+          input: inp,
+          container,
+          row,
+        });
+      }
+    }
+
+    return poleSlots;
+  }
+
+  // Injecte automatiquement les coordonnées GPS d'un poteau dans la case de coordonnées CelPros
+  function injectPoleCoordinates(slot, pole) {
+    if (!slot || !pole) return false;
+    if (pole.lat == null || pole.lng == null) return false;
+
+    const latVal = Number(pole.lat).toFixed(6);
+    const lngVal = Number(pole.lng).toFixed(6);
+    const combinedVal = `${latVal}, ${lngVal}`;
+
+    const container = slot.container || slot.input?.parentElement;
+    if (!container) return false;
+
+    // 1. Chercher en priorité dans la boîte / conteneur immédiat de ce poteau
+    let inputs = Array.from(
+      container.querySelectorAll('input:not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+    );
+
+    // 2. Si pas trouvé, remonter au parent direct (ligne du poteau) uniquement s'il n'englobe pas d'autres slots de fichiers
+    if (inputs.length === 0 && container.parentElement) {
+      const parent = container.parentElement;
+      const otherFileInputs = parent.querySelectorAll ? parent.querySelectorAll('input[type="file"]') : [];
+      if (otherFileInputs.length <= 1) {
+        inputs = Array.from(
+          parent.querySelectorAll('input:not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+        );
+      }
+    }
+
+    if (inputs.length === 0) return false;
+
+    // Cas 1 : Exactement 1 champ texte (Cas standard CelPros : champ "Coordonnées GPS" ou "GPS")
+    if (inputs.length === 1) {
+      setNativeFieldValue(inputs[0], combinedVal);
+      return true;
+    }
+
+    // Cas 2 : Plusieurs champs (séparation Latitude / Longitude)
+    let filledLat = false;
+    let filledLng = false;
+
+    for (const inp of inputs) {
+      const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.placeholder || ""}`.toLowerCase();
+      const prevText = (inp.previousElementSibling?.textContent || "").toLowerCase();
+      const parentText = (inp.parentElement?.textContent || "").toLowerCase();
+      const labelText = (inp.labels && inp.labels[0]?.textContent || "").toLowerCase();
+      const combined = `${idName} ${prevText} ${parentText} ${labelText}`;
+
+      if (!filledLat && (combined.includes("lat") || combined.includes("latitude"))) {
+        setNativeFieldValue(inp, latVal);
+        filledLat = true;
+      } else if (!filledLng && (combined.includes("lng") || combined.includes("lon") || combined.includes("longitude"))) {
+        setNativeFieldValue(inp, lngVal);
+        filledLng = true;
+      }
+    }
+
+    if (!filledLat && !filledLng) {
+      if (inputs.length === 2) {
+        setNativeFieldValue(inputs[0], latVal);
+        setNativeFieldValue(inputs[1], lngVal);
+        return true;
+      } else {
+        setNativeFieldValue(inputs[0], combinedVal);
+        return true;
+      }
+    }
+
+    return filledLat || filledLng;
+  }
+
+  // Gère l'ajout et l'injection des photos de poteaux géolocalisés et "Autre poteau" (uniquement si elles existent)
+  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null)) {
+    const details = [];
+    if (!root || !interventionData) return details;
+
+    const allPoles = collectAllPoles(interventionData);
+    if (!allPoles.length) return details;
+
+    // Détection de la section Poteaux
+    const poteauxTitle = findPoteauxTitle(root);
+    if (!poteauxTitle) return details;
+
+    const section = findPoteauxSection(root) || root;
+    const addBtn = findAddPoleButton(section, root);
+    const maxPoles = Math.min(10, allPoles.length);
+
+    const getPoleSlots = () => findExistingPoleSlots(section, poteauxTitle);
 
     // Cas 1 : Si un input file unique avec attribut multiple existe déjà dans la section
-    const existingInputs = getPoleInputs();
-    const multipleInput = existingInputs.find((inp) => inp.multiple);
-    if (multipleInput) {
+    const existingSlots = getPoleSlots();
+    const multipleSlot = existingSlots.find((s) => s.input && s.input.multiple);
+    if (multipleSlot) {
       const poleFiles = [];
       for (let i = 0; i < maxPoles; i++) {
-        const f = await srcToFile(polePhotos[i].src, polePhotos[i].name);
+        const f = await srcToFile(allPoles[i].src, allPoles[i].name);
         if (f) poleFiles.push(f);
       }
       if (poleFiles.length > 0) {
         try {
           const dt = new DataTransfer();
           for (const f of poleFiles) dt.items.add(f);
-          multipleInput.files = dt.files;
-          multipleInput.dispatchEvent(new Event("input", { bubbles: true }));
-          multipleInput.dispatchEvent(new Event("change", { bubbles: true }));
+          multipleSlot.input.files = dt.files;
+          multipleSlot.input.dispatchEvent(new Event("input", { bubbles: true }));
+          multipleSlot.input.dispatchEvent(new Event("change", { bubbles: true }));
           for (let i = 0; i < poleFiles.length; i++) {
             details.push({
-              slot: `poteau_${i + 1}`,
-              label: `Poteau ${i + 1}`,
+              slot: allPoles[i].isAutrePoteau ? `autre_poteau_${i + 1}` : `poteau_${allPoles[i].numero || i + 1}`,
+              label: allPoles[i].label,
               fileName: poleFiles[i].name,
               sizeKb: Math.round(poleFiles[i].size / 1024),
+              gps: allPoles[i].lat != null && allPoles[i].lng != null ? `${Number(allPoles[i].lat).toFixed(6)}, ${Number(allPoles[i].lng).toFixed(6)}` : undefined,
             });
           }
           return details;
@@ -1239,43 +1478,51 @@
 
     // Cas 2 : Slots dynamiques unitaires (appuyer sur '+' pour faire apparaître chaque case)
     for (let i = 0; i < maxPoles; i++) {
-      const pole = polePhotos[i];
+      const pole = allPoles[i];
       if (!pole || !pole.src) continue;
 
-      let allInputs = getPoleInputs();
-      let emptyInput = allInputs.find((inp) => !inp.files || inp.files.length === 0);
+      let slots = getPoleSlots();
 
-      // Si aucun slot libre, cliquer sur '+' et attendre réactivement jusqu'à 1500ms
-      if (!emptyInput && addBtn) {
-        const prevCount = allInputs.length;
-        try {
-          addBtn.click();
-        } catch {}
+      // Si aucun slot disponible à l'index i, cliquer sur '+' et attendre réactivement jusqu'à 2000ms
+      if (slots.length <= i && addBtn) {
+        const prevCount = slots.length;
+        robustClick(addBtn);
 
-        // Scrutation active toutes les 100ms
+        // Scrutation active toutes les 80ms
         const start = Date.now();
-        while (Date.now() - start < 1500) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          allInputs = getPoleInputs();
-          if (allInputs.length > prevCount) {
-            emptyInput = allInputs[allInputs.length - 1];
+        while (Date.now() - start < 2000) {
+          await new Promise((resolve) => setTimeout(resolve, 80));
+          slots = getPoleSlots();
+          if (slots.length > prevCount) {
             break;
           }
         }
+
+        // Retry au bout de 500ms si Angular n'a pas encore réagi
+        if (slots.length <= prevCount) {
+          robustClick(addBtn);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          slots = getPoleSlots();
+        }
       }
 
-      const targetInput = emptyInput || allInputs[i];
-      if (targetInput && (!targetInput.files || targetInput.files.length === 0)) {
+      // Sélectionner le slot correspondant
+      const targetSlot = slots[i] || slots.find((s) => !s.input.files || s.input.files.length === 0);
+      if (targetSlot && targetSlot.input) {
         const file = await srcToFile(pole.src, pole.name);
         if (file) {
-          const container = targetInput.closest ? (targetInput.closest(".upload-box, [class*='upload'], div") || targetInput.parentElement) : targetInput.parentElement;
-          const ok = injectFileIntoInput(targetInput, file, container);
+          const container = targetSlot.container;
+          const ok = injectFileIntoInput(targetSlot.input, file, container);
           if (ok) {
+            // Renseigner automatiquement les coordonnées GPS
+            injectPoleCoordinates(targetSlot, pole);
+
             details.push({
               slot: `poteau_${i + 1}`,
-              label: `Poteau ${i + 1}`,
+              label: pole.label,
               fileName: file.name,
               sizeKb: Math.round(file.size / 1024),
+              gps: pole.lat != null && pole.lng != null ? `${Number(pole.lat).toFixed(6)}, ${Number(pole.lng).toFixed(6)}` : undefined,
             });
           }
         }
@@ -1297,5 +1544,12 @@
     markContainerMissing,
     markContainerSuccess,
     fillPhotosOnPage,
+    collectAllPoles,
+    findPoteauxSection,
+    findPoteauxTitle,
+    findAddPoleButton,
+    findExistingPoleSlots,
+    injectPoleCoordinates,
+    handlePoteauxPhotos,
   };
 });
