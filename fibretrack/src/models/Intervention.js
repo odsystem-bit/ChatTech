@@ -371,24 +371,15 @@ export function ensureInterventionDefaults(data) {
     rawMp.pto = Number(rawMp.pto);
   }
 
-  // OTP / ONT : 1 par défaut
+  // ONT : 1 par défaut pour chaque client (aucun OTP, pas de doublon)
   const baseOnt = (rawMp.ont !== undefined && rawMp.ont !== null && rawMp.ont !== "")
     ? Number(rawMp.ont)
     : ((rawMp.otp !== undefined && rawMp.otp !== null && rawMp.otp !== "")
       ? Number(rawMp.otp)
       : (data.ont_qte !== undefined && data.ont_qte !== null && data.ont_qte !== "" ? Number(data.ont_qte) : 1));
 
-  if (rawMp.otp === undefined || rawMp.otp === null || rawMp.otp === "") {
-    rawMp.otp = baseOnt;
-  } else {
-    rawMp.otp = Number(rawMp.otp);
-  }
-
-  if (rawMp.ont === undefined || rawMp.ont === null || rawMp.ont === "") {
-    rawMp.ont = baseOnt;
-  } else {
-    rawMp.ont = Number(rawMp.ont);
-  }
+  rawMp.ont = baseOnt;
+  delete rawMp.otp; // Nettoyage strict : aucun OTP dans materiel_pose
 
   return {
     ...empty,
@@ -840,7 +831,6 @@ export function createEmptyIntervention(technicien, initialNom = "") {
       crochets: 0,
       piton: 1,
       pto: 1,
-      otp: 1,
       ont: 1,
     },
 

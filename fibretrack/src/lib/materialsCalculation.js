@@ -5,7 +5,7 @@
  * - Poteau linéaire : 2 crochets par poteau
  * - Poteau FAT : 1 crochet par poteau
  * - Piton : 1 unité obligatoire par client
- * - OTP : valeur par défaut de 1
+ * - ONT : valeur par défaut de 1 (pas d'OTP)
  * - PTO : valeur par défaut de 1
  */
 
@@ -19,8 +19,8 @@
  *   nbFatPoles: number,
  *   piton: number,
  *   pto: number,
- *   otp: number,
  *   ont: number,
+ *   otp: number,
  *   formula: string
  * }}
  */

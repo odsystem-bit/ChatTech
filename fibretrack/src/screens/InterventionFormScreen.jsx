@@ -195,7 +195,7 @@ const MATERIEL_STANDARD = [
   { key: "susp", label: "Suspente (Susp)" },
   { key: "piton", label: "Piton" },
   { key: "pto", label: "PTO" },
-  { key: "otp", label: "OTP / ONT" },
+  { key: "ont", label: "ONT" },
   { key: "closer", label: "Closer" },
   { key: "rp1", label: "RP1", hidden: true },
   { key: "traverse_13t", label: "Traverse 13T" },
@@ -901,11 +901,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         dirtyFieldsRef.current.add("_crochets_manual");
       }
 
-      if (designation === "otp" || designation === "ont") {
-        nextMp.otp = numQte;
+      if (designation === "ont" || designation === "otp") {
         nextMp.ont = numQte;
+        delete nextMp.otp;
         next.ont_qte = numQte;
-        markDirty("materiel_pose.otp", "materiel_pose.ont", "ont_qte");
+        markDirty("materiel_pose.ont", "ont_qte");
       }
 
       if (designation === "pto") {
@@ -3129,7 +3129,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                         </div>
                       ) : (
                         <p style={{ margin: "6px 0 14px", fontSize: 11, color: "var(--text-muted)" }}>
-                          💡 Calcul automatique : <strong>{materialsCalc.formula}</strong> (Piton : 1, PTO : 1, OTP : 1 par défaut). Modifiable manuellement à tout moment.
+                          💡 Calcul automatique : <strong>{materialsCalc.formula}</strong> (Piton : 1, PTO : 1, ONT : 1 par défaut). Modifiable manuellement à tout moment.
                         </p>
                       )}
                     </>

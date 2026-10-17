@@ -203,9 +203,26 @@ function db() {
       if (!$hasCol) {
         $pdo->exec("ALTER TABLE interventions ADD COLUMN videos_terrain LONGTEXT NULL");
       }
+      // Correction rétroactive du bug d'addition ONT/OTP (1+1=2) sur les interventions récentes créées sans matériel posé
+      $pdo->exec("UPDATE interventions SET materiel_pose = JSON_SET(materiel_pose, '$.ont', 1) 
+                  WHERE JSON_EXTRACT(materiel_pose, '$.ont') = 2 
+                    AND (ont_sn IS NULL OR ont_sn = '') 
+                    AND (points_gps IS NULL OR points_gps = '[]' OR points_gps = '')
+                    AND date >= DATE_SUB(NOW(), INTERVAL 3 DAY)");
+      $pdo->exec("UPDATE interventions SET materiel_pose = JSON_REMOVE(materiel_pose, '$.otp') 
+                  WHERE JSON_CONTAINS_PATH(materiel_pose, 'one', '$.otp')");
     } catch (Exception $e) {}
   }
   return $pdo;
+}
+
+function normalizeMaterielPose(&$mp) {
+  if (is_string($mp)) $mp = json_decode($mp, true);
+  if (!is_array($mp)) return;
+  if (isset($mp['otp'])) {
+    $mp['ont'] = max((int)($mp['ont'] ?? 0), (int)$mp['otp']);
+    unset($mp['otp']);
+  }
 }
 
 header('Content-Type: application/json; charset=utf-8');
@@ -514,7 +531,8 @@ try {
         FROM interventions ORDER BY date DESC');
       $rows = $stmt->fetchAll();
       foreach ($rows as &$r) {
-        $r['materiel_pose'] = json_decode($r['materiel_pose'] ?? '{}', true);
+        $r['materiel_pose'] = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
+        normalizeMaterielPose($r['materiel_pose']);
         $gps = json_decode($r['points_gps'] ?? '[]', true) ?? [];
         foreach ($gps as &$pt) { unset($pt['photo']); }
         unset($pt);
@@ -553,6 +571,7 @@ try {
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $mp = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
+      normalizeMaterielPose($mp);
       $r['materiel_pose'] = empty($mp) ? new stdClass() : $mp;
       $gps = json_decode($r['points_gps'] ?? '[]', true) ?? [];
       foreach ($gps as &$pt) { unset($pt['photo']); }
@@ -677,6 +696,7 @@ try {
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $mp = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
+      normalizeMaterielPose($mp);
       $r['materiel_pose'] = empty($mp) ? new stdClass() : $mp;
       $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true) ?? [];
       $r['whatsapp_photos'] = json_decode($r['whatsapp_photos'] ?? '[]', true) ?? [];
@@ -895,19 +915,40 @@ try {
         if (empty($d['signature_technicien'])) $d['signature_technicien'] = $existing['signature_technicien'];
       }
 
-      // --- materiel_pose : garder le serveur si entrant vide ---
+      // --- materiel_pose : déduplication stricte des alias et initialisation par défaut ---
       $incomingMat = $d['materiel_pose'] ?? [];
       if (is_object($incomingMat)) $incomingMat = (array)$incomingMat;
       if (!is_array($incomingMat)) $incomingMat = [];
       if ($existing && empty($incomingMat) && !($changedFields !== null && in_array('materiel_pose', $changedFields, true))) {
         $incomingMat = json_decode($existing['materiel_pose'] ?? '{}', true) ?? [];
       }
+
+      // Fusion / déduplication préalable ONT et OTP pour ne JAMAIS additionner 1+1=2
+      if (isset($incomingMat['otp']) || isset($incomingMat['ont'])) {
+        $ontVal = max((int)($incomingMat['ont'] ?? 0), (int)($incomingMat['otp'] ?? 0));
+        unset($incomingMat['otp']);
+        $incomingMat['ont'] = $ontVal;
+      }
+
       $canonicalMat = [];
       foreach ($incomingMat as $designation => $quantity) {
         $canonical = canonicalDesignation($designation);
         $canonicalMat[$canonical] = ($canonicalMat[$canonical] ?? 0) + (int)$quantity;
       }
+
+      if (isset($canonicalMat['otp']) || isset($canonicalMat['ont'])) {
+        $canonicalMat['ont'] = max((int)($canonicalMat['ont'] ?? 0), (int)($canonicalMat['otp'] ?? 0));
+        unset($canonicalMat['otp']);
+      }
       $incomingMat = $canonicalMat;
+
+      // Valeurs par défaut obligatoires pour les nouvelles interventions (ONT: 1, PTO: 1, Piton: 1)
+      if (!$existing) {
+        if (!isset($incomingMat['piton']) || (int)$incomingMat['piton'] === 0) $incomingMat['piton'] = 1;
+        if (!isset($incomingMat['pto']) || (int)$incomingMat['pto'] === 0) $incomingMat['pto'] = 1;
+        if (!isset($incomingMat['ont']) || (int)$incomingMat['ont'] === 0) $incomingMat['ont'] = 1;
+      }
+
       $patchMode = $existing && $changedFields !== null;
       $materialPatch = $patchMode && count(array_filter($changedFields, fn($name) => $name === 'materiel_pose' || str_starts_with((string)$name, 'materiel_pose.'))) > 0;
       if ($materialPatch && !in_array('materiel_pose', $changedFields, true)) {
@@ -917,6 +958,10 @@ try {
           $designation = canonicalDesignation(substr((string)$changedField, strlen('materiel_pose.')));
           if (array_key_exists($designation, $incomingMat)) $mergedMat[$designation] = $incomingMat[$designation];
           else unset($mergedMat[$designation]);
+        }
+        if (isset($mergedMat['otp'])) {
+          $mergedMat['ont'] = max((int)($mergedMat['ont'] ?? 0), (int)$mergedMat['otp']);
+          unset($mergedMat['otp']);
         }
         $incomingMat = $mergedMat;
       }
