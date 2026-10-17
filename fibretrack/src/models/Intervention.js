@@ -217,6 +217,11 @@ export function ensureInterventionDefaults(data) {
     const candidate = { ...p, numero: num };
     const existingIdx = deduplicatedPoles.findIndex((ex) => {
       if (ex.id && candidate.id && ex.id === candidate.id) return true;
+      const numEx = Number(ex.numero);
+      const numCand = Number(candidate.numero);
+      if (numEx > 0 && numCand > 0) {
+        return numEx === numCand;
+      }
       const latA = ex.lat ?? ex.latitude;
       const lngA = ex.lng ?? ex.longitude;
       const latB = candidate.lat ?? candidate.latitude;
@@ -230,7 +235,7 @@ export function ensureInterventionDefaults(data) {
       const isArmB = Boolean(candidate.arme) && !candidate.traverse && candidate.sous_type !== "Traversé";
       const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
       const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
-      return catA === catB && Number(ex.numero) === Number(candidate.numero) && Number(candidate.numero) > 0;
+      return catA === catB;
     });
 
     if (existingIdx === -1) {

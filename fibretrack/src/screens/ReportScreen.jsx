@@ -673,6 +673,43 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
           </div>
         </div>
 
+        {/* Galerie des photos CelPros & Poteaux */}
+        {photoEntries.length > 0 && (
+          <div style={{ marginBottom: 14, background: "#fff", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>
+                Photos CelPros & Poteaux ({photoEntries.length})
+              </span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(105px, 1fr))", gap: 8 }}>
+              {photoEntries.map((pe, peIdx) => {
+                const url = pe.url || pe.photo?.url || pe.photo?.photo || "";
+                if (!url) return null;
+                const lat = pe.photo?.lat;
+                const lng = pe.photo?.lng;
+                const isPole = pe.key.startsWith("poteau_");
+                return (
+                  <div key={pe.key || peIdx} style={{ borderRadius: 8, overflow: "hidden", border: isPole ? "1.5px solid #38bdf8" : "1px solid #cbd5e1", background: "#f8fafc" }}>
+                    <img
+                      src={url}
+                      alt={pe.label}
+                      style={{ width: "100%", height: 80, objectFit: "cover", display: "block", cursor: "pointer" }}
+                      onClick={() => setViewingPhoto({
+                        url,
+                        title: pe.label,
+                        subtitle: pe.photo?.lieu || (lat != null ? `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : ""),
+                      })}
+                    />
+                    <div style={{ padding: "4px 5px", fontSize: 10.5, textAlign: "center", fontWeight: 700, color: isPole ? "#0369a1" : "#334155", background: isPole ? "#f0f9ff" : "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={pe.label}>
+                      {isPole ? "🪵 " : ""}{pe.label} {lat != null ? "📍" : ""}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Galerie des photos additionnelles */}
         {photosAdditionnelles.length > 0 ? (
           <div style={{ marginBottom: 12, background: "#fff", padding: 12, borderRadius: 10, border: "1px solid #e2e8f0" }}>

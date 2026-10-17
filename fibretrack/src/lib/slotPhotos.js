@@ -117,11 +117,22 @@ export function collectCelprosPhotos(data, slotDefs = []) {
     if (photo) push(slot.key, slot.label, photo);
   }
 
-  const poles = points
-    .filter((p) => p && p.type === "Poteau" && p.photo)
-    .sort((a, b) => Number(a.numero || 0) - Number(b.numero || 0));
-  for (const pole of poles) {
-    push(`poteau_${pole.numero}`, `Poteau ${pole.numero}`, pole);
+  const poleNums = new Set();
+  points.forEach((p) => {
+    if (p && p.type === "Poteau" && Number(p.numero) > 0) poleNums.add(Number(p.numero));
+  });
+  whatsappPhotos.forEach((wa) => {
+    const m = wa?.slot?.match(/^poteau_(\d+)$/);
+    if (m) poleNums.add(Number(m[1]));
+  });
+  const sortedNums = Array.from(poleNums).sort((a, b) => a - b);
+  for (const num of sortedNums) {
+    const pt = points.find((p) => p && p.type === "Poteau" && Number(p.numero) === num);
+    const wa = whatsappPhotos.find((p) => p && p.slot === `poteau_${num}`);
+    const url = wa?.url || pt?.photo || "";
+    if (url) {
+      push(`poteau_${num}`, `Poteau ${num}`, { ...(pt || {}), ...(wa || {}), url, photo: url, numero: num });
+    }
   }
 
   return result;

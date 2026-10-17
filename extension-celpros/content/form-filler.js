@@ -475,6 +475,12 @@
     if (!a || !b) return false;
     if (a.id && b.id && a.id === b.id) return true;
 
+    const numA = Number(a.numero);
+    const numB = Number(b.numero);
+    if (numA > 0 && numB > 0) {
+      if (numA !== numB) return false;
+    }
+
     const latA = a.lat ?? a.latitude;
     const lngA = a.lng ?? a.longitude;
     const latB = b.lat ?? b.latitude;
@@ -494,9 +500,6 @@
     const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
 
     if (catA !== catB) return false;
-
-    const numA = Number(a.numero);
-    const numB = Number(b.numero);
     if (!numA || !numB || numA !== numB) return false;
 
     const txtA = `${a.proprietaire || ""} ${a.type_poteau || ""} ${a.nom || ""}`.toLowerCase();

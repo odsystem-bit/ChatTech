@@ -278,7 +278,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
           if (!isMulti) {
             if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-            if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+            if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
           }
           return true;
         });
@@ -296,7 +296,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
           if (!isMulti) {
             if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-            if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+            if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
           }
           if (p.id && incomingIds.has(p.id)) return false;
           if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
@@ -573,7 +573,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
               if (!isMulti) {
                 if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-                if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+                if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
               }
               return true;
             });
@@ -591,7 +591,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
               if (!isMulti) {
                 if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-                if (p.type && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+                if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
               }
               if (p.id && incomingIds.has(p.id)) return false;
               if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
@@ -3120,6 +3120,89 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   </div>
                 </div>
 
+                {(() => {
+                  const poleMap = new Map();
+                  (data.points_gps || []).forEach((pt) => {
+                    if (pt && (pt.type === "Poteau" || String(pt.type || "").toLowerCase().includes("poteau")) && Number(pt.numero) > 0) {
+                      poleMap.set(Number(pt.numero), { ...pt });
+                    }
+                  });
+                  (whatsappPhotos || []).forEach((wa) => {
+                    const m = wa?.slot?.match(/^poteau_(\d+)$/);
+                    if (m) {
+                      const num = Number(m[1]);
+                      const existing = poleMap.get(num) || { id: wa.id, numero: num, type: "Poteau" };
+                      if (!existing.photo && wa.url) existing.photo = wa.url;
+                      poleMap.set(num, existing);
+                    }
+                  });
+                  const poleList = Array.from(poleMap.values()).sort((a, b) => Number(a.numero) - Number(b.numero));
+                  if (poleList.length === 0) return null;
+
+                  return (
+                    <div style={{ marginTop: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 4 }}>
+                        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#334155" }}>
+                          🪵 Photos des poteaux enregistrés ({poleList.length})
+                        </span>
+                        <button
+                          type="button"
+                          className="btn-slot-subtle"
+                          style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, background: "#f0f9ff", border: "1px solid #bae6fd", color: "#0284c7", borderRadius: 6, cursor: "pointer" }}
+                          onClick={() => setActiveTab("photos")}
+                        >
+                          📸 Gérer dans l'onglet Photos →
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(95px, 1fr))", gap: 8 }}>
+                        {poleList.map((pole) => {
+                          const wa = (whatsappPhotos || []).find((p) => p && p.slot === `poteau_${pole.numero}`);
+                          const photoUrl = wa?.url || pole.photo;
+                          return (
+                            <div
+                              key={pole.numero}
+                              style={{
+                                borderRadius: 8,
+                                overflow: "hidden",
+                                border: photoUrl ? "1.5px solid #0284c7" : "1px dashed #cbd5e1",
+                                background: "#fff",
+                                textAlign: "center",
+                                cursor: photoUrl ? "pointer" : "default",
+                              }}
+                              onClick={() => {
+                                if (photoUrl) {
+                                  setViewingPhoto({
+                                    url: photoUrl,
+                                    title: `Poteau ${pole.numero}`,
+                                    subtitle: pole.lieu || (pole.lat ? `${Number(pole.lat).toFixed(5)}, ${Number(pole.lng).toFixed(5)}` : ""),
+                                  });
+                                } else {
+                                  setActiveTab("photos");
+                                }
+                              }}
+                            >
+                              {photoUrl ? (
+                                <img
+                                  src={photoUrl}
+                                  alt={`Poteau ${pole.numero}`}
+                                  style={{ width: "100%", height: 75, objectFit: "cover", display: "block" }}
+                                />
+                              ) : (
+                                <div style={{ height: 75, display: "flex", alignItems: "center", justifyContent: "center", background: "#f1f5f9", color: "#94a3b8", fontSize: 11 }}>
+                                  Sans photo
+                                </div>
+                              )}
+                              <div style={{ padding: "3px 4px", fontSize: 11, fontWeight: 700, color: "#0369a1", background: "#f0f9ff" }}>
+                                Poteau #{pole.numero} {pole.lat != null || wa?.lat != null ? "📍" : ""}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <h4 style={{ margin: "16px 0 10px", fontSize: 14 }}>Matériel standard</h4>
                 {(() => {
                   const materialsCalc = calculateMaterials(data);
@@ -3679,7 +3762,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 {(() => {
                   const poleMap = new Map();
                   (data.points_gps || []).forEach((pt) => {
-                    if (pt && pt.type === "Poteau" && Number(pt.numero) > 0) {
+                    if (pt && (pt.type === "Poteau" || String(pt.type || "").toLowerCase().includes("poteau")) && Number(pt.numero) > 0) {
                       poleMap.set(Number(pt.numero), { ...pt });
                     }
                   });
@@ -3705,6 +3788,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           lieu: wa.lieu || "",
                           horodatage: wa.horodatage || new Date().toISOString(),
                         });
+                      } else {
+                        const existing = poleMap.get(num);
+                        if (!existing.photo && wa.url) {
+                          existing.photo = wa.url;
+                        }
+                        if (existing.lat == null && wa.lat != null) {
+                          existing.lat = wa.lat;
+                          existing.lng = wa.lng;
+                          existing.precision_m = wa.precision_m;
+                          existing.lieu = wa.lieu;
+                        }
+                        poleMap.set(num, existing);
                       }
                     }
                   });

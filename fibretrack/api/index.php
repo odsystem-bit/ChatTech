@@ -1208,17 +1208,24 @@ try {
             $foundKey = null;
 
             foreach ($uniquePoles as $k => $ex) {
-              $exLat = isset($ex['lat']) ? (float)$ex['lat'] : null;
-              $exLng = isset($ex['lng']) ? (float)$ex['lng'] : null;
-              if ($pLat !== null && $pLng !== null && $exLat !== null && $exLng !== null) {
-                if (abs($pLat - $exLat) < 0.00005 && abs($pLng - $exLng) < 0.00005) {
+              if ($num > 0) {
+                if ($k === "{$cat}_{$num}") {
                   $foundKey = $k;
                   break;
                 }
-              }
-              if ($num > 0 && ($k === "{$cat}_{$num}")) {
-                $foundKey = $k;
-                break;
+              } else {
+                $exLat = isset($ex['lat']) ? (float)$ex['lat'] : null;
+                $exLng = isset($ex['lng']) ? (float)$ex['lng'] : null;
+                if ($pLat !== null && $pLng !== null && $exLat !== null && $exLng !== null) {
+                  if (abs($pLat - $exLat) < 0.00005 && abs($pLng - $exLng) < 0.00005) {
+                    $foundKey = $k;
+                    break;
+                  }
+                }
+                if (!empty($p['id']) && !empty($ex['id']) && $p['id'] === $ex['id']) {
+                  $foundKey = $k;
+                  break;
+                }
               }
             }
 
