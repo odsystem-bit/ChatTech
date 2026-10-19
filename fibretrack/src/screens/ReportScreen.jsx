@@ -730,16 +730,20 @@ export default function ReportScreen({ intervention, allInterventions = [], onCl
                 const lng = pe.photo?.lng;
                 const isPole = pe.key.startsWith("poteau_");
                 return (
-                  <div key={pe.key || peIdx} style={{ borderRadius: 8, overflow: "hidden", border: isPole ? "1.5px solid #38bdf8" : "1px solid #cbd5e1", background: "#f8fafc" }}>
+                  <div
+                    key={pe.key || peIdx}
+                    style={{ borderRadius: 8, overflow: "hidden", border: isPole ? "1.5px solid #38bdf8" : "1px solid #cbd5e1", background: "#f8fafc", cursor: "pointer" }}
+                    onClick={() => setViewingPhoto({
+                      url,
+                      title: pe.label,
+                      subtitle: pe.photo?.lieu || (lat != null ? `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : ""),
+                    })}
+                    title="Cliquer pour agrandir la photo"
+                  >
                     <img
                       src={url}
                       alt={pe.label}
-                      style={{ width: "100%", height: 80, objectFit: "cover", display: "block", cursor: "pointer" }}
-                      onClick={() => setViewingPhoto({
-                        url,
-                        title: pe.label,
-                        subtitle: pe.photo?.lieu || (lat != null ? `${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}` : ""),
-                      })}
+                      style={{ width: "100%", height: 80, objectFit: "cover", display: "block" }}
                     />
                     <div style={{ padding: "4px 5px", fontSize: 10.5, textAlign: "center", fontWeight: 700, color: isPole ? "#0369a1" : "#334155", background: isPole ? "#f0f9ff" : "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={pe.label}>
                       {isPole ? "🪵 " : ""}{pe.label} {lat != null ? "📍" : ""}
@@ -770,16 +774,20 @@ export default function ReportScreen({ intervention, allInterventions = [], onCl
             {sendAddStatus && <p className="gps-status" style={{ margin: "4px 0 8px" }}>{sendAddStatus}</p>}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(90px, 1fr))", gap: 8 }}>
               {photosAdditionnelles.map((ap, apIdx) => (
-                <div key={ap.id || apIdx} style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #cbd5e1", background: "#f1f5f9" }}>
+                <div
+                  key={ap.id || apIdx}
+                  style={{ borderRadius: 8, overflow: "hidden", border: "1px solid #cbd5e1", background: "#f1f5f9", cursor: "pointer" }}
+                  onClick={() => setViewingPhoto({
+                    url: ap.url,
+                    title: `Photo additionnelle #${apIdx + 1}`,
+                    subtitle: ap.lieu || (ap.lat ? `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` : ""),
+                  })}
+                  title="Cliquer pour agrandir la photo"
+                >
                   <img
                     src={ap.url}
                     alt={`Photo additionnelle ${apIdx + 1}`}
-                    style={{ width: "100%", height: 75, objectFit: "cover", display: "block", cursor: "pointer" }}
-                    onClick={() => setViewingPhoto({
-                      url: ap.url,
-                      title: `Photo additionnelle #${apIdx + 1}`,
-                      subtitle: ap.lieu || (ap.lat ? `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` : ""),
-                    })}
+                    style={{ width: "100%", height: 75, objectFit: "cover", display: "block" }}
                   />
                   <div style={{ padding: "3px 4px", fontSize: 10.5, textAlign: "center", fontWeight: 700, color: "#475569" }}>
                     #{apIdx + 1} {ap.lat != null ? "📍" : ""}

@@ -1,8 +1,8 @@
 {
-  "version": "3.5.5",
-  "buildTime": "2026-10-19T16:15:00Z",
+  "version": "3.5.6",
+  "buildTime": "2026-10-19T16:48:00Z",
   "features": [
-    "Centrage et affichage fixe en premier plan des modales de confirmation (Lancer intervention, Suppression)",
-    "Matériel standard : cheville intégrée par défaut à 1 pour tous les clients (associée au piton, modifiable à 0)"
+    "Agrandissement plein écran au clic sur toutes les photos additionnelles et photos de galerie",
+    "Bouton dédié de sélection WhatsApp distinct de l'agrandissement photo"
   ]
 }

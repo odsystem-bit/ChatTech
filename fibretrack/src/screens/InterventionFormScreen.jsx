@@ -5171,41 +5171,41 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                             <div
                               key={photo.id}
                               className="whatsapp-photo-item"
-                              onClick={() => togglePhotoSelection(photo.id)}
+                              onClick={() => {
+                                setViewingPhoto({
+                                  url: photo.url,
+                                  title: `Photo additionnelle #${pIdx + 1}`,
+                                  subtitle: photo.lieu || (photo.lat ? `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` : ""),
+                                  info: [
+                                    { label: "Catégorie", val: `Photo additionnelle #${pIdx + 1}` },
+                                    ...(photo.lat ? [{ label: "Coordonnées GPS", val: `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` }] : []),
+                                    ...(photo.precision_m ? [{ label: "Précision", val: `±${Number(photo.precision_m).toFixed(1)} m` }] : []),
+                                    ...(photo.horodatage ? [{ label: "Prise le", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                                    ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
+                                  ],
+                                });
+                              }}
                               style={{
                                 cursor: "pointer",
                                 border: selectedPhotoIds.has(photo.id) ? "2px solid var(--primary)" : "2px solid #cbd5e1"
                               }}
+                              title="Cliquer pour agrandir la photo"
                             >
                               <img src={photo.url} alt={`Photo additionnelle ${pIdx + 1}`} />
                               <span className="photo-tag-pill" style={{ background: "rgba(15, 23, 42, 0.85)" }}>
                                 Additionnelle #{pIdx + 1}
                               </span>
-                              {selectedPhotoIds.has(photo.id) && (
-                                <div className="selected-check">✓</div>
-                              )}
-                              <button
-                                type="button"
-                                className="zoom-photo-btn"
+                              <span className="zoom-hint-chip">🔍 Agrandir</span>
+                              <div
+                                className={`selected-check ${selectedPhotoIds.has(photo.id) ? "is-active" : ""}`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setViewingPhoto({
-                                    url: photo.url,
-                                    title: `Photo additionnelle #${pIdx + 1}`,
-                                    subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
-                                    info: [
-                                      { label: "Catégorie", val: `Photo additionnelle #${pIdx + 1}` },
-                                      ...(photo.lat ? [{ label: "Coordonnées GPS", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
-                                      ...(photo.precision_m ? [{ label: "Précision", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
-                                      ...(photo.horodatage ? [{ label: "Prise le", val: new Date(photo.horodatage).toLocaleString() }] : []),
-                                      ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
-                                    ],
-                                  });
+                                  togglePhotoSelection(photo.id);
                                 }}
-                                title="Agrandir"
+                                title={selectedPhotoIds.has(photo.id) ? "Désélectionner pour WhatsApp" : "Sélectionner pour WhatsApp"}
                               >
-                                🔍
-                              </button>
+                                {selectedPhotoIds.has(photo.id) ? "✓" : "○"}
+                              </div>
                               <button
                                 type="button"
                                 className="remove-btn"
@@ -5247,41 +5247,41 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       <div
                         key={photo.id}
                         className="whatsapp-photo-item"
-                        onClick={() => togglePhotoSelection(photo.id)}
+                        onClick={() => {
+                          setViewingPhoto({
+                            url: photo.url,
+                            title: photo.label || "Photo terrain",
+                            subtitle: photo.lieu || (photo.lat ? `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` : ""),
+                            info: [
+                              ...(photo.label ? [{ label: "Catégorie", val: photo.label }] : []),
+                              ...(photo.lat ? [{ label: "Coordonnées", val: `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` }] : []),
+                              ...(photo.precision_m ? [{ label: "Précision", val: `±${Number(photo.precision_m).toFixed(1)} m` }] : []),
+                              ...(photo.horodatage ? [{ label: "Date & Heure", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                              ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
+                            ],
+                          });
+                        }}
                         style={{
                           cursor: "pointer",
                           border: selectedPhotoIds.has(photo.id) ? "2px solid var(--primary)" : "2px solid transparent"
                         }}
+                        title="Cliquer pour agrandir la photo"
                       >
                         <img src={photo.url} alt="Photo terrain" />
                         {photo.label && (
                           <span className="photo-tag-pill">{photo.label}</span>
                         )}
-                        {selectedPhotoIds.has(photo.id) && (
-                          <div className="selected-check">✓</div>
-                        )}
-                        <button
-                          type="button"
-                          className="zoom-photo-btn"
+                        <span className="zoom-hint-chip">🔍 Agrandir</span>
+                        <div
+                          className={`selected-check ${selectedPhotoIds.has(photo.id) ? "is-active" : ""}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setViewingPhoto({
-                              url: photo.url,
-                              title: photo.label || "Photo terrain",
-                              subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
-                              info: [
-                                ...(photo.label ? [{ label: "Catégorie", val: photo.label }] : []),
-                                ...(photo.lat ? [{ label: "Coordonnées", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
-                                ...(photo.precision_m ? [{ label: "Précision", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
-                                ...(photo.horodatage ? [{ label: "Date & Heure", val: new Date(photo.horodatage).toLocaleString() }] : []),
-                                ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
-                              ],
-                            });
+                            togglePhotoSelection(photo.id);
                           }}
-                          title="Agrandir"
+                          title={selectedPhotoIds.has(photo.id) ? "Désélectionner pour WhatsApp" : "Sélectionner pour WhatsApp"}
                         >
-                          🔍
-                        </button>
+                          {selectedPhotoIds.has(photo.id) ? "✓" : "○"}
+                        </div>
                         <button
                           type="button"
                           className="remove-btn"
@@ -5289,6 +5289,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                             e.stopPropagation();
                             removeWhatsappPhoto(photo.id);
                           }}
+                          title="Supprimer cette photo"
                         >
                           ✕
                         </button>
@@ -5613,51 +5614,38 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       <div
                         key={photo.id}
                         className="whatsapp-photo-item"
-                        onClick={() => togglePhotoSelection(photo.id)}
+                        onClick={() => {
+                          setViewingPhoto({
+                            url: photo.url,
+                            title: photo.label || "Photo terrain",
+                            subtitle: photo.lieu || (photo.lat ? `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` : ""),
+                            info: [
+                              ...(photo.label ? [{ label: "Catégorie", val: photo.label }] : []),
+                              ...(photo.lat ? [{ label: "Coordonnées", val: `${Number(photo.lat).toFixed(5)}, ${Number(photo.lng).toFixed(5)}` }] : []),
+                              ...(photo.precision_m ? [{ label: "Précision", val: `±${Number(photo.precision_m).toFixed(1)} m` }] : []),
+                              ...(photo.horodatage ? [{ label: "Date & Heure", val: new Date(photo.horodatage).toLocaleString() }] : []),
+                              ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
+                            ],
+                          });
+                        }}
                         style={{ cursor: "pointer", border: selectedPhotoIds.has(photo.id) ? "2px solid var(--primary)" : "2px solid transparent" }}
+                        title="Cliquer pour agrandir la photo"
                       >
                         <img src={photo.url} alt="Photo terrain" />
-                        {selectedPhotoIds.has(photo.id) && (
-                          <div className="selected-check">✓</div>
+                        {photo.label && (
+                          <span className="photo-tag-pill">{photo.label}</span>
                         )}
-                        <button
-                          type="button"
-                          className="zoom-photo-btn"
-                          style={{
-                            position: "absolute",
-                            bottom: 4,
-                            right: 4,
-                            width: 26,
-                            height: 26,
-                            borderRadius: "50%",
-                            background: "rgba(0, 0, 0, 0.65)",
-                            color: "#fff",
-                            border: "none",
-                            fontSize: 12,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                            zIndex: 3,
-                          }}
+                        <span className="zoom-hint-chip">🔍 Agrandir</span>
+                        <div
+                          className={`selected-check ${selectedPhotoIds.has(photo.id) ? "is-active" : ""}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setViewingPhoto({
-                              url: photo.url,
-                              title: "Photo terrain",
-                              subtitle: photo.lieu || (photo.lat ? `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` : ""),
-                              info: [
-                                ...(photo.lat ? [{ label: "Coordonnées", val: `${photo.lat.toFixed(5)}, ${photo.lng.toFixed(5)}` }] : []),
-                                ...(photo.precision_m ? [{ label: "Précision", val: `±${photo.precision_m.toFixed(1)} m` }] : []),
-                                ...(photo.horodatage ? [{ label: "Date & Heure", val: new Date(photo.horodatage).toLocaleString() }] : []),
-                                ...(photo.lieu ? [{ label: "Lieu", val: photo.lieu }] : []),
-                              ],
-                            });
+                            togglePhotoSelection(photo.id);
                           }}
-                          title="Agrandir"
+                          title={selectedPhotoIds.has(photo.id) ? "Désélectionner pour WhatsApp" : "Sélectionner pour WhatsApp"}
                         >
-                          🔍
-                        </button>
+                          {selectedPhotoIds.has(photo.id) ? "✓" : "○"}
+                        </div>
                         <button
                           type="button"
                           className="remove-btn"
@@ -5665,6 +5653,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                             e.stopPropagation();
                             removeWhatsappPhoto(photo.id);
                           }}
+                          title="Supprimer cette photo"
                         >
                           ✕
                         </button>

@@ -1630,44 +1630,75 @@
   border-radius: 10px;
   overflow: hidden;
   aspect-ratio: 1;
+  cursor: pointer;
+  background: #0f172a;
+  touch-action: manipulation;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.whatsapp-photo-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .whatsapp-photo-item img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  display: block;
 }
 
 .whatsapp-photo-item .remove-btn {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 26px;
-  height: 26px;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(15, 23, 42, 0.75);
   color: #fff;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 14px;
   cursor: pointer;
+  z-index: 4;
+  backdrop-filter: blur(2px);
+  transition: background 0.15s ease;
+}
+
+.whatsapp-photo-item .remove-btn:hover {
+  background: rgba(220, 38, 38, 0.9);
 }
 
 .whatsapp-photo-item .selected-check {
   position: absolute;
-  bottom: 4px;
-  left: 4px;
-  width: 22px;
-  height: 22px;
+  top: 6px;
+  left: 6px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
-  background: var(--success);
+  background: rgba(15, 23, 42, 0.7);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  z-index: 4;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(2px);
+  transition: all 0.15s ease;
+}
+
+.whatsapp-photo-item .selected-check.is-active {
+  background: #16a34a;
+  border-color: #ffffff;
+  color: #ffffff;
+  transform: scale(1.08);
 }
 
 /* ===== Materiel Grid ===== */
