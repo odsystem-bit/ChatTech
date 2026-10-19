@@ -287,27 +287,133 @@ export function extractSpeedtestFromText(text) {
     }
   }
 
-  // 2. Détection par mots-clés contextuels (Download / Réception / Descendant)
+  // 2. Détection intelligente par lignes (même ligne, ligne au-dessus, ligne en-dessous)
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const extractNumber = (str, isPing = false) => {
+    if (!str) return null;
+    const pat = isPing ? /([0-9]+[.,][0-9]+|[0-9]+)\s*(?:ms)?/i : /([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps|Mo\/s|kb\/s)?/i;
+    const m = str.match(pat);
+    return m ? m[1].replace(",", ".") : null;
+  };
+
+  const isDlKeyword = (str) => /(?:r[eé]ception|download|descendant|descendante)\b/i.test(str);
+  const isUlKeyword = (str) => /(?:envoi|upload|montant|montante)\b/i.test(str);
+  const isPingKeyword = (str) => /(?:ping|latence)\b/i.test(str);
+
+  // Déterminer le sens de disposition : les nombres sont-ils avant (au-dessus) ou après (en-dessous) les libellés ?
+  let layoutMode = "number_below";
+  for (let i = 0; i < lines.length; i++) {
+    if (isDlKeyword(lines[i]) || isUlKeyword(lines[i]) || isPingKeyword(lines[i])) {
+      const hasNumberOnSameLine = extractNumber(lines[i]);
+      if (!hasNumberOnSameLine && i > 0 && extractNumber(lines[i - 1])) {
+        layoutMode = "number_above";
+      }
+      break;
+    }
+  }
+
+  const claimedLines = new Set();
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Download
+    if (!download && isDlKeyword(line)) {
+      const sameLineClean = line.replace(/(?:r[eé]ception|download|descendant|descendante)/gi, "");
+      const sameVal = extractNumber(sameLineClean);
+      if (sameVal) {
+        download = sameVal;
+        claimedLines.add(i);
+      } else {
+        const primaryVal = layoutMode === "number_above"
+          ? (i > 0 && !claimedLines.has(i - 1) ? extractNumber(lines[i - 1]) : null)
+          : (i < lines.length - 1 && !claimedLines.has(i + 1) ? extractNumber(lines[i + 1]) : null);
+        const secondaryVal = layoutMode === "number_above"
+          ? (i < lines.length - 1 && !claimedLines.has(i + 1) ? extractNumber(lines[i + 1]) : null)
+          : (i > 0 && !claimedLines.has(i - 1) ? extractNumber(lines[i - 1]) : null);
+
+        if (primaryVal) {
+          download = primaryVal;
+          claimedLines.add(layoutMode === "number_above" ? i - 1 : i + 1);
+        } else if (secondaryVal) {
+          download = secondaryVal;
+          claimedLines.add(layoutMode === "number_above" ? i + 1 : i - 1);
+        }
+      }
+    }
+
+    // Upload
+    if (!upload && isUlKeyword(line)) {
+      const sameLineClean = line.replace(/(?:envoi|upload|montant|montante)/gi, "");
+      const sameVal = extractNumber(sameLineClean);
+      if (sameVal) {
+        upload = sameVal;
+        claimedLines.add(i);
+      } else {
+        const primaryVal = layoutMode === "number_above"
+          ? (i > 0 && !claimedLines.has(i - 1) ? extractNumber(lines[i - 1]) : null)
+          : (i < lines.length - 1 && !claimedLines.has(i + 1) ? extractNumber(lines[i + 1]) : null);
+        const secondaryVal = layoutMode === "number_above"
+          ? (i < lines.length - 1 && !claimedLines.has(i + 1) ? extractNumber(lines[i + 1]) : null)
+          : (i > 0 && !claimedLines.has(i - 1) ? extractNumber(lines[i - 1]) : null);
+
+        if (primaryVal) {
+          upload = primaryVal;
+          claimedLines.add(layoutMode === "number_above" ? i - 1 : i + 1);
+        } else if (secondaryVal) {
+          upload = secondaryVal;
+          claimedLines.add(layoutMode === "number_above" ? i + 1 : i - 1);
+        }
+      }
+    }
+
+    // Ping
+    if (!ping && isPingKeyword(line)) {
+      const sameLineClean = line.replace(/(?:ping|latence)/gi, "");
+      const sameVal = extractNumber(sameLineClean, true);
+      if (sameVal) {
+        ping = sameVal;
+        claimedLines.add(i);
+      } else {
+        const primaryVal = layoutMode === "number_above"
+          ? (i > 0 && !claimedLines.has(i - 1) ? extractNumber(lines[i - 1], true) : null)
+          : (i < lines.length - 1 && !claimedLines.has(i + 1) ? extractNumber(lines[i + 1], true) : null);
+        const secondaryVal = layoutMode === "number_above"
+          ? (i < lines.length - 1 && !claimedLines.has(i + 1) ? extractNumber(lines[i + 1], true) : null)
+          : (i > 0 && !claimedLines.has(i - 1) ? extractNumber(lines[i - 1], true) : null);
+
+        if (primaryVal) {
+          ping = primaryVal;
+          claimedLines.add(layoutMode === "number_above" ? i - 1 : i + 1);
+        } else if (secondaryVal) {
+          ping = secondaryVal;
+          claimedLines.add(layoutMode === "number_above" ? i + 1 : i - 1);
+        }
+      }
+    }
+  }
+
+  // 3. Repli général par expressions régulières directes
   if (!download) {
-    const dlMatch = text.match(/(?:r[eé]ception|download|descendant|descendante)[\s\S]{0,40}?([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps|kb\/s)?/i);
+    const dlMatch = text.match(/(?:r[eé]ception|download|descendant|descendante)[\s\S]{0,30}?([0-9]+[.,][0-9]+|[0-9]+)/i);
     if (dlMatch) download = dlMatch[1].replace(",", ".");
   }
-
-  // 3. Détection par mots-clés contextuels (Upload / Envoi / Montant)
   if (!upload) {
-    const ulMatch = text.match(/(?:envoi|upload|montant|montante)[\s\S]{0,40}?([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps|kb\/s)?/i);
+    const ulMatch = text.match(/(?:envoi|upload|montant|montante)[\s\S]{0,30}?([0-9]+[.,][0-9]+|[0-9]+)/i);
     if (ulMatch) upload = ulMatch[1].replace(",", ".");
   }
-
-  // 4. Détection par mots-clés contextuels (Ping / Latence)
   if (!ping) {
-    const pingMatch = text.match(/(?:ping|latence)[\s\S]{0,40}?([0-9]+[.,][0-9]+|[0-9]+)\s*(?:ms)?/i);
+    const pingMatch = text.match(/(?:ping|latence)[\s\S]{0,30}?([0-9]+[.,][0-9]+|[0-9]+)/i);
     if (pingMatch) ping = pingMatch[1].replace(",", ".");
   }
 
-  // 5. Repli nPerf valeurs instantanées ou séquentielles : chiffres suivis de Mb/s ou ms
+  // 4. Repli séquentiel sur valeurs unitaires
   if (!download || !upload || !ping) {
-    const allMbMatches = [...text.matchAll(/([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps)/gi)].map((m) => m[1].replace(",", "."));
+    const allMbMatches = [...text.matchAll(/([0-9]+[.,][0-9]+|[0-9]+)\s*(?:Mb\/s|Mbps|Mo\/s)/gi)].map((m) => m[1].replace(",", "."));
     const allMsMatches = [...text.matchAll(/([0-9]+[.,][0-9]+|[0-9]+)\s*(?:ms)/gi)].map((m) => m[1].replace(",", "."));
     if (!download && allMbMatches.length >= 1) download = allMbMatches[0];
     if (!upload && allMbMatches.length >= 2) upload = allMbMatches[1];
@@ -354,18 +460,99 @@ export async function recognizeSpeedtestFromImage(imageSrc) {
 
 /**
  * Extrait une mesure de puissance optique (dBm) d'un photomètre
+ * Évite les longueurs d'ondes (850, 1310, 1490, 1550) et les valeurs de référence (0.00)
  * @param {string} text
- * @returns {string|null} Valeur en dBm avec signe négatif (ex: "-18.52")
+ * @returns {string|null} Valeur en dBm avec signe négatif (ex: "-18.52", "-19.93")
+ */
+/**
+ * Extrait une mesure de puissance optique (dBm) d'un photomètre
+ * Évite les longueurs d'ondes (850, 1310, 1490, 1550) et les valeurs de référence (0.00)
+ * @param {string} text
+ * @returns {string|null} Valeur en dBm avec signe négatif (ex: "-18.52", "-19.93")
  */
 export function extractPowerMeterFromText(text) {
   if (!text || typeof text !== "string") return null;
-  const match = text.match(/(?:[-–—]\s*)?([1-3]?[0-9][.,][0-9]{1,2})\s*(?:dBm|dbm)?/i);
-  if (match) {
-    const num = parseFloat(match[1].replace(",", "."));
-    if (!isNaN(num) && num > 5 && num < 40) {
-      return `-${num.toFixed(2)}`;
+
+  const isWavelength = (n) => [850, 1300, 1310, 1490, 1550, 1625, 1650].includes(Math.round(n));
+  const candidates = [];
+
+  // 1. Motif explicite avec unité dBm / dB / dm (ex: -19.93 dBm, 19.93 dBm, -18.5 dB, -18:52 dBm)
+  const dbmRegex = /(?:[-–—_~]\s*)?([0-9]{1,2})\s*[.,·':]\s*([0-9]{1,2})\s*(?:dBm|dbm|d8m|dB|db|DBM|dom|dem|dm|bm|d8)\b/gi;
+  let m;
+  while ((m = dbmRegex.exec(text)) !== null) {
+    const rawVal = `${m[1]}.${m[2]}`;
+    const num = parseFloat(rawVal);
+    if (!isNaN(num) && num >= 5 && num <= 40 && !isWavelength(num)) {
+      candidates.push({
+        num,
+        hasDbm: true,
+        hasMinus: m[0].includes("-") || m[0].includes("–") || m[0].includes("—") || m[0].includes("_") || m[0].includes("~"),
+      });
     }
   }
+
+  // 1bis. Nombre à 4 chiffres accolé à dBm (ex: 1852 dBm -> 18.52)
+  const fourDigitDbm = /(?:[-–—_~]\s*)?([1-3][0-9]{3})\s*(?:dBm|dbm|d8m|dB|db|DBM)\b/gi;
+  while ((m = fourDigitDbm.exec(text)) !== null) {
+    const num = parseFloat(m[1]) / 100;
+    if (!isNaN(num) && num >= 5 && num <= 40 && !isWavelength(num)) {
+      candidates.push({
+        num,
+        hasDbm: true,
+        hasMinus: m[0].includes("-") || m[0].includes("–") || m[0].includes("—") || m[0].includes("_") || m[0].includes("~"),
+      });
+    }
+  }
+
+  // 2. Motif explicite avec signe négatif (ex: -19.93, -19.28, -18:50)
+  if (candidates.length === 0) {
+    const negRegex = /[-–—_~]\s*([0-9]{1,2})\s*[.,·':]\s*([0-9]{1,2})/g;
+    while ((m = negRegex.exec(text)) !== null) {
+      const rawVal = `${m[1]}.${m[2]}`;
+      const num = parseFloat(rawVal);
+      if (!isNaN(num) && num >= 5 && num <= 40 && !isWavelength(num)) {
+        candidates.push({ num, hasDbm: false, hasMinus: true });
+      }
+    }
+  }
+
+  // 3. Motif numérique pur dans la plage FTTH typique (8.00 à 35.00 dBm)
+  if (candidates.length === 0) {
+    const genericRegex = /\b([1-3]?[0-9])\s*[.,·':]\s*([0-9]{1,2})\b/g;
+    while ((m = genericRegex.exec(text)) !== null) {
+      const rawVal = `${m[1]}.${m[2]}`;
+      const num = parseFloat(rawVal);
+      if (!isNaN(num) && num >= 8 && num <= 35 && !isWavelength(num) && num > 0.1) {
+        candidates.push({ num, hasDbm: false, hasMinus: false });
+      }
+    }
+  }
+
+  // 4. Nombre à 4 chiffres dans la plage (1000 à 3500 -> 10.00 à 35.00 dBm)
+  if (candidates.length === 0) {
+    const raw4Regex = /\b([1-3][0-9]{3})\b/g;
+    while ((m = raw4Regex.exec(text)) !== null) {
+      const num = parseFloat(m[1]) / 100;
+      if (!isNaN(num) && num >= 10 && num <= 35 && !isWavelength(num)) {
+        candidates.push({ num, hasDbm: false, hasMinus: false });
+      }
+    }
+  }
+
+  if (candidates.length > 0) {
+    // Tri par confiance : présence de dBm (+10), présence du signe négatif (+5), proximité plage standard (-15 à -26 dBm, +3)
+    candidates.sort((a, b) => {
+      let scoreA = (a.hasDbm ? 10 : 0) + (a.hasMinus ? 5 : 0);
+      let scoreB = (b.hasDbm ? 10 : 0) + (b.hasMinus ? 5 : 0);
+      if (a.num >= 15 && a.num <= 28) scoreA += 3;
+      if (b.num >= 15 && b.num <= 28) scoreB += 3;
+      return scoreB - scoreA;
+    });
+
+    const best = candidates[0];
+    return `-${best.num.toFixed(2)}`;
+  }
+
   return null;
 }
 
@@ -380,15 +567,26 @@ export async function recognizePowerMeterFromImage(imageSrc) {
     const worker = await getOcrWorker();
     try {
       await worker.setParameters({
-        tessedit_pageseg_mode: "3",
-        tessedit_char_whitelist: "0123456789.-–—,dBm ",
+        tessedit_pageseg_mode: "6",
+        tessedit_char_whitelist: "0123456789.-–—,;:·'dBmDBMWwnmλREFrefOPM \n",
       });
     } catch {}
 
-    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: false });
+    const preprocessed = await preprocessImageSourceForOcr(imageSrc, { cropBottomBanner: false, skipContrastStretch: true });
     const result = await worker.recognize(preprocessed);
     const text = result?.data?.text || "";
-    const power = extractPowerMeterFromText(text);
+    let power = extractPowerMeterFromText(text);
+
+    // Fallback si non trouvé : essayer en PSM 11 (sparse text)
+    if (!power) {
+      try {
+        await worker.setParameters({ tessedit_pageseg_mode: "11" });
+        const res2 = await worker.recognize(preprocessed);
+        const text2 = res2?.data?.text || "";
+        power = extractPowerMeterFromText(text2);
+      } catch {}
+    }
+
     return { power, rawText: text, confidence: result?.data?.confidence || 0 };
   } catch (err) {
     console.warn("Erreur reconnaissance OCR Photomètre:", err);

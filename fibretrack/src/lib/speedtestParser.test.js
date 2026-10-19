@@ -55,9 +55,32 @@ Ping 12.4 ms
   assert.equal(result.ping, "12.4");
 });
 
+test("extractSpeedtestFromText - extrait lorsque les chiffres sont situés AVANT les libellés", () => {
+  const reverseText = `
+Speedtest Celtiis
+48.26 Mb/s
+RÉCEPTION
+10.49 Mb/s
+ENVOI
+20.71 ms
+PING
+`;
+
+  const result = extractSpeedtestFromText(reverseText);
+  assert.equal(result.download, "48.26", "Download placé avant Réception doit être extrait");
+  assert.equal(result.upload, "10.49", "Upload placé avant Envoi doit être extrait");
+  assert.equal(result.ping, "20.71", "Ping placé avant label doit être extrait");
+});
+
 test("extractPowerMeterFromText - extrait les valeurs typiques d'un photomètre optique", () => {
   assert.equal(extractPowerMeterFromText("1310 nm\n-18.52 dBm\nREF: 0 dB"), "-18.52");
   assert.equal(extractPowerMeterFromText("1490 nm -19.93 dBm"), "-19.93");
   assert.equal(extractPowerMeterFromText("Mesure: -22.4 dBm"), "-22.40");
   assert.equal(extractPowerMeterFromText("Optic 18.5 dBm"), "-18.50");
+  // Cas écran réel avec longueur d'onde et REF 0.00 avant la mesure
+  assert.equal(extractPowerMeterFromText("OPM\n1310 nm\nREF 0.00 dBm\n-19.93 dBm"), "-19.93");
+  assert.equal(extractPowerMeterFromText("OPM 1490nm\nREF 0.00dBm\n-19.28 dBm"), "-19.28");
+  assert.equal(extractPowerMeterFromText("-18:52 dBm"), "-18.52");
+  assert.equal(extractPowerMeterFromText("1852 dBm"), "-18.52");
+  assert.equal(extractPowerMeterFromText("- 19 . 93 dBm"), "-19.93");
 });

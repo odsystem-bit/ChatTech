@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
-import { generateGlobalReport, generateConformiteReport } from "../lib/whatsapp";
+import { generateGlobalReport, generateConformiteReport, fmt2 } from "../lib/whatsapp";
 import { collectCelprosPhotos } from "../lib/slotPhotos";
 import { buildShareFiles, shareReportWithPhotos, openWhatsAppText } from "../lib/reportShare";
 import { CELPROS_PHOTO_SLOTS } from "./InterventionFormScreen";
+import { isInterventionTerminee } from "../lib/interventionFilters";
 import {
   ensureInterventionDefaults,
   getIntervention,
@@ -31,8 +32,15 @@ import {
 import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 import VideoPlayerModal from "../components/VideoPlayerModal";
 import { formatDuration, formatFileSize } from "../lib/videoCompression";
+import {
+  IconRefresh,
+  IconCheckCircle,
+  IconClipboardList,
+  IconChart,
+  IconFileText,
+} from "../components/Icons";
 
-export default function ReportScreen({ intervention, onClose, onEdit }) {
+export default function ReportScreen({ intervention, allInterventions = [], onClose, onEdit }) {
   const [data, setData] = useState(ensureInterventionDefaults(intervention));
   const [refreshing, setRefreshing] = useState(false);
   const [downloadProgressText, setDownloadProgressText] = useState("");
@@ -141,9 +149,9 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     };
   }, [photosAdditionnelles]);
 
-  // Les listes en cache sont "légères" (sans photos) : charger la fiche complète à l'ouverture
+  // Charger toujours la fiche complète et à jour à l'ouverture du rapport
   useEffect(() => {
-    if (!intervention?.id || intervention._fully_loaded) return;
+    if (!intervention?.id) return;
     let cancelled = false;
     getIntervention(intervention.id)
       .then((fresh) => {
@@ -156,7 +164,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
     return () => {
       cancelled = true;
     };
-  }, [intervention?.id, intervention?._fully_loaded]);
+  }, [intervention?.id]);
 
   const handleRefreshReport = useCallback(async () => {
     if (refreshing || !data?.id) return;
@@ -186,6 +194,38 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
   const [realises, setRealises] = useState("");
   const [recus, setRecus] = useState("");
   const [loadingAction, setLoadingAction] = useState(null);
+  const [isManualCounter, setIsManualCounter] = useState(false);
+
+  // Calcul automatique des compteurs "Reçus" et "Réalisés" du jour selon la tournée
+  const computeCounters = useCallback(() => {
+    const list = Array.isArray(allInterventions) && allInterventions.length > 0 ? allInterventions : [];
+    const targetDate = data?.tournee_du_jour || (data?.date ? String(data.date).slice(0, 10) : new Date().toISOString().slice(0, 10));
+
+    // Filtrer les dossiers de la même journée de tournée
+    const todayDossiers = list.filter((intv) => {
+      if (!intv) return false;
+      if (intv.tournee_du_jour) return intv.tournee_du_jour === targetDate;
+      const d = (intv.date || "").slice(0, 10);
+      return d === targetDate;
+    });
+
+    if (todayDossiers.length > 0) {
+      const nbRecus = todayDossiers.length;
+      let nbTraites = todayDossiers.filter((d) => isInterventionTerminee(d) || d.id === data?.id).length;
+      if (nbTraites === 0) nbTraites = 1; // Au minimum le dossier en cours de rapport
+      setRecus(String(nbRecus));
+      setRealises(String(nbTraites));
+    } else {
+      setRecus("1");
+      setRealises("1");
+    }
+  }, [allInterventions, data?.id, data?.tournee_du_jour, data?.date]);
+
+  useEffect(() => {
+    if (!isManualCounter) {
+      computeCounters();
+    }
+  }, [computeCounters, isManualCounter]);
 
   const compteurJour = {
     realises: realises !== "" ? Number(realises) : 0,
@@ -556,7 +596,7 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
             disabled={refreshing}
             title="Actualiser les informations de l'intervention"
           >
-            <span className={refreshing ? "spin-icon" : ""}>🔄</span>
+            <IconRefresh size={16} className={refreshing ? "spin-icon" : ""} style={{ verticalAlign: "middle" }} />
             <span className="btn-refresh-label">{refreshing ? "…" : "Actualiser"}</span>
           </button>
           <button type="button" className="btn-secondary" onClick={onClose}>
@@ -568,8 +608,9 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
         </div>
       </header>
 
-      <div className="status-banner" style={{ marginBottom: 16 }}>
-        ✅ <strong>{data.nom_client || "Nouveau client"}</strong> — Intervention terminée
+      <div className="status-banner" style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+        <IconCheckCircle size={18} color="var(--success, #16a34a)" />
+        <span><strong>{data.nom_client || "Nouveau client"}</strong> — Intervention terminée</span>
       </div>
 
       {/* SECTION DOCUMENTS OFFICIELS & SIGNATURES */}
@@ -895,23 +936,48 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
           type="button"
           className={reportType === "global" ? "btn-primary" : "btn-secondary"}
           onClick={() => { setReportType("global"); setCopied(false); }}
-          style={{ flex: "1 1 200px", padding: "12px 16px", fontWeight: "600", fontSize: "14px" }}
+          style={{ flex: "1 1 200px", padding: "12px 16px", fontWeight: "600", fontSize: "14px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}
         >
-          📋 Rapport Global WhatsApp
+          <IconClipboardList size={16} />
+          <span>Rapport Global WhatsApp</span>
         </button>
         <button
           type="button"
           className={reportType === "conformite" ? "btn-primary" : "btn-secondary"}
           onClick={() => { setReportType("conformite"); setCopied(false); }}
-          style={{ flex: "1 1 200px", padding: "12px 16px", fontWeight: "600", fontSize: "14px" }}
+          style={{ flex: "1 1 200px", padding: "12px 16px", fontWeight: "600", fontSize: "14px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}
         >
-          ✅ Rapport de Conformité
+          <IconCheckCircle size={16} />
+          <span>Rapport de Conformité</span>
         </button>
       </div>
 
       {reportType === "global" && (
-        <div style={{ background: "#f8fafc", padding: "12px 16px", borderRadius: 8, marginBottom: 16, border: "1px solid #e2e8f0" }}>
-          <h4 style={{ margin: "0 0 8px 0", fontSize: 13, color: "#475569" }}>Compteur journalier</h4>
+        <div style={{ background: "#f8fafc", padding: "12px 16px", borderRadius: 10, marginBottom: 16, border: "1px solid #e2e8f0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+            <h4 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "#334155", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <IconChart size={15} />
+              <span>Compteur journalier ({fmt2(compteurJour.realises)} Réalisés / {fmt2(compteurJour.recus)} Reçus)</span>
+            </h4>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: "#166534", background: "#f0fdf4", border: "1px solid #bbf7d0", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>
+                {isManualCounter ? "Modifié manuellement" : "Calculé selon la tournée"}
+              </span>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "3px 8px", fontSize: 11, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}
+                onClick={() => {
+                  setIsManualCounter(false);
+                  computeCounters();
+                }}
+                title="Recalculer automatiquement à partir des dossiers de la journée"
+              >
+                <IconRefresh size={12} />
+                <span>Recalculer</span>
+              </button>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
             <label className="form-field" style={{ flex: "1 1 120px" }}>
               <span>Réalisés (aujourd'hui)</span>
@@ -919,7 +985,10 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
                 type="number"
                 min="0"
                 value={realises}
-                onChange={(e) => setRealises(e.target.value)}
+                onChange={(e) => {
+                  setIsManualCounter(true);
+                  setRealises(e.target.value);
+                }}
                 placeholder="0"
               />
             </label>
@@ -929,7 +998,10 @@ export default function ReportScreen({ intervention, onClose, onEdit }) {
                 type="number"
                 min="0"
                 value={recus}
-                onChange={(e) => setRecus(e.target.value)}
+                onChange={(e) => {
+                  setIsManualCounter(true);
+                  setRecus(e.target.value);
+                }}
                 placeholder="0"
               />
             </label>

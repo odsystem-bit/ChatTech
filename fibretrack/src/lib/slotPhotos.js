@@ -113,6 +113,21 @@ export function collectCelprosPhotos(data, slotDefs = []) {
         continue;
       }
     }
+    if (slot.key === "contrat_client") {
+      const contrats = whatsappPhotos.filter(
+        (p) => p && !isAdditional(p) && (p.slot === "contrat_client" || p.slot?.startsWith("contrat_client") || p.type === "contrat_client")
+      );
+      if (contrats.length > 0) {
+        contrats.forEach((p, idx) => {
+          push(
+            contrats.length > 1 ? `contrat_client_${idx + 1}` : "contrat_client",
+            contrats.length > 1 ? `Photo contrat client (${idx + 1})` : "Photo contrat client",
+            p
+          );
+        });
+        continue;
+      }
+    }
     const photo = findPhotoForSlot(whatsappPhotos, points, slot.key);
     if (photo) push(slot.key, slot.label, photo);
   }

@@ -3573,15 +3573,27 @@
   color: var(--text);
 }
 
-/* 2. Onglets de Catégories (2 seulement : En cours & Terminées) */
+/* 2. Onglets de Catégories (Tournée du jour, En cours & Terminées) */
 .home-category-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   background: #e2e8f0;
   padding: 4px;
   border-radius: 14px;
   gap: 4px;
   margin-bottom: 14px;
+}
+
+@media (max-width: 480px) {
+  .home-category-tabs {
+    gap: 3px;
+    padding: 3px;
+  }
+  .home-tab-btn {
+    padding: 8px 6px;
+    font-size: 12.5px;
+    gap: 4px;
+  }
 }
 
 .home-tab-btn {
@@ -3627,6 +3639,16 @@
   font-size: 12px;
   font-weight: 800;
   line-height: 1;
+}
+
+.tab-counter-tournee {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.home-tab-btn.is-active .tab-counter-tournee {
+  background: #f59e0b;
+  color: #ffffff;
 }
 
 .tab-counter-progress {
@@ -4174,4 +4196,571 @@
 .sync-now-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* =========================================================
+   ===== 4. MODULE TOURNÉE DU JOUR (CADENAS & BATCH) =====
+   ========================================================= */
+
+.tournee-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 28px;
+  animation: fadeIn 0.25s ease-out;
+}
+
+.tournee-header-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tournee-header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tournee-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tournee-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: #fef3c7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.tournee-title {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tournee-date-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+.tournee-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btn-tournee-import {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 15px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-tournee-import:active {
+  transform: scale(0.97);
+  background: #1d4ed8;
+}
+
+.tournee-date-picker-inline {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1.5px solid #cbd5e1;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1e293b;
+  background: #f8fafc;
+  outline: none;
+}
+
+.tournee-date-picker-inline:focus {
+  border-color: #2563eb;
+  background: #ffffff;
+}
+
+/* Barre de progression */
+.tournee-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tournee-progress-legend {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #475569;
+}
+
+.tournee-progress-legend .legend-highlight {
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tournee-progress-bar {
+  width: 100%;
+  height: 9px;
+  background: #e2e8f0;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.tournee-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #059669);
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+
+/* Grille des statistiques / compteurs */
+.tournee-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  gap: 10px;
+}
+
+.tournee-metric-chip {
+  padding: 10px 12px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.tournee-metric-chip .metric-val {
+  font-size: 19px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.tournee-metric-chip .metric-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.tournee-metric-chip.total {
+  background: #f1f5f9;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+}
+
+.tournee-metric-chip.done {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.tournee-metric-chip.progress {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.tournee-metric-chip.locked {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.tournee-metric-chip.canceled {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+/* Liste des cartes dossiers */
+.tournee-dossiers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 768px) {
+  .tournee-dossiers-list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+}
+
+@media (min-width: 1280px) {
+  .tournee-dossiers-list {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+  }
+}
+
+.tournee-card {
+  background: #ffffff;
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: all 0.18s ease;
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.tournee-card:hover {
+  border-color: #94a3b8;
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+
+.tournee-card:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.tournee-card.status-done {
+  background: #fdfefe;
+  border-color: #86efac;
+}
+
+.tournee-card.status-active,
+.tournee-card.status-progress {
+  background: #ffffff;
+  border: 2px solid #2563eb;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.14);
+}
+
+.tournee-card.status-locked {
+  background: #fafafa;
+  border-color: #e2e8f0;
+}
+
+.tournee-card.status-locked:hover {
+  border-color: #cbd5e1;
+  background: #ffffff;
+}
+
+.tournee-card.status-canceled {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  opacity: 0.88;
+}
+
+.tournee-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.tournee-card-num-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #e2e8f0;
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.tournee-card.status-progress .tournee-card-num-badge {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.tournee-card.status-done .tournee-card-num-badge {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.tournee-card-header .client-name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.3;
+}
+
+.badge-locked {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+}
+
+.tournee-card-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.detail-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-chip.link {
+  color: #0284c7;
+  text-decoration: none;
+}
+
+.detail-chip.tech {
+  color: #475569;
+}
+
+.tournee-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.btn-action-unlock {
+  flex: 1.2;
+  background: #f59e0b;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-action-unlock:active {
+  transform: scale(0.97);
+  background: #d97706;
+}
+
+.btn-action-primary {
+  flex: 1.2;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(37, 99, 235, 0.25);
+  transition: all 0.15s ease;
+}
+
+.btn-action-primary:active {
+  transform: scale(0.97);
+  background: #1d4ed8;
+}
+
+.btn-action-secondary {
+  flex: 1;
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.btn-action-secondary:active {
+  background: #f1f5f9;
+  transform: scale(0.97);
+}
+
+.btn-action-danger {
+  background: #fff;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-action-danger:hover {
+  background: #fee2e2;
+}
+
+.btn-action-delete {
+  background: #fff;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-action-delete:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+  color: #7f1d1d;
+}
+
+.btn-action-delete:active {
+  transform: translateY(1px);
+}
+
+.btn-action-reactivate {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tournee-empty-card {
+  background: #ffffff;
+  border: 2px dashed #cbd5e1;
+  border-radius: 16px;
+  padding: 36px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.tournee-empty-card .empty-icon {
+  font-size: 40px;
+  margin-bottom: 4px;
+}
+
+/* Modale d'import Tournée */
+.tournee-import-modal {
+  max-width: 620px;
+  width: 92%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.import-preview-box {
+  background: #f8fafc;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.import-preview-title {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.import-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.import-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #ffffff;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  font-size: 13px;
+}
+
+.import-preview-item .item-order {
+  font-weight: 800;
+  color: #2563eb;
+  width: 24px;
+}
+
+.import-preview-item .item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.import-preview-item .item-sub {
+  font-size: 11.5px;
+  color: #64748b;
 }

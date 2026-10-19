@@ -204,3 +204,79 @@ test("Pagination découpe correctement les listes", () => {
   assert.equal(page2.items.length, 1);
   assert.equal(page2.currentPage, 2);
 });
+
+test("Tournée du jour : un dossier verrouillé / en attente n'apparaît JAMAIS dans En cours", () => {
+  const dossierVerrouille = {
+    id: "tournee-1",
+    nom_client: "OJUS MALIKI",
+    statut: "en_attente",
+    tournee_verrouille: true,
+    tournee_du_jour: "2026-10-19",
+  };
+
+  assert.equal(isInterventionEnCours(dossierVerrouille), false);
+  assert.equal(isInterventionTerminee(dossierVerrouille), false);
+  assert.equal(getInterventionBadge(dossierVerrouille).label, "En attente");
+});
+
+test("Tournée du jour : un dossier déverrouillé et lancé passe bien En cours", () => {
+  const dossierLance = {
+    id: "tournee-1",
+    nom_client: "OJUS MALIKI",
+    statut: "en_cours",
+    tournee_verrouille: false,
+    tournee_du_jour: "2026-10-19",
+    date: "2026-10-19 08:30:00",
+    nom_technicien: "Rodolphe",
+  };
+
+  assert.equal(isInterventionEnCours(dossierLance), true);
+  assert.equal(isInterventionTerminee(dossierLance), false);
+  assert.equal(getInterventionBadge(dossierLance).label, "En cours");
+});
+
+test("Suppression : une intervention supprimée est ignorée et exclue des compteurs et listes", () => {
+  const dossierSupprime = {
+    id: "del-1",
+    nom_client: "CLIENT SUPPRIME",
+    statut: "supprime",
+    supprime_le: "2026-10-19T10:00:00Z",
+  };
+
+  assert.equal(isInterventionEnCours(dossierSupprime), false);
+  assert.equal(isInterventionTerminee(dossierSupprime), false);
+
+  const list = [
+    dossierSupprime,
+    { id: "active-1", nom_client: "Actif", statut: "en_cours" },
+  ];
+
+  const res = filterAndOrganizeInterventions(list, { activeTab: "en_cours" });
+  assert.equal(res.enCoursCount, 1);
+  assert.equal(res.items.length, 1);
+  assert.equal(res.items[0].id, "active-1");
+});
+
+test("Tournée du jour : 5 dossiers importés verrouillés donnent 0 en cours", () => {
+  const cinqDossiers = [
+    { id: "d1", nom_client: "Dossier 1", statut: "en_attente", tournee_verrouille: true, tournee_du_jour: "2026-10-19" },
+    { id: "d2", nom_client: "Dossier 2", statut: "en_attente", tournee_verrouille: true, tournee_du_jour: "2026-10-19" },
+    { id: "d3", nom_client: "Dossier 3", statut: "en_attente", tournee_verrouille: true, tournee_du_jour: "2026-10-19" },
+    { id: "d4", nom_client: "Dossier 4", statut: "en_attente", tournee_verrouille: true, tournee_du_jour: "2026-10-19" },
+    { id: "d5", nom_client: "Dossier 5", statut: "en_attente", tournee_verrouille: true, tournee_du_jour: "2026-10-19" },
+  ];
+
+  const res = filterAndOrganizeInterventions(cinqDossiers, { activeTab: "en_cours" });
+  assert.equal(res.enCoursCount, 0);
+  assert.equal(res.items.length, 0);
+
+  // Quand le premier dossier est lancé par le technicien
+  cinqDossiers[0].statut = "en_cours";
+  cinqDossiers[0].tournee_verrouille = false;
+
+  const resApresLancement = filterAndOrganizeInterventions(cinqDossiers, { activeTab: "en_cours" });
+  assert.equal(resApresLancement.enCoursCount, 1);
+  assert.equal(resApresLancement.items.length, 1);
+  assert.equal(resApresLancement.items[0].id, "d1");
+});
+

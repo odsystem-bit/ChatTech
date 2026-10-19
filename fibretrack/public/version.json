@@ -1,11 +1,9 @@
 {
-  "version": "3.3.1",
-  "buildTime": "2026-10-17T11:45:00Z",
+  "version": "3.5.4",
+  "buildTime": "2026-10-19T15:52:00Z",
   "features": [
-    "Synchronisation instantanée serveur lors du clic sur les options et types de poteaux (Petit Jean, SBEE, Traversé)",
-    "Règle stricte bandeau vidéo : les vidéos importées restent sans bandeau, les vidéos caméra conservent le bandeau GPS",
-    "Persistance et réconciliation automatique de toutes les vidéos terrain sans perte",
-    "Calcul automatique fidèle des matériaux (crochets calculés avec précision, ONT=1, PTO=1, Piton=1)",
-    "Indicateurs clairs du nombre de vidéos sur l'onglet Photos & Vidéos et les cartes d'intervention"
+    "Résolution du gel UI au lancement ou suppression de tournée (action instantanée à 0ms en mémoire)",
+    "Poteaux multi-options : un poteau peut être à la fois implanté et traversé simultanément",
+    "Règle métier armement : seuls les poteaux SBEE peuvent être armés (verrouillage strict Petit Jean)"
   ]
 }

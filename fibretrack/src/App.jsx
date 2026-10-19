@@ -18,10 +18,21 @@ import {
   getSyncOutbox,
   flushSyncOutbox,
   onOutboxChange,
+  createTourneeBatch,
 } from "./models/Intervention";
 import InstallPwaButton from "./components/InstallPwaButton";
 import InterventionCard from "./components/InterventionCard";
+import TourneeDuJourView from "./components/TourneeDuJourView";
 import { filterAndOrganizeInterventions, isInterventionTerminee } from "./lib/interventionFilters";
+import {
+  IconTruck,
+  IconRefresh,
+  IconSearch,
+  IconZap,
+  IconFileText,
+  IconPlus,
+  IconCheckCircle,
+} from "./components/Icons";
 
 export default function App() {
   const [user, setUser] = useState(getCurrentAccount());
@@ -38,7 +49,13 @@ export default function App() {
   const [isSyncingOutbox, setIsSyncingOutbox] = useState(false);
 
   // Filtres, recherche, pagination accueil
-  const [activeTab, setActiveTab] = useState("en_cours"); // 'en_cours' | 'terminees'
+  const [activeTab, setActiveTab] = useState(() => {
+    try {
+      return localStorage.getItem("chaptech_active_tab") || "tournee";
+    } catch {
+      return "tournee";
+    }
+  });
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTabFilter, setSearchTabFilter] = useState("all"); // 'all' | 'en_cours' | 'terminees'
   const [technicienFilter, setTechnicienFilter] = useState("all");
@@ -127,7 +144,7 @@ export default function App() {
 
   const goToHome = useCallback((targetTab = null) => {
     refreshInterventions();
-    if (targetTab === "terminees" || targetTab === "en_cours") {
+    if (targetTab === "terminees" || targetTab === "en_cours" || targetTab === "tournee") {
       setActiveTab(targetTab);
     }
     setScreen("home");
@@ -196,11 +213,14 @@ export default function App() {
 
   async function openIntervention(target) {
     const id = typeof target === "object" && target !== null ? target.id : target;
-    if (!id || openingId) return;
+    if (!id || openingId === id) return;
 
-    // 1. Si nous avons l'intervention en cache local : ouverture instantanée 0 ms garantie
-    const localFull = getStoredIntervention(id);
+    // 1. Si nous avons l'intervention en cache local ou passée en direct : ouverture instantanée 0 ms garantie
+    const targetObj = typeof target === "object" && target !== null ? target : null;
+    const localFull = getStoredIntervention(id) || (targetObj ? ensureInterventionDefaults(targetObj) : null);
     if (localFull) {
+      localFull._fully_loaded = true;
+      saveInterventionLocally(localFull);
       setActiveIntervention(localFull);
       navigateTo(isInterventionTerminee(localFull) ? "report" : "form");
 
@@ -229,7 +249,7 @@ export default function App() {
     } catch (err) {
       console.error("openIntervention error:", err);
       // Fallback hors-ligne si présent dans la liste chargée
-      const listItem = typeof target === "object" && target !== null ? target : interventions.find((i) => i.id === id);
+      const listItem = interventions.find((i) => i.id === id);
       if (listItem) {
         const initial = ensureInterventionDefaults(listItem);
         initial._fully_loaded = true;
@@ -244,18 +264,28 @@ export default function App() {
     }
   }
 
-  async function handleDeleteIntervention(id, e) {
+  async function handleDeleteIntervention(id, e, skipConfirm = false) {
     if (e && e.stopPropagation) e.stopPropagation();
-    if (openingId) return;
-    if (confirm("Supprimer cette intervention ?")) {
-      setOpeningId(id);
-      try {
-        await deleteIntervention(id);
-        await refreshInterventions();
-      } catch (err) {
-        console.error("handleDeleteIntervention error:", err);
-      }
-      setOpeningId(null);
+    if (!id) return;
+
+    if (!skipConfirm && !confirm("Supprimer cette intervention ?")) {
+      return;
+    }
+
+    // 1. Suppression visuelle instantanée (0 ms) de la liste active en mémoire
+    setInterventions((prev) => prev.filter((i) => i.id !== id));
+
+    // 2. Nettoyage local immédiat (0 ms)
+    try {
+      localStorage.removeItem("chaptech_intv_" + id);
+    } catch {}
+
+    // 3. Suppression serveur et outbox en arrière-plan
+    try {
+      await deleteIntervention(id);
+      await refreshInterventions(false);
+    } catch (err) {
+      console.error("handleDeleteIntervention error:", err);
     }
   }
 
@@ -273,6 +303,9 @@ export default function App() {
 
   function handleTabChange(tab) {
     setActiveTab(tab);
+    try {
+      localStorage.setItem("chaptech_active_tab", tab);
+    } catch {}
     setPage(1);
   }
 
@@ -347,6 +380,7 @@ export default function App() {
       <ReportScreen
         key={activeIntervention.id}
         intervention={activeIntervention}
+        allInterventions={interventions}
         onClose={() => goToHome("terminees")}
         onEdit={(intv) => {
           setActiveIntervention(intv);
@@ -381,7 +415,7 @@ export default function App() {
               aria-label="Actualiser les interventions"
               title="Actualiser les interventions en direct"
             >
-              <span className={loading ? "spin-icon" : ""}>🔄</span>
+              <IconRefresh size={16} className={loading ? "spin-icon" : ""} style={{ verticalAlign: "middle" }} />
               <span className="btn-refresh-label">{loading ? "…" : "Actualiser"}</span>
             </button>
             <button type="button" className="btn-icon" onClick={handleLogout} aria-label="Déconnexion">
@@ -510,16 +544,33 @@ export default function App() {
           </div>
         </section>
 
-        {/* ===== CATÉGORIES PRINCIPALES (2 SEULEMENT) OU RÉSULTATS DE RECHERCHE ===== */}
+        {/* ===== CATÉGORIES PRINCIPALES (TOURNÉE DU JOUR, EN COURS, TERMINÉES) OU RÉSULTATS DE RECHERCHE ===== */}
         {!filteredData.hasSearch ? (
           <nav className="home-category-tabs" aria-label="Catégories d'interventions">
+            <button
+              type="button"
+              className={`home-tab-btn ${activeTab === "tournee" ? "is-active" : ""}`}
+              onClick={() => handleTabChange("tournee")}
+              aria-selected={activeTab === "tournee"}
+            >
+              <span className="tab-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <IconTruck size={15} />
+                <span>Tournée du jour</span>
+              </span>
+              {filteredData.tourneeTodayCount > 0 && (
+                <span className="tab-counter tab-counter-tournee">{filteredData.tourneeTodayCount}</span>
+              )}
+            </button>
             <button
               type="button"
               className={`home-tab-btn ${activeTab === "en_cours" ? "is-active" : ""}`}
               onClick={() => handleTabChange("en_cours")}
               aria-selected={activeTab === "en_cours"}
             >
-              <span className="tab-label">En cours</span>
+              <span className="tab-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <IconZap size={15} />
+                <span>En cours</span>
+              </span>
               <span className="tab-counter tab-counter-progress">{filteredData.enCoursCount}</span>
             </button>
             <button
@@ -528,7 +579,10 @@ export default function App() {
               onClick={() => handleTabChange("terminees")}
               aria-selected={activeTab === "terminees"}
             >
-              <span className="tab-label">Terminées</span>
+              <span className="tab-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <IconCheckCircle size={15} />
+                <span>Terminées</span>
+              </span>
               <span className="tab-counter tab-counter-done">{filteredData.termineesCount}</span>
             </button>
           </nav>
@@ -570,8 +624,37 @@ export default function App() {
           </div>
         )}
 
-        {/* ===== BARRE D'OUTILS : TRI & FILTRE TECHNICIEN ===== */}
-        <div className="home-filter-toolbar">
+        {/* ===== CONTENU PRINCIPAL : TOURNÉE DU JOUR OU LISTE CLASSIQUE ===== */}
+        {!filteredData.hasSearch && activeTab === "tournee" ? (
+          <TourneeDuJourView
+            interventions={interventions}
+            currentUser={user?.nom || ""}
+            techniciens={filteredData.techniciens}
+            onOpenIntervention={openIntervention}
+            onSaveIntervention={(updated) => {
+              if (!updated?.id) return;
+              // 1. Mise à jour d'état instantanée 0 ms (pour que la carte passe en cours / non traité immédiatement)
+              setInterventions((prev) =>
+                prev.map((i) => (i.id === updated.id ? { ...i, ...updated } : i))
+              );
+              // 2. Sauvegarde locale 0 ms
+              saveInterventionLocally(updated);
+              // 3. Sauvegarde serveur en tâche de fond
+              saveIntervention(updated)
+                .catch((e) => console.warn("Save intervention offline:", e));
+            }}
+            onDeleteIntervention={(id) => handleDeleteIntervention(id, null, true)}
+            onCreateTourneeBatch={async (date, items, tech) => {
+              const res = await createTourneeBatch(date, items, tech);
+              await refreshInterventions(true);
+              return res;
+            }}
+            onRefresh={() => refreshInterventions(true)}
+          />
+        ) : (
+          <>
+            {/* ===== BARRE D'OUTILS : TRI & FILTRE TECHNICIEN ===== */}
+            <div className="home-filter-toolbar">
           <div className="filter-group">
             <label htmlFor="filter-sort" className="filter-label">Tri</label>
             <select
@@ -628,7 +711,9 @@ export default function App() {
           <div className="empty-state">
             {filteredData.hasSearch ? (
               <>
-                <p style={{ fontSize: 32, marginBottom: 8 }}>🔍</p>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 10, color: "var(--text-muted)" }}>
+                  <IconSearch size={38} />
+                </div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
                   Aucun résultat trouvé
                 </div>
@@ -641,25 +726,31 @@ export default function App() {
               </>
             ) : activeTab === "en_cours" ? (
               <>
-                <p style={{ fontSize: 32, marginBottom: 8 }}>⚡</p>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 10, color: "var(--primary)" }}>
+                  <IconZap size={38} />
+                </div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
                   Aucune intervention en cours
                 </div>
                 <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
-                  Toutes vos interventions sont terminées ou vous n'en avez pas encore créé.
+                  Toutes vos interventions sont terminées ou vous n&apos;en avez pas encore créé.
                 </div>
                 <button
                   type="button"
                   className="btn-primary"
                   onClick={startNewIntervention}
                   disabled={creatingNew}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                 >
-                  + Créer une intervention
+                  <IconPlus size={16} />
+                  <span>Créer une intervention</span>
                 </button>
               </>
             ) : (
               <>
-                <p style={{ fontSize: 32, marginBottom: 8 }}>📁</p>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 10, color: "var(--text-muted)" }}>
+                  <IconFileText size={38} />
+                </div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
                   Aucune intervention terminée
                 </div>
@@ -710,13 +801,15 @@ export default function App() {
             </button>
           </div>
         )}
+          </>
+        )}
         {/* Modal Création Nouveau Dossier */}
         {newDossierModalOpen && (
           <div className="modal-overlay" style={{ zIndex: 9999 }}>
             <div className="modal-card" style={{ maxWidth: 460, width: "90%", padding: 24, borderRadius: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <div style={{ background: "#e0f2fe", color: "#0284c7", width: 42, height: 42, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
-                  📁
+                <div style={{ background: "#e0f2fe", color: "#0284c7", width: 42, height: 42, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <IconPlus size={22} />
                 </div>
                 <div>
                   <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>Nouveau Dossier / Raccordement</h3>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { formatFileSize, formatDuration, burnGpsBannerOnVideo } from "../lib/videoCompression";
 
-export default function VideoPlayerModal({ video, clientName = "", onClose, onDelete }) {
+export default function VideoPlayerModal({ video, clientName = "", onClose, onDelete, onRetake }) {
   const [showBanner, setShowBanner] = useState(true);
   const [isBurning, setIsBurning] = useState(false);
   const [burnProgress, setBurnProgress] = useState(0);
@@ -26,6 +26,7 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
   const effectiveClient = clientName || video.nom_client || video.clientName || "";
   const effectiveTech = video.ajoute_par || video.technicien || "";
   const isImported = Boolean(video.is_imported || video.source === "gallery");
+  const isPreStamped = Boolean(video.stamped || video.has_banner || video.stampedUrl);
 
   const triggerDownload = (downloadUrl, fileName) => {
     const a = document.createElement("a");
@@ -47,20 +48,21 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
       .replace(/[^a-zA-Z0-9_-]/g, "_")
       .replace(/_+/g, "_");
 
-    if (!withBanner) {
-      // Téléchargement du fichier brut
-      triggerDownload(url, `${safeTitle}_brut.mp4`);
+    if (!withBanner || isImported) {
+      // Téléchargement du fichier direct
+      triggerDownload(url, `${safeTitle}.mp4`);
       return;
     }
 
-    // Si la vidéo estampillée est déjà en cache mémoire
-    if (video.stampedUrl) {
+    // Si la vidéo a déjà son bandeau GPS gravé (pré-gravé lors de l'enregistrement ou en cache)
+    if (isPreStamped) {
       const ext = video.stampedExt || "mp4";
-      triggerDownload(video.stampedUrl, `${safeTitle}_GPS.${ext}`);
+      const downloadTarget = video.stampedUrl || url;
+      triggerDownload(downloadTarget, `${safeTitle}_GPS.${ext}`);
       return;
     }
 
-    // Incrustation dynamique du bandeau sur les frames de la vidéo
+    // Incrustation dynamique de repli si ancien enregistrement sans bandeau pré-gravé
     setIsBurning(true);
     setBurnProgress(10);
     setBurnStatus("Initialisation du transcodage avec bandeau GPS…");
@@ -83,14 +85,11 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
       });
 
       if (result && result.url) {
-        // Enregistrer dans l'objet vidéo pour réutilisation instantanée
         video.stampedUrl = result.url;
         video.stampedBlob = result.blob;
         video.stampedExt = result.extension;
-
         triggerDownload(result.url, `${safeTitle}_GPS.${result.extension}`);
       } else {
-        // Repli gracieux
         triggerDownload(url, `${safeTitle}.mp4`);
       }
     } catch (err) {
@@ -213,8 +212,8 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
             Votre navigateur ne supporte pas la lecture de cette vidéo.
           </video>
 
-          {/* Bandeau de géolocalisation & horodatage collé directement sur la vidéo en bas (vidéos caméra uniquement) */}
-          {!isImported && (video.lat != null || video.lieu || dateStr) && showBanner && (
+          {/* Bandeau de géolocalisation & horodatage incrusté (si non pré-gravé dans le flux vidéo) */}
+          {!isImported && !isPreStamped && (video.lat != null || video.lieu || dateStr) && showBanner && (
             <div
               className="video-gps-docked-band"
               style={{
@@ -260,8 +259,30 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
             </div>
           )}
 
-          {/* Bouton discret pour afficher/masquer le bandeau afin de ne pas obstruer la vue */}
-          {!isImported && (video.lat != null || video.lieu || dateStr) && (
+          {/* Badge discret si bandeau GPS déjà gravé */}
+          {!isImported && isPreStamped && (
+            <div
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                background: "rgba(15, 23, 42, 0.78)",
+                color: "#38bdf8",
+                border: "1px solid rgba(56, 189, 248, 0.4)",
+                borderRadius: 20,
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 600,
+                zIndex: 7,
+                backdropFilter: "blur(4px)",
+              }}
+            >
+              📍 Bandeau GPS intégré
+            </div>
+          )}
+
+          {/* Bouton discret pour afficher/masquer le bandeau afin de ne pas obstruer la vue (si non pré-gravé) */}
+          {!isImported && !isPreStamped && (video.lat != null || video.lieu || dateStr) && (
             <button
               type="button"
               onClick={() => setShowBanner((v) => !v)}
@@ -402,33 +423,62 @@ export default function VideoPlayerModal({ video, clientName = "", onClose, onDe
             )}
           </div>
 
-          {onDelete && (
-            <button
-              type="button"
-              disabled={isBurning}
-              onClick={() => {
-                if (window.confirm("Êtes-vous sûr de vouloir supprimer cette vidéo de terrain ?")) {
-                  onDelete(video);
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {onRetake && (
+              <button
+                type="button"
+                disabled={isBurning}
+                onClick={() => {
+                  onRetake(video);
                   onClose();
-                }
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                background: "rgba(239, 68, 68, 0.15)",
-                color: "#f87171",
-                border: "1px solid rgba(239, 68, 68, 0.3)",
-                padding: "8px 14px",
-                borderRadius: 8,
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: isBurning ? "not-allowed" : "pointer",
-              }}
-            >
-              🗑️ Supprimer
-            </button>
-          )}
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "#1e293b",
+                  color: "#38bdf8",
+                  border: "1px solid #334155",
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isBurning ? "not-allowed" : "pointer",
+                }}
+                title="Reprendre ou remplacer cette vidéo"
+              >
+                🔄 Reprendre
+              </button>
+            )}
+
+            {onDelete && (
+              <button
+                type="button"
+                disabled={isBurning}
+                onClick={() => {
+                  if (window.confirm("Êtes-vous sûr de vouloir supprimer cette vidéo de terrain ?")) {
+                    onDelete(video);
+                    onClose();
+                  }
+                }}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  background: "rgba(239, 68, 68, 0.15)",
+                  color: "#f87171",
+                  border: "1px solid rgba(239, 68, 68, 0.3)",
+                  padding: "8px 14px",
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: isBurning ? "not-allowed" : "pointer",
+                }}
+              >
+                🗑️ Supprimer
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

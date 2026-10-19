@@ -30,8 +30,18 @@ async function apiPost(action, body = {}, timeoutMs = 25000) {
       cache: "no-store",
       ...(controller ? { signal: controller.signal } : {}),
     });
+    if (!res.ok) {
+      if (res.status === 403 || res.status >= 500) {
+        throw new Error(`Réseau/Serveur temporairement indisponible (HTTP ${res.status}). Sauvegarde locale active.`);
+      }
+      try {
+        const errData = await res.json();
+        throw new Error(errData?.error || `Erreur API (${res.status})`);
+      } catch (jsonErr) {
+        throw new Error(`Erreur API (${res.status})`);
+      }
+    }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Erreur API");
     return data;
   } finally {
     if (timer) clearTimeout(timer);
@@ -48,8 +58,18 @@ async function apiGet(action, timeoutMs = 20000) {
       cache: "no-store",
       ...(controller ? { signal: controller.signal } : {}),
     });
+    if (!res.ok) {
+      if (res.status === 403 || res.status >= 500) {
+        throw new Error(`Réseau/Serveur temporairement indisponible (HTTP ${res.status}). Sauvegarde locale active.`);
+      }
+      try {
+        const errData = await res.json();
+        throw new Error(errData?.error || `Erreur API (${res.status})`);
+      } catch (jsonErr) {
+        throw new Error(`Erreur API (${res.status})`);
+      }
+    }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Erreur API");
     return data;
   } finally {
     if (timer) clearTimeout(timer);
@@ -150,10 +170,23 @@ export function ensureInterventionDefaults(data) {
   const empty = createEmptyIntervention(data.nom_technicien || "");
   const rawPoints = Array.isArray(data.points_gps) ? data.points_gps.map((pt, idx) => {
     if (pt && pt.type === "Poteau") {
+      let typePoteau = (pt.type_poteau || pt.proprietaire || "").trim();
+      if (/petit[\s_-]*jean|pj/i.test(typePoteau)) typePoteau = "Petit Jean";
+      else if (/sbee/i.test(typePoteau)) typePoteau = "SBEE";
+      const isSbee = typePoteau === "SBEE";
+
       const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (pt.sous_type !== "Implanté");
       const isImplante = pt.implante !== undefined ? Boolean(pt.implante) : (pt.sous_type === "Implanté");
-      const isArme = pt.arme !== undefined ? Boolean(pt.arme) : (pt.sous_type === "Armé");
-      const typePoteau = pt.type_poteau || pt.proprietaire || "";
+      const isArme = isSbee && (pt.arme !== undefined ? Boolean(pt.arme) : (pt.sous_type === "Armé"));
+      const isFat = Boolean(pt.is_poteau_fat || String(pt.sous_type || "").toLowerCase().includes("fat"));
+
+      const labels = [];
+      if (isFat) labels.push("FAT");
+      if (isTraverse) labels.push("Traversé");
+      if (isImplante) labels.push("Implanté");
+      if (isArme) labels.push("Armé");
+      const sousType = pt.sous_type || labels.join(" + ") || "Traversé";
+
       return {
         id: pt.id || crypto.randomUUID(),
         ...pt,
@@ -163,7 +196,8 @@ export function ensureInterventionDefaults(data) {
         traverse: isTraverse,
         implante: isImplante,
         arme: isArme,
-        sous_type: pt.sous_type || (isImplante ? "Implanté" : isArme ? "Armé" : "Traversé"),
+        is_poteau_fat: isFat,
+        sous_type: sousType,
       };
     }
     return pt;
@@ -242,18 +276,20 @@ export function ensureInterventionDefaults(data) {
       deduplicatedPoles.push(candidate);
     } else {
       const existing = deduplicatedPoles[existingIdx];
+      const normType = (/petit[\s_-]*jean|pj/i.test(candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "")) ? "Petit Jean" : (/sbee/i.test(candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "")) ? "SBEE" : (candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "");
+      const isSbee = normType === "SBEE";
       deduplicatedPoles[existingIdx] = {
         ...existing,
         ...candidate,
-        type_poteau: candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "",
-        proprietaire: candidate.proprietaire || candidate.type_poteau || existing.proprietaire || existing.type_poteau || "",
+        type_poteau: normType,
+        proprietaire: normType,
         photo: existing.photo || candidate.photo || "",
         lat: existing.lat ?? candidate.lat ?? null,
         lng: existing.lng ?? candidate.lng ?? null,
         precision_m: existing.precision_m ?? candidate.precision_m ?? null,
         traverse: existing.traverse !== undefined ? Boolean(existing.traverse) : Boolean(candidate.traverse),
         implante: existing.implante !== undefined ? Boolean(existing.implante) : Boolean(candidate.implante),
-        arme: existing.arme !== undefined ? Boolean(existing.arme) : Boolean(candidate.arme),
+        arme: isSbee ? (existing.arme !== undefined ? Boolean(existing.arme) : Boolean(candidate.arme)) : false,
         lieu: existing.lieu || candidate.lieu || "",
         numero: existing.numero || candidate.numero || num,
       };
@@ -346,7 +382,7 @@ export function ensureInterventionDefaults(data) {
     ? poleItems.filter((p) => Boolean(p.implante)).length
     : Number(data.nb_poteaux_implantes ?? 0);
   const computedArmes = poleItems.length > 0
-    ? poleItems.filter((p) => Boolean(p.arme)).length
+    ? poleItems.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length
     : Number(data.nb_poteaux_armes ?? 0);
 
   // Initialisation des matériaux par défaut (Piton: 1, PTO: 1, ONT: 1, Crochets calculés à l'insertion des poteaux)
@@ -425,6 +461,10 @@ export function ensureInterventionDefaults(data) {
     remarque_aucune: data.remarque_aucune !== undefined ? Boolean(data.remarque_aucune) : (!data.remarque_libre),
     remarque_libre: String(data.remarque_libre ?? ""),
     videos_terrain: Array.isArray(data.videos_terrain) ? data.videos_terrain : [],
+    tournee_du_jour: String(data.tournee_du_jour || ""),
+    tournee_ordre: Number(data.tournee_ordre || 0),
+    tournee_verrouille: Boolean(data.tournee_verrouille),
+    motif_non_traite: String(data.motif_non_traite || ""),
   };
 }
 
@@ -577,12 +617,17 @@ export function saveInterventionLocally(intervention) {
     if (existing) {
       const deletedPhotoIds = new Set(Array.isArray(defaulted._deleted_photo_ids) ? defaulted._deleted_photo_ids : []);
       const deletedPointIds = new Set(Array.isArray(defaulted._deleted_point_ids) ? defaulted._deleted_point_ids : []);
+      const deletedVideoIds = new Set(
+        (Array.isArray(defaulted._deleted_video_ids) ? defaulted._deleted_video_ids : []).concat(
+          Array.isArray(defaulted.deleted_videos) ? defaulted.deleted_videos : []
+        ).map(String)
+      );
 
       const isFullyLoaded = Boolean(defaulted._fully_loaded);
 
       if (isFullyLoaded) {
         // Mode plein : l'intervention est ouverte dans le formulaire avec sa liste de photos à jour.
-        // La liste passée est la source de vérité : on purge les photos/points supprimés sans jamais les ressusciter.
+        // La liste passée est la source de vérité : on purge les photos/points/vidéos supprimés sans jamais les ressusciter.
         defaulted.whatsapp_photos = (defaulted.whatsapp_photos || []).filter((p) => {
           if (!p) return false;
           if (p.id && deletedPhotoIds.has(p.id)) return false;
@@ -598,6 +643,12 @@ export function saveInterventionLocally(intervention) {
           if (!p) return false;
           if (p.id && deletedPointIds.has(p.id)) return false;
           if (p.horodatage && deletedPointIds.has(p.horodatage)) return false;
+          return true;
+        });
+
+        defaulted.videos_terrain = (defaulted.videos_terrain || []).filter((v) => {
+          if (!v || !v.id) return false;
+          if (deletedVideoIds.has(String(v.id))) return false;
           return true;
         });
       } else {
@@ -652,10 +703,10 @@ export function saveInterventionLocally(intervention) {
 
         // Protéger les vidéos terrain existantes contre un écrasement accidentel lors d'une mise à jour partielle
         if ((!defaulted.videos_terrain || defaulted.videos_terrain.length === 0) && Array.isArray(existing.videos_terrain) && existing.videos_terrain.length > 0) {
-          defaulted.videos_terrain = existing.videos_terrain;
+          defaulted.videos_terrain = existing.videos_terrain.filter((v) => v && v.id && !deletedVideoIds.has(String(v.id)));
         } else if (Array.isArray(defaulted.videos_terrain) && Array.isArray(existing.videos_terrain) && existing.videos_terrain.length > 0) {
-          const incomingIds = new Set(defaulted.videos_terrain.map((v) => v?.id).filter(Boolean));
-          const localOnly = existing.videos_terrain.filter((v) => v && v.id && !incomingIds.has(v.id));
+          const incomingIds = new Set(defaulted.videos_terrain.map((v) => String(v?.id)).filter(Boolean));
+          const localOnly = existing.videos_terrain.filter((v) => v && v.id && !incomingIds.has(String(v.id)) && !deletedVideoIds.has(String(v.id)));
           if (localOnly.length > 0) {
             defaulted.videos_terrain = [...defaulted.videos_terrain, ...localOnly];
           }
@@ -777,10 +828,18 @@ export async function getIntervention(id) {
             }
           }
 
-          // Préserver les vidéos locales non encore synchronisées
+          // Préserver les vidéos locales non encore synchronisées en respectant les suppressions
+          const deletedVideoIds = new Set(
+            (Array.isArray(local._deleted_video_ids) ? local._deleted_video_ids : []).concat(
+              Array.isArray(local.deleted_videos) ? local.deleted_videos : []
+            ).map(String)
+          );
+          if (Array.isArray(finalIntv.videos_terrain)) {
+            finalIntv.videos_terrain = finalIntv.videos_terrain.filter((v) => v && v.id && !deletedVideoIds.has(String(v.id)));
+          }
           if (Array.isArray(local.videos_terrain) && local.videos_terrain.length > 0) {
-            const remoteVideoIds = new Set((finalIntv.videos_terrain || []).map((v) => v?.id).filter(Boolean));
-            const unsyncedVideos = local.videos_terrain.filter((v) => v && v.id && !remoteVideoIds.has(v.id));
+            const remoteVideoIds = new Set((finalIntv.videos_terrain || []).map((v) => String(v?.id)).filter(Boolean));
+            const unsyncedVideos = local.videos_terrain.filter((v) => v && v.id && !remoteVideoIds.has(String(v.id)) && !deletedVideoIds.has(String(v.id)));
             if (unsyncedVideos.length > 0) {
               finalIntv.videos_terrain = [...(finalIntv.videos_terrain || []), ...unsyncedVideos];
             }
@@ -817,17 +876,38 @@ export async function checkInterventionUpdatedAt(id) {
  * @param {string} id
  */
 export async function deleteIntervention(id) {
-  try {
-    await apiPost("intervention_delete", { id });
-  } catch (err) {
-    console.error("deleteIntervention error:", err);
-    throw err;
-  }
+  if (!id) return;
+
+  // 1. Retrait immédiat de l'outbox hors-ligne pour ne jamais la réinjecter lors d'un flush
+  removeFromOutbox(id);
+
+  // 2. Nettoyage immédiat du stockage local dédié
   try {
     localStorage.removeItem(INTV_STORAGE_PREFIX + id);
   } catch {}
+
+  // 3. Retrait immédiat du cache des interventions
   const list = getCached().filter((i) => i.id !== id);
   setCached(list);
+
+  // 4. Notification immédiate aux autres onglets / extension
+  if (typeof window !== "undefined") {
+    try {
+      window.postMessage({
+        type: "FIBRETRACK_INTERVENTION_DELETED",
+        id,
+        timestamp: Date.now(),
+      }, "*");
+    } catch {}
+  }
+
+  // 5. Appel serveur pour suppression définitive MySQL et restitution du stock
+  try {
+    await apiPost("intervention_delete", { id });
+  } catch (err) {
+    console.warn("deleteIntervention network sync error (supprimé localement) :", err);
+    // On ne rethrow pas si l'utilisateur est temporairement hors-ligne pour ne pas bloquer l'interface
+  }
 }
 
 export function createEmptyIntervention(technicien, initialNom = "") {
@@ -904,5 +984,81 @@ export function createEmptyIntervention(technicien, initialNom = "") {
 
     whatsapp_photos: [],
     videos_terrain: [],
+    tournee_du_jour: "",
+    tournee_ordre: 0,
+    tournee_verrouille: false,
+    motif_non_traite: "",
   };
+}
+
+/**
+ * Crée un lot d'interventions pour la Tournée du Jour.
+ * Enregistre sur le serveur MySQL et en cache local avec gestion hors-ligne.
+ * @param {string} dateTournee - Format YYYY-MM-DD
+ * @param {Array<object>} parsedItems - Liste d'objets parsés
+ * @param {string} technicienNom - Nom du technicien assigné
+ * @returns {Promise<Array<object>>}
+ */
+export async function createTourneeBatch(dateTournee, parsedItems, technicienNom = "") {
+  if (!Array.isArray(parsedItems) || parsedItems.length === 0) return [];
+
+  const itemsToCreate = parsedItems.map((item, idx) => ({
+    id: item.id || crypto.randomUUID(),
+    nom_client: item.nom_client,
+    nom_dossier: item.nom_client,
+    telephone_ligne: item.telephone_ligne || "",
+    mobile: item.mobile || "",
+    offre_souscrite: item.offre_souscrite || "FTTH",
+    msan: item.msan || "",
+    fat_ref: item.fat_ref || "",
+    tournee_du_jour: dateTournee,
+    tournee_ordre: item.ordre || idx + 1,
+    tournee_verrouille: true,
+    statut: "en_attente",
+    nom_technicien: technicienNom,
+  }));
+
+  try {
+    const res = await apiPost("tournee_batch_create", {
+      date_tournee: dateTournee,
+      nom_technicien: technicienNom,
+      interventions: itemsToCreate,
+    });
+    if (res?.created && Array.isArray(res.created)) {
+      const fullCreated = res.created.map((item) => {
+        const full = ensureInterventionDefaults({
+          ...item,
+          nom_technicien: technicienNom,
+          _fully_loaded: true,
+        });
+        saveInterventionLocally(full);
+        return full;
+      });
+      return fullCreated;
+    }
+    throw new Error("Réponse API invalide");
+  } catch (err) {
+    console.warn("createTourneeBatch API error, fallback local:", err);
+    // Sauvegarde locale hors-ligne et ajout à l'outbox
+    const localCreated = itemsToCreate.map((item, idx) => {
+      const full = createEmptyIntervention(technicienNom, item.nom_client);
+      full.id = item.id;
+      full.nom_client = item.nom_client;
+      full.nom_dossier = item.nom_client;
+      full.telephone_ligne = item.telephone_ligne;
+      full.mobile = item.mobile;
+      full.offre_souscrite = item.offre_souscrite;
+      full.msan = item.msan;
+      full.fat_ref = item.fat_ref;
+      full.tournee_du_jour = dateTournee;
+      full.tournee_ordre = item.tournee_ordre;
+      full.tournee_verrouille = item.tournee_verrouille;
+      full.statut = item.statut;
+      full._fully_loaded = true;
+      saveInterventionLocally(full);
+      addToOutbox(full);
+      return full;
+    });
+    return localCreated;
+  }
 }

@@ -1,5 +1,6 @@
 import { formatDateFR } from "../lib/date.js";
 import { getInterventionBadge, isInterventionTerminee } from "../lib/interventionFilters.js";
+import { IconWifi, IconCamera } from "./Icons.jsx";
 
 /**
  * Carte d'intervention compacte, professionnelle et responsive.
@@ -85,20 +86,22 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
           {(intervention.debit_descendant || intervention.debit_montant) ? (
             <span
               className="intv-chip"
-              style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", fontWeight: 600 }}
+              style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0", fontWeight: 600, display: "inline-flex", alignItems: "center" }}
               title={`Débit mesuré : Descendant ${intervention.debit_descendant || "-"} Mb/s, Montant ${intervention.debit_montant || "-"} Mb/s, Ping ${intervention.debit_ping || "-"} ms`}
             >
-              📶 {intervention.debit_descendant ? `${intervention.debit_descendant}↓` : ""}{intervention.debit_montant ? ` ${intervention.debit_montant}↑` : ""} Mb/s
+              <IconWifi size={12} style={{ marginRight: 4 }} />
+              <span>{intervention.debit_descendant ? `${intervention.debit_descendant}↓` : ""}{intervention.debit_montant ? ` ${intervention.debit_montant}↑` : ""} Mb/s</span>
             </span>
           ) : null}
 
           {Array.isArray(intervention.videos_terrain) && intervention.videos_terrain.length > 0 ? (
             <span
               className="intv-chip"
-              style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", fontWeight: 600 }}
+              style={{ background: "#eff6ff", color: "#2563eb", border: "1px solid #bfdbfe", fontWeight: 600, display: "inline-flex", alignItems: "center" }}
               title={`${intervention.videos_terrain.length} vidéo(s) terrain enregistrée(s)`}
             >
-              📹 {intervention.videos_terrain.length} vidéo{intervention.videos_terrain.length > 1 ? "s" : ""}
+              <IconCamera size={12} style={{ marginRight: 4 }} />
+              <span>{intervention.videos_terrain.length} vidéo{intervention.videos_terrain.length > 1 ? "s" : ""}</span>
             </span>
           ) : null}
         </div>

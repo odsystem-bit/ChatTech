@@ -203,6 +203,14 @@ function db() {
       if (!$hasCol) {
         $pdo->exec("ALTER TABLE interventions ADD COLUMN videos_terrain LONGTEXT NULL");
       }
+      $hasTourneeCol = $pdo->query("SHOW COLUMNS FROM interventions LIKE 'tournee_du_jour'")->fetch();
+      if (!$hasTourneeCol) {
+        $pdo->exec("ALTER TABLE interventions 
+          ADD COLUMN tournee_du_jour VARCHAR(20) NULL, 
+          ADD COLUMN tournee_ordre INT DEFAULT 0, 
+          ADD COLUMN tournee_verrouille TINYINT(1) DEFAULT 0, 
+          ADD COLUMN motif_non_traite VARCHAR(255) NULL");
+      }
       // Correction rétroactive du bug d'addition ONT/OTP (1+1=2) sur les interventions récentes créées sans matériel posé
       $pdo->exec("UPDATE interventions SET materiel_pose = JSON_SET(materiel_pose, '$.ont', 1) 
                   WHERE JSON_EXTRACT(materiel_pose, '$.ont') = 2 
@@ -310,6 +318,10 @@ function normalizeInterventionTypes(array &$r): void {
   $r['recommanderait'] = (bool)($r['recommanderait'] ?? false);
   $r['accepte_recontact'] = (bool)($r['accepte_recontact'] ?? false);
   $r['videos_terrain'] = is_array($r['videos_terrain'] ?? null) ? $r['videos_terrain'] : (json_decode($r['videos_terrain'] ?? '[]', true) ?: []);
+  $r['tournee_du_jour'] = (string)($r['tournee_du_jour'] ?? '');
+  $r['tournee_ordre'] = (int)($r['tournee_ordre'] ?? 0);
+  $r['tournee_verrouille'] = (bool)($r['tournee_verrouille'] ?? false);
+  $r['motif_non_traite'] = (string)($r['motif_non_traite'] ?? '');
 }
 
 function authenticatedUser() {
@@ -557,7 +569,7 @@ try {
         if ($row) {
           $currVideos = json_decode($row['videos_terrain'] ?? '[]', true);
           if (is_array($currVideos)) {
-            $filtered = array_values(array_filter($currVideos, fn($v) => !empty($v['id']) && $v['id'] !== $mediaId));
+            $filtered = array_values(array_filter($currVideos, fn($v) => !empty($v['id']) && (string)$v['id'] !== (string)$mediaId));
             $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ?');
             $upStmt->execute([json_encode($filtered), $intvId]);
           }
@@ -580,7 +592,9 @@ try {
       $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe,
         COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
         COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
-        adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
+        adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port, offre_souscrite,
+        tournee_du_jour, tournee_ordre, tournee_verrouille, motif_non_traite,
+        modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
       echo json_encode($stmt->fetchAll());
       break;
 
@@ -600,7 +614,9 @@ try {
         appreciation_satisfaction_libre, travaux_conformes, emplacement_valide,
         travail_propre, service_teste, service_fonctionne, explications_donnees,
         recommanderait, accepte_recontact, qualite, delais, professionnalisme,
-        nom_client_declaration, remarque_libre, whatsapp_photos, videos_terrain, modifie_par, modifie_le, modifie_le AS updated_at
+        nom_client_declaration, remarque_libre, whatsapp_photos, videos_terrain,
+        tournee_du_jour, tournee_ordre, tournee_verrouille, motif_non_traite,
+        modifie_par, modifie_le, modifie_le AS updated_at
         FROM interventions ORDER BY date DESC');
       $rows = $stmt->fetchAll();
       foreach ($rows as &$r) {
@@ -773,9 +789,9 @@ try {
       $r['materiel_pose'] = empty($mp) ? new stdClass() : $mp;
       $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true) ?? [];
       $r['whatsapp_photos'] = json_decode($r['whatsapp_photos'] ?? '[]', true) ?? [];
-      $r['updated_at'] = (string)($r['modifie_le'] ?? '');
+      $rawVideosDb = $r['videos_terrain'] ?? null;
       normalizeInterventionTypes($r);
-      if (empty($r['videos_terrain']) || !is_array($r['videos_terrain'])) {
+      if ($rawVideosDb === null) {
         try {
           $mStmt = db()->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain') ORDER BY captured_at ASC");
           $mStmt->execute([$id]);
@@ -808,7 +824,7 @@ try {
       break;
 
     case 'intervention_delete':
-      requireAuth(true);
+      requireAuth();
       $interventionId = trim((string)($input['id'] ?? ''));
       if ($interventionId === '') { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
       $pdo = db();
@@ -838,6 +854,12 @@ try {
           ]);
           $restored += $quantity;
         }
+
+        // Nettoyer les médias associés pour éviter des résidus ou des blocages FK
+        try {
+          $delMedia = $pdo->prepare('DELETE FROM intervention_media WHERE intervention_id = ?');
+          $delMedia->execute([$interventionId]);
+        } catch (Exception $e) {}
 
         $stmt = $pdo->prepare('DELETE FROM interventions WHERE id = ?');
         $stmt->execute([$interventionId]);
@@ -917,6 +939,7 @@ try {
         'qualite', 'delais', 'professionnalisme',
         'nom_client_declaration', 'remarque_libre',
         'signature_client', 'signature_technicien',
+        'tournee_du_jour', 'tournee_ordre', 'tournee_verrouille', 'motif_non_traite',
         'modifie_par', 'modifie_le'
       ];
       $setClause = implode(', ', array_map(fn($f) => "$f = :$f", $fields));
@@ -1015,60 +1038,95 @@ try {
       $incomingVideos = $d['videos_terrain'] ?? [];
       if (!is_array($incomingVideos)) $incomingVideos = [];
       $isVideosDirty = ($changedFields !== null && in_array('videos_terrain', $changedFields, true));
+      $isFullyLoaded = !empty($d['_fully_loaded']);
+      $rawDeletedVids = array_merge(
+        is_array($d['_deleted_video_ids'] ?? null) ? $d['_deleted_video_ids'] : [],
+        is_array($d['deleted_videos'] ?? null) ? $d['deleted_videos'] : []
+      );
+      $incomingDeletedVideos = array_values(array_unique(array_filter(array_map('strval', $rawDeletedVids))));
+      $deletedVideosSet = array_flip($incomingDeletedVideos);
 
       if ($existing) {
         $serverVideos = json_decode($existing['videos_terrain'] ?? '[]', true);
         if (!is_array($serverVideos)) $serverVideos = [];
 
-        if (empty($incomingVideos) && !$isVideosDirty) {
+        if (empty($incomingVideos) && !$isVideosDirty && !$isFullyLoaded && empty($incomingDeletedVideos)) {
           $incomingVideos = $serverVideos;
         } else {
           $serverById = [];
           foreach ($serverVideos as $v) {
-            if (!empty($v['id'])) $serverById[$v['id']] = $v;
+            $vidKey = !empty($v['id']) ? (string)$v['id'] : '';
+            if ($vidKey !== '' && !isset($deletedVideosSet[$vidKey])) $serverById[$vidKey] = $v;
           }
           foreach ($incomingVideos as &$v) {
-            if (empty($v['url']) && !empty($v['id']) && isset($serverById[$v['id']])) {
-              $v['url'] = $serverById[$v['id']]['url'] ?? '';
+            $vidKey = !empty($v['id']) ? (string)$v['id'] : '';
+            if ($vidKey !== '' && empty($v['url']) && isset($serverById[$vidKey])) {
+              $v['url'] = $serverById[$vidKey]['url'] ?? '';
             }
-            if (empty($v['thumbnail_url']) && !empty($v['id']) && isset($serverById[$v['id']])) {
-              $v['thumbnail_url'] = $serverById[$v['id']]['thumbnail_url'] ?? '';
+            if ($vidKey !== '' && empty($v['thumbnail_url']) && isset($serverById[$vidKey])) {
+              $v['thumbnail_url'] = $serverById[$vidKey]['thumbnail_url'] ?? '';
             }
           }
           unset($v);
-          $incomingIds = array_filter(array_column($incomingVideos, 'id'));
-          foreach ($serverVideos as $sv) {
-            if (!empty($sv['id']) && !in_array($sv['id'], $incomingIds, true)) {
-              $incomingVideos[] = $sv;
+
+          // Si ce n'est PAS un formulaire complet / modifié explicitement, fusionner les vidéos serveur non supprimées
+          if (!$isFullyLoaded && !$isVideosDirty) {
+            $incomingIds = array_map('strval', array_filter(array_column($incomingVideos, 'id')));
+            foreach ($serverVideos as $sv) {
+              $svKey = !empty($sv['id']) ? (string)$sv['id'] : '';
+              if ($svKey !== '' && !in_array($svKey, $incomingIds, true) && !isset($deletedVideosSet[$svKey])) {
+                $incomingVideos[] = $sv;
+              }
             }
           }
         }
       }
 
+      // Purger les vidéos supprimées de incomingVideos
+      if (!empty($deletedVideosSet)) {
+        $incomingVideos = array_values(array_filter($incomingVideos, fn($v) => empty($v['id']) || !isset($deletedVideosSet[(string)$v['id']])));
+      }
+
       if (!empty($d['id'])) {
         try {
-          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain')");
-          $mStmt->execute([$d['id']]);
-          $medias = $mStmt->fetchAll();
-          if (!empty($medias)) {
-            $existingIds = array_filter(array_column($incomingVideos, 'id'));
-            foreach ($medias as $m) {
-              if (!in_array($m['id'], $existingIds, true)) {
-                $fullPath = __DIR__ . '/' . ltrim($m['file_path'], '/');
-                $incomingVideos[] = [
-                  'id' => $m['id'],
-                  'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
-                  'thumbnail_url' => '',
-                  'size' => (int)@filesize($fullPath),
-                  'duration' => 0,
-                  'label' => 'Vidéo terrain',
-                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
-                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
-                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
-                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                  'captured_at' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                  'ajoute_par' => $m['added_by'] ?? 'Technicien',
-                ];
+          if (!empty($incomingDeletedVideos)) {
+            $delPlaceholders = implode(',', array_fill(0, count($incomingDeletedVideos), '?'));
+            $delMStmt = $pdo->prepare("SELECT file_path FROM intervention_media WHERE id IN ($delPlaceholders) AND intervention_id = ?");
+            $delMStmt->execute([...$incomingDeletedVideos, $d['id']]);
+            $filesToDel = $delMStmt->fetchAll();
+            foreach ($filesToDel as $f) {
+              $abs = __DIR__ . '/' . ltrim((string)$f['file_path'], '/');
+              if (is_file($abs)) @unlink($abs);
+              $thumb = preg_replace('/\.\w+$/', '_thumb.jpg', $abs);
+              if (is_file($thumb)) @unlink($thumb);
+            }
+            $pdo->prepare("DELETE FROM intervention_media WHERE id IN ($delPlaceholders) AND intervention_id = ?")->execute([...$incomingDeletedVideos, $d['id']]);
+          }
+
+          if (!$isFullyLoaded && !$isVideosDirty) {
+            $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain')");
+            $mStmt->execute([$d['id']]);
+            $medias = $mStmt->fetchAll();
+            if (!empty($medias)) {
+              $existingIds = array_filter(array_column($incomingVideos, 'id'));
+              foreach ($medias as $m) {
+                if (!in_array($m['id'], $existingIds, true) && !isset($deletedVideosSet[$m['id']])) {
+                  $fullPath = __DIR__ . '/' . ltrim($m['file_path'], '/');
+                  $incomingVideos[] = [
+                    'id' => $m['id'],
+                    'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
+                    'thumbnail_url' => '',
+                    'size' => (int)@filesize($fullPath),
+                    'duration' => 0,
+                    'label' => 'Vidéo terrain',
+                    'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
+                    'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
+                    'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
+                    'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                    'captured_at' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                    'ajoute_par' => $m['added_by'] ?? 'Technicien',
+                  ];
+                }
               }
             }
           }
@@ -1425,6 +1483,91 @@ try {
           . ' body=' . strlen((string)$rawBody) . 'o');
         http_response_code(500);
         echo json_encode(['error' => $e->getMessage()]);
+      }
+      break;
+
+    case 'tournee_batch_create':
+      requireAuth();
+      $items = $input['interventions'] ?? [];
+      if (!is_array($items) || empty($items)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Aucune intervention fournie pour la tournée']);
+        break;
+      }
+      $dateTournee = trim((string)($input['date_tournee'] ?? date('Y-m-d')));
+      $pdo = db();
+      $pdo->beginTransaction();
+      $createdList = [];
+
+      try {
+        foreach ($items as $idx => $rawItem) {
+          $id = !empty($rawItem['id']) ? $rawItem['id'] : sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+            mt_rand(0, 0x0fff) | 0x4000, mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff));
+
+          $nomClient = trim((string)($rawItem['nom_client'] ?? ''));
+          $telephoneLigne = trim((string)($rawItem['telephone_ligne'] ?? ''));
+          $mobile = trim((string)($rawItem['mobile'] ?? ''));
+          $offre = trim((string)($rawItem['offre_souscrite'] ?? 'FTTH'));
+          $msan = trim((string)($rawItem['msan'] ?? ''));
+          $fatRef = trim((string)($rawItem['fat_ref'] ?? ''));
+          $ordre = (int)($rawItem['tournee_ordre'] ?? ($idx + 1));
+          $isLocked = isset($rawItem['tournee_verrouille']) ? ((bool)$rawItem['tournee_verrouille'] ? 1 : 0) : 1;
+          $statut = $isLocked ? 'en_attente' : (!empty($rawItem['statut']) ? trim((string)$rawItem['statut']) : 'en_attente');
+          $tech = trim((string)($rawItem['nom_technicien'] ?? $input['nom_technicien'] ?? ''));
+
+          $matPose = json_encode(['crochets' => 0, 'piton' => 1, 'pto' => 1, 'ont' => 1]);
+
+          $stmt = $pdo->prepare('INSERT INTO interventions 
+            (id, date, statut, nom_technicien, nom_equipe, nom_client, nom_dossier, telephone_ligne, mobile, offre_souscrite, msan, fat_ref, tournee_du_jour, tournee_ordre, tournee_verrouille, materiel_pose, modifie_le)
+            VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())');
+          $stmt->execute([
+            $id,
+            $statut,
+            $tech,
+            'TELECOM BTP Services',
+            $nomClient,
+            $nomClient,
+            $telephoneLigne,
+            $mobile,
+            $offre,
+            $msan,
+            $fatRef,
+            $dateTournee,
+            $ordre,
+            $isLocked,
+            $matPose
+          ]);
+
+          $createdList[] = [
+            'id' => $id,
+            'nom_client' => $nomClient,
+            'nom_dossier' => $nomClient,
+            'telephone_ligne' => $telephoneLigne,
+            'mobile' => $mobile,
+            'offre_souscrite' => $offre,
+            'msan' => $msan,
+            'fat_ref' => $fatRef,
+            'nom_technicien' => $tech,
+            'nom_equipe' => 'TELECOM BTP Services',
+            'tournee_du_jour' => $dateTournee,
+            'tournee_ordre' => $ordre,
+            'tournee_verrouille' => (bool)$isLocked,
+            'statut' => $statut,
+            'date' => date('Y-m-d H:i:s'),
+            'materiel_pose' => ['crochets' => 0, 'piton' => 1, 'pto' => 1, 'ont' => 1],
+            'points_gps' => [],
+            'whatsapp_photos' => [],
+            'videos_terrain' => [],
+          ];
+        }
+        $pdo->commit();
+        echo json_encode(['ok' => true, 'created' => $createdList]);
+      } catch (Exception $e) {
+        $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['error' => 'Erreur lors de la création de la tournée : ' . $e->getMessage()]);
       }
       break;
 

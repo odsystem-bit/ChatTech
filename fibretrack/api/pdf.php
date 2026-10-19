@@ -549,9 +549,6 @@ function generateRapportPDF($d) {
   if (!empty($d['debit_descendant'])) $tech[] = ['Debit Descendant (Wi-Fi)', $d['debit_descendant'] . ' Mb/s'];
   if (!empty($d['debit_montant'])) $tech[] = ['Debit Montant (Wi-Fi)', $d['debit_montant'] . ' Mb/s'];
   if (!empty($d['debit_ping'])) $tech[] = ['Latence / Ping (Wi-Fi)', $d['debit_ping'] . ' ms'];
-  if (!empty($d['videos_terrain']) && is_array($d['videos_terrain'])) {
-    $tech[] = ['Videos Terrain', count($d['videos_terrain']) . ' video(s)'];
-  }
   foreach ($tech as $row) {
     $pdf->drawRect($margin, $y, 70, 6);
     $pdf->drawRect($margin + 70, $y, $contentW - 70, 6);

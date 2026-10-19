@@ -272,10 +272,19 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const cleanTypeCable = cleanStr(d.type_cable) || "CPC";
   const cleanEtat = cleanStr(d.etat) || "PON";
 
+  let realisesNb = compteurJour?.realises;
+  let recusNb = compteurJour?.recus;
+  if ((realisesNb === undefined || realisesNb === null || realisesNb === 0) &&
+      (recusNb === undefined || recusNb === null || recusNb === 0) &&
+      d.tournee_ordre) {
+    realisesNb = d.tournee_ordre;
+    recusNb = d.tournee_total || d.tournee_ordre || 1;
+  }
+
   const lignes = [
     `*Chef d'Équipe : ${chefEquipe}*`,
     ``,
-    `*${fmt2(compteurJour?.realises)} Réalisés / ${fmt2(compteurJour?.recus)} Reçus*`,
+    `*${fmt2(realisesNb)} Réalisés / ${fmt2(recusNb)} Reçus*`,
     ``,
     `*RACCORDEMENT*`,
     ``,
@@ -303,9 +312,6 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
           `*Débit Montant (Wi-Fi) : ${d.debit_montant || "-"} Mb/s*`,
           `*Latence / Ping (Wi-Fi) : ${d.debit_ping || "-"} ms*`,
         ]
-      : []),
-    ...(Array.isArray(d.videos_terrain) && d.videos_terrain.length > 0
-      ? [`*Vidéos Terrain : ${fmt2(d.videos_terrain.length)} vidéo(s)*`]
       : []),
     `*Nombre de poteaux armés : ${fmt2(nbArmes)}*`,
     `*Nombre de poteaux traversés : ${fmt2(nbTraverses)}*`,
@@ -505,9 +511,6 @@ export function generateConformiteReport(intervention) {
           ``,
           `Débit Wi-Fi : ${d.debit_descendant || "-"} Mb/s (Desc.) / ${d.debit_montant || "-"} Mb/s (Mont.) / ${d.debit_ping || "-"} ms (Ping)`,
         ]
-      : []),
-    ...(Array.isArray(d.videos_terrain) && d.videos_terrain.length > 0
-      ? [``, `Vidéos terrain : ${fmt2(d.videos_terrain.length)} vidéo(s)`]
       : []),
   ];
 

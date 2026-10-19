@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fibretrack-pwa-v3.3.1';
+const CACHE_NAME = 'fibretrack-pwa-v3.5.4';
 const PRECACHE_ASSETS = [
   '/',
   '/index.html',
@@ -41,16 +41,22 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigation requests: Network first, fallback to cached index.html
+  // Navigation requests: Network first, fallback to cached index.html on network drop or HTTP error (403, 502, etc.)
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
+        .then((networkResponse) => {
+          if (!networkResponse || (!networkResponse.ok && networkResponse.status >= 400)) {
+            return caches.match('/index.html').then((cached) => cached || networkResponse);
+          }
+          return networkResponse;
+        })
         .catch(() => caches.match('/index.html') || caches.match('/'))
     );
     return;
   }
 
-  // Static assets: Stale-While-Revalidate
+  // Static assets: Stale-While-Revalidate with offline cache guarantee
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       const fetchPromise = fetch(event.request).then((networkResponse) => {

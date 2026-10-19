@@ -19,20 +19,36 @@ export function isInterventionTerminee(intv) {
 }
 
 /**
- * Détermine si une intervention est en cours (ou nouvelle / à prendre en charge).
+ * Détermine si une intervention est en cours (effectivement démarrée et non terminée).
+ * Les interventions simplement planifiées dans la tournée mais non lancées (statut 'en_attente' ou 'tournee_verrouille')
+ * NE SONT PAS en cours.
  * @param {object} intv
  * @returns {boolean}
  */
 export function isInterventionEnCours(intv) {
-  return !isInterventionTerminee(intv);
+  if (!intv || typeof intv !== "object") return false;
+  if (isInterventionTerminee(intv)) return false;
+  if (intv.supprime_le) return false;
+  const s = String(intv.statut || "").trim().toLowerCase();
+  if (s === "non_traite" || s === "annule" || s === "supprime" || s === "en_attente") return false;
+  if (Boolean(intv.tournee_verrouille)) return false;
+  if (intv.tournee_du_jour && (Boolean(intv.tournee_verrouille) || s !== "en_cours")) return false;
+  return true;
 }
 
 /**
  * Détermine le libellé et le type de badge pour une intervention.
  * @param {object} intv
- * @returns {{ label: string, variant: 'done' | 'progress' | 'pending' }}
+ * @returns {{ label: string, variant: 'done' | 'progress' | 'pending' | 'danger' }}
  */
 export function getInterventionBadge(intv) {
+  const s = String(intv?.statut || "").trim().toLowerCase();
+  if (s === "non_traite" || s === "annule") {
+    return { label: "Non traité", variant: "danger" };
+  }
+  if (intv?.tournee_verrouille || s === "en_attente") {
+    return { label: "En attente", variant: "pending" };
+  }
   if (isInterventionTerminee(intv)) {
     return { label: "Terminée", variant: "done" };
   }
@@ -168,18 +184,30 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
     pageSize = 15,
   } = options;
 
-  // 1. Compteurs globaux (toujours basés sur TOUTES les interventions disponibles)
+  // 1. Compteurs globaux (toujours basés sur TOUTES les interventions valides non supprimées)
   let enCoursCount = 0;
   let termineesCount = 0;
+  let tourneeTodayCount = 0;
+  const todayIso = new Date().toISOString().slice(0, 10);
+
   for (const intv of allInterventions) {
-    if (isInterventionTerminee(intv)) termineesCount++;
-    else enCoursCount++;
+    if (!intv || intv.supprime_le || String(intv.statut || "").toLowerCase() === "supprime") continue;
+    if (isInterventionTerminee(intv)) {
+      termineesCount++;
+    } else if (isInterventionEnCours(intv)) {
+      enCoursCount++;
+    }
+
+    if (intv?.tournee_du_jour === todayIso || (intv?.date && String(intv.date).slice(0, 10) === todayIso && intv?.tournee_ordre)) {
+      tourneeTodayCount++;
+    }
   }
 
   // 2. Extraire la liste unique des techniciens pour le filtre
   const techniciens = [
     ...new Set(
       allInterventions
+        .filter((i) => i && !i.supprime_le && String(i.statut || "").toLowerCase() !== "supprime")
         .map((i) => (i.nom_technicien || "").trim())
         .filter(Boolean)
     ),
@@ -187,16 +215,22 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
 
   const hasSearch = searchQuery.trim().length > 0;
 
-  // 3. Application du filtre de recherche (recherche GLOBALE dans toutes les interventions)
-  let filtered = allInterventions.filter((intv) => matchesInterventionSearch(intv, searchQuery));
+  // 3. Application du filtre de recherche (recherche GLOBALE dans toutes les interventions actives)
+  let filtered = allInterventions.filter((intv) => {
+    if (!intv || intv.supprime_le || String(intv.statut || "").toLowerCase() === "supprime") return false;
+    return matchesInterventionSearch(intv, searchQuery);
+  });
 
   // Compteurs dans les résultats de recherche
   let searchEnCoursCount = 0;
   let searchTermineesCount = 0;
   if (hasSearch) {
     for (const intv of filtered) {
-      if (isInterventionTerminee(intv)) searchTermineesCount++;
-      else searchEnCoursCount++;
+      if (isInterventionTerminee(intv)) {
+        searchTermineesCount++;
+      } else if (isInterventionEnCours(intv)) {
+        searchEnCoursCount++;
+      }
     }
   }
 
@@ -241,6 +275,7 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
     currentPage,
     enCoursCount,
     termineesCount,
+    tourneeTodayCount,
     hasSearch,
     searchEnCoursCount,
     searchTermineesCount,

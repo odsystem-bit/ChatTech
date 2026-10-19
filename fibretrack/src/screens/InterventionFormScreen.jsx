@@ -58,13 +58,16 @@ import {
   IconRefresh,
   IconCheckCircle,
   IconPole,
+  IconZap,
+  IconCable,
+  IconServer,
+  IconHardware,
 } from "../components/Icons";
 import FichesOfficiellesModule from "../components/FichesOfficiellesModule";
 
 const TABS = [
   { id: "rapport", label: "📋 Rapport" },
   { id: "photos", label: "📸 Photos CelPros" },
-  { id: "gps", label: "📍 Poteaux & GPS" },
   { id: "satisfaction", label: "📄 Fiches & Signatures" },
   { id: "mise_en_service", label: "⚙️ Mise en service", hidden: true },
 ];
@@ -161,23 +164,27 @@ export const CELPROS_PHOTO_SLOTS = [
     key: "combine",
     label: "Combiné téléphonique",
     icon: "📞",
-    description: "Photo du combiné ou téléphone fixe raccordé",
+    description: "Photo du combiné ou téléphone fixe raccordé (masqué)",
     keywords: ["combine", "photo combine", "telephone"],
+    hidden: true,
   },
   {
     key: "fiche_combine",
     label: "Fiche combiné",
     icon: "🔌",
-    description: "Prise ou fiche de raccordement du combiné",
+    description: "Prise ou fiche de raccordement du combiné (masqué)",
     keywords: ["fiche combine", "fiche raccordement"],
+    hidden: true,
   },
   {
     key: "contrat_client",
     label: "Photo contrat client",
     icon: "📝",
-    description: "Contrat ou fiche d'intervention signée par le client",
+    description: "Contrats clients signés (jusqu'à 2 contrats autorisés)",
     keywords: ["photo contrat", "contrat client", "signature"],
     noBanner: true,
+    isMulti: true,
+    maxPhotos: 2,
   },
 ];
 
@@ -211,9 +218,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const dirtyRevisionsRef = useRef(new Map());
   const deletedGpsPointIdsRef = useRef(new Set());
   const deletedWhatsappPhotoIdsRef = useRef(new Set());
+  const deletedVideoIdsRef = useRef(new Set());
   const saveQueueRef = useRef(Promise.resolve());
   const changeRevisionRef = useRef(0);
   const [activeTab, setActiveTab] = useState("rapport");
+  useEffect(() => {
+    if (activeTab === "gps") {
+      setActiveTab("photos");
+    }
+  }, [activeTab]);
   const [gpsStatus, setGpsStatus] = useState("");
   const [pointType, setPointType] = useState("Poteau");
   const [customType, setCustomType] = useState("");
@@ -246,6 +259,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const [activeViewingVideo, setActiveViewingVideo] = useState(null);
   const videoCameraInputRef = useRef(null);
   const videoGalleryInputRef = useRef(null);
+  const videoTargetReplaceRef = useRef(null);
+  const [retakeTargetVideo, setRetakeTargetVideo] = useState(null);
 
   const [saveStatus, setSaveStatus] = useState("");
   const [viewingPhoto, setViewingPhoto] = useState(null);
@@ -325,10 +340,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     }
     if (Array.isArray(intervention.videos_terrain)) {
       setVideosTerrain((prev) => {
-        if (!prev || prev.length === 0) return intervention.videos_terrain;
-        const incomingIds = new Set(intervention.videos_terrain.map((v) => v?.id).filter(Boolean));
-        const localUnsynced = prev.filter((v) => v && v.id && !incomingIds.has(v.id));
-        return [...intervention.videos_terrain, ...localUnsynced];
+        const deletedIds = deletedVideoIdsRef.current;
+        const incoming = intervention.videos_terrain.filter((v) => v && v.id && !deletedIds.has(v.id));
+        if (!prev || prev.length === 0) return incoming;
+        const incomingIds = new Set(incoming.map((v) => v?.id).filter(Boolean));
+        const localUnsynced = prev.filter((v) => v && v.id && !incomingIds.has(v.id) && !deletedIds.has(v.id));
+        return [...incoming, ...localUnsynced];
       });
     }
   }, [intervention]);
@@ -356,6 +373,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const poleGalleryInputRef = useRef(null);
   const targetPoleNumeroRef = useRef(1);
   const [poleCapturingNumero, setPoleCapturingNumero] = useState(null);
+  const [poleConfigModal, setPoleConfigModal] = useState(null);
 
   const selectedPorts = (data.ports_disponibles || "")
     .split(",")
@@ -409,14 +427,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     // Optimisation majeure : n'envoyer les photos lourdes que si elles ont été expressément modifiées
     const isWaPhotosDirty = dirtySnapshot.has("whatsapp_photos");
     const isGpsDirty = dirtySnapshot.has("points_gps");
+    const isVideosDirty = dirtySnapshot.has("videos_terrain");
 
     const payload = {
       ...currentData,
       whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? (currentData.whatsapp_photos ?? whatsappPhotos) : [],
       points_gps: isGpsDirty || !currentData.updated_at ? currentData.points_gps : [],
+      videos_terrain: isVideosDirty || !currentData.updated_at ? (currentData.videos_terrain ?? videosTerrain) : [],
       changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
       deleted_points: [...deletedGpsPointIdsRef.current],
       deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
+      deleted_videos: [...deletedVideoIdsRef.current],
+      _deleted_video_ids: [...deletedVideoIdsRef.current],
     };
 
     try {
@@ -428,6 +450,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         }
         for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
         for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
+        for (const id of (payload.deleted_videos || [])) deletedVideoIdsRef.current.delete(id);
         if (saved?.updated_at) {
           setData((prev) => ({ ...prev, updated_at: saved.updated_at, modifie_le: saved.updated_at }));
         }
@@ -439,7 +462,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       // En cas de réseau instable, les données restent garanties dans le cache local
       setSaveStatus("✓ Sauvegardé (local)");
     }
-  }, [whatsappPhotos]);
+  }, [whatsappPhotos, videosTerrain]);
 
   useEffect(() => {
     if (finishingRef.current || dirtyFieldsRef.current.size === 0) return;
@@ -689,7 +712,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         const poleList = (value || []).filter((p) => p && p.type === "Poteau");
         next.nb_poteaux_traverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
         next.nb_poteaux_implantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
-        next.nb_poteaux_armes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+        next.nb_poteaux_armes = poleList.filter((p) => (p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
       }
       dataRef.current = next;
       // Sauvegarde locale instantanée à 0ms dans le navigateur/smartphone
@@ -1277,6 +1300,22 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         newPhoto.label = `Autre poteau (${existingAutre.length + 1})`;
         newPhoto.description = `Autre poteau ${existingAutre.length + 1} - ${data.nom_client || "Intervention"}`;
         nextPhotos = [...(whatsappPhotos || []), newPhoto];
+      } else if (slotKey === "contrat_client") {
+        const existingContrats = (whatsappPhotos || []).filter(
+          (p) => p && !p.additionnelle && !p.is_additionnelle && (p.slot === "contrat_client" || p.slot?.startsWith("contrat_client") || p.type === "contrat_client")
+        );
+        const contratNum = existingContrats.length < 2 ? existingContrats.length + 1 : 2;
+        newPhoto.slot = `contrat_client_${contratNum}`;
+        newPhoto.label = `Photo contrat client (${contratNum})`;
+        newPhoto.name = `contrat_client_${contratNum}.jpg`;
+        newPhoto.description = `Photo contrat client ${contratNum} - ${data.nom_client || "Intervention"}`;
+        if (existingContrats.length < 2) {
+          nextPhotos = [...(whatsappPhotos || []), newPhoto];
+        } else {
+          const targetToReplace = existingContrats[1];
+          if (targetToReplace?.id) deletedWhatsappPhotoIdsRef.current.add(targetToReplace.id);
+          nextPhotos = (whatsappPhotos || []).map((p) => (p.id === targetToReplace.id ? newPhoto : p));
+        }
       } else {
         const filtered = (whatsappPhotos || []).filter((p) => p && p.slot !== slotKey && p.type !== slotKey);
         nextPhotos = [...filtered, newPhoto];
@@ -1434,6 +1473,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
           return false;
         }
+        if (slotKey === "contrat_client" && (p.slot?.startsWith("contrat_client") || p.type === "contrat_client")) {
+          if (p.id) deletedWhatsappPhotoIdsRef.current.add(p.id);
+          return false;
+        }
         return true;
       });
 
@@ -1496,6 +1539,42 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         await flushServerSync();
       } catch (err) {
         console.warn("Erreur suppression photo autre poteau:", err);
+      }
+    }
+  }
+
+  async function removeContratPhoto(photoId) {
+    if (!photoId) return;
+    const target = (whatsappPhotos || []).find((p) => p && p.id === photoId);
+    if (!target) return;
+    if (confirm("Supprimer définitivement cette photo de contrat client ?")) {
+      markDirty("whatsapp_photos");
+      deletedWhatsappPhotoIdsRef.current.add(photoId);
+      if (target.slot) deletedWhatsappPhotoIdsRef.current.add(target.slot);
+
+      const nextPhotos = (whatsappPhotos || []).filter((p) => p && p.id !== photoId);
+      const nextData = {
+        ...data,
+        whatsapp_photos: nextPhotos,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _deleted_photo_ids: Array.from(deletedWhatsappPhotoIdsRef.current),
+        _fully_loaded: true,
+      };
+
+      setWhatsappPhotos(nextPhotos);
+      setData(nextData);
+      dataRef.current = nextData;
+      saveInterventionLocally(nextData);
+
+      setSaveStatus("✓ Photo supprimée");
+      setSlotActionFeedback("Photo de contrat supprimée définitivement.");
+      setTimeout(() => setSlotActionFeedback(""), 3000);
+
+      try {
+        await flushServerSync();
+      } catch (err) {
+        console.warn("Erreur suppression photo contrat:", err);
       }
     }
   }
@@ -1615,72 +1694,138 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   // ===== Photos de Poteaux Géolocalisés (section dynamique Photos CelPros) =====
-  function openPoleCamera(numero) {
-    targetPoleNumeroRef.current = Number(numero);
+  function openPoleCamera(numero, skipCheck = false) {
+    const poleNum = Number(numero);
+    if (!skipCheck) {
+      const currentLatestData = dataRef.current || data;
+      const pole = (currentLatestData.points_gps || []).find(
+        (p) => p && p.type === "Poteau" && Number(p.numero) === poleNum
+      );
+      const isConfigured = pole && (pole.type_poteau || pole.proprietaire) && (
+        /petit[\s_-]*jean|pj/i.test(pole.type_poteau || pole.proprietaire) ||
+        /sbee/i.test(pole.type_poteau || pole.proprietaire)
+      );
+      if (!isConfigured) {
+        setPoleConfigModal({ poleNum, actionAfter: "camera" });
+        return;
+      }
+    }
+    targetPoleNumeroRef.current = poleNum;
     if (poleCameraInputRef.current) {
       poleCameraInputRef.current.value = "";
       poleCameraInputRef.current.click();
     }
   }
 
-  function openPoleGallery(numero) {
-    targetPoleNumeroRef.current = Number(numero);
+  function openPoleGallery(numero, skipCheck = false) {
+    const poleNum = Number(numero);
+    if (!skipCheck) {
+      const currentLatestData = dataRef.current || data;
+      const pole = (currentLatestData.points_gps || []).find(
+        (p) => p && p.type === "Poteau" && Number(p.numero) === poleNum
+      );
+      const isConfigured = pole && (pole.type_poteau || pole.proprietaire) && (
+        /petit[\s_-]*jean|pj/i.test(pole.type_poteau || pole.proprietaire) ||
+        /sbee/i.test(pole.type_poteau || pole.proprietaire)
+      );
+      if (!isConfigured) {
+        setPoleConfigModal({ poleNum, actionAfter: "gallery" });
+        return;
+      }
+    }
+    targetPoleNumeroRef.current = poleNum;
     if (poleGalleryInputRef.current) {
       poleGalleryInputRef.current.value = "";
       poleGalleryInputRef.current.click();
     }
   }
 
-  function handleAddPole() {
+  function handleConfirmPoleConfig(poleNum, selectedType, options, actionAfter = null) {
+    const num = Number(poleNum);
+    const normType = /petit[\s_-]*jean|pj/i.test(selectedType) ? "Petit Jean" : (/sbee/i.test(selectedType) ? "SBEE" : selectedType);
+    const isSbee = normType === "SBEE";
+
+    let isFat = false;
+    let isImplante = false;
+    let isArme = false;
+    let isTraverse = true;
+
+    if (typeof options === "string") {
+      isFat = options === "fat";
+      isImplante = options === "implante";
+      isArme = isSbee && options === "arme";
+      isTraverse = options === "traverse" || (!isFat && !isImplante && !isArme);
+    } else if (options && typeof options === "object") {
+      isFat = Boolean(options.fat);
+      isImplante = Boolean(options.implante);
+      isArme = isSbee && Boolean(options.arme);
+      isTraverse = options.traverse !== undefined ? Boolean(options.traverse) : (!isFat && !isImplante && !isArme);
+    }
+
+    if (!isTraverse && !isImplante && !isArme && !isFat) {
+      isTraverse = true;
+    }
+
+    const labels = [];
+    if (isFat) labels.push("FAT");
+    if (isTraverse) labels.push("Traversé");
+    if (isImplante) labels.push("Implanté");
+    if (isArme) labels.push("Armé");
+    const sousType = labels.join(" + ") || "Traversé";
+
     const currentLatestData = dataRef.current || data;
-    const existingNums = [
-      ...(currentLatestData.points_gps || [])
-        .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
-        .map((p) => Number(p.numero)),
-      ...(whatsappPhotos || [])
-        .map((p) => {
-          const m = p?.slot?.match(/^poteau_(\d+)$/);
-          return m ? Number(m[1]) : 0;
-        })
-        .filter((n) => n > 0),
-    ];
-    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+    const list = [...(currentLatestData.points_gps || [])];
+    const poleIdx = list.findIndex(
+      (p) => p && p.type === "Poteau" && Number(p.numero) === num
+    );
 
-    const newPole = {
-      id: crypto.randomUUID(),
-      type: "Poteau",
-      numero: nextNum,
-      traverse: true,
-      implante: false,
-      arme: false,
-      type_poteau: "",
-      proprietaire: "",
-      sous_type: "Traversé",
-      photo: "",
-      lat: null,
-      lng: null,
-      precision_m: null,
-      horodatage: new Date().toISOString(),
-      lieu: "",
-      ajoute_par: currentUser || "Technicien",
-    };
+    let updatedPole;
+    if (poleIdx >= 0) {
+      updatedPole = {
+        ...list[poleIdx],
+        type_poteau: normType,
+        proprietaire: normType,
+        is_poteau_fat: isFat,
+        implante: isImplante,
+        arme: isArme,
+        traverse: isTraverse,
+        sous_type: sousType,
+      };
+      list[poleIdx] = updatedPole;
+    } else {
+      const wa = (whatsappPhotos || []).find((p) => p && p.slot === `poteau_${num}`);
+      updatedPole = {
+        id: wa?.id || crypto.randomUUID(),
+        type: "Poteau",
+        numero: num,
+        type_poteau: normType,
+        proprietaire: normType,
+        is_poteau_fat: isFat,
+        implante: isImplante,
+        arme: isArme,
+        traverse: isTraverse,
+        sous_type: sousType,
+        photo: wa?.url || "",
+        lat: wa?.lat ?? null,
+        lng: wa?.lng ?? null,
+        precision_m: wa?.precision_m ?? null,
+        lieu: wa?.lieu || "",
+        horodatage: wa?.horodatage || new Date().toISOString(),
+        ajoute_par: currentUser || "Technicien",
+      };
+      list.push(updatedPole);
+    }
 
-    const nextPoints = [
-      ...(currentLatestData.points_gps || []).filter(
-        (p) => !(p && p.type === "Poteau" && Number(p.numero) === nextNum)
-      ),
-      newPole,
-    ];
-    const poleList = nextPoints.filter((p) => p && p.type === "Poteau");
-    const nbTraverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
-    const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
-    const nbArmes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+    const poleList = list.filter((p) => p && p.type === "Poteau");
+    const nbTraverses = poleList.filter((p) => Boolean(p.traverse)).length;
+    const nbImplantes = poleList.filter((p) => Boolean(p.implante)).length;
+    const nbArmes = poleList.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
 
     markDirty("points_gps", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
     setData((prev) => {
       const next = {
         ...prev,
-        points_gps: nextPoints,
+        points_gps: list,
         nb_poteaux_traverses: nbTraverses,
         nb_poteaux_implantes: nbImplantes,
         nb_poteaux_armes: nbArmes,
@@ -1703,13 +1848,183 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     flushServerSync().catch(() => {});
 
-    setSaveStatus("✓ Poteau ajouté");
-    setSlotActionFeedback(`➕ Poteau ${nextNum} ajouté`);
+    setPoleConfigModal(null);
+    setSaveStatus("✓ Configuration poteau enregistrée");
+
+    if (actionAfter === "camera") {
+      setTimeout(() => openPoleCamera(num, true), 120);
+    } else if (actionAfter === "gallery") {
+      setTimeout(() => openPoleGallery(num, true), 120);
+    }
+  }
+
+  function handlePoleTypeChange(poleNum, newType) {
+    const num = Number(poleNum);
+    const normType = /petit[\s_-]*jean|pj/i.test(newType) ? "Petit Jean" : (/sbee/i.test(newType) ? "SBEE" : newType);
+    const isSbee = normType === "SBEE";
+
+    const currentLatestData = dataRef.current || data;
+    const list = [...(currentLatestData.points_gps || [])];
+    const poleIdx = list.findIndex(
+      (p) => p && p.type === "Poteau" && Number(p.numero) === num
+    );
+    if (poleIdx < 0) return;
+
+    const currentPole = list[poleIdx];
+    const isArme = isSbee ? Boolean(currentPole.arme) : false; // Only SBEE can be armé!
+    const isTraverse = currentPole.traverse !== undefined ? Boolean(currentPole.traverse) : true;
+    const isImplante = Boolean(currentPole.implante);
+    const isFat = Boolean(currentPole.is_poteau_fat);
+
+    const labels = [];
+    if (isFat) labels.push("FAT");
+    if (isTraverse) labels.push("Traversé");
+    if (isImplante) labels.push("Implanté");
+    if (isArme) labels.push("Armé");
+    const sousType = labels.join(" + ") || "Traversé";
+
+    list[poleIdx] = {
+      ...currentPole,
+      type_poteau: normType,
+      proprietaire: normType,
+      arme: isArme,
+      sous_type: sousType,
+    };
+
+    const poleList = list.filter((p) => p && p.type === "Poteau");
+    const nbTraverses = poleList.filter((p) => Boolean(p.traverse)).length;
+    const nbImplantes = poleList.filter((p) => Boolean(p.implante)).length;
+    const nbArmes = poleList.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
+
+    markDirty("points_gps", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
+    setData((prev) => {
+      const next = {
+        ...prev,
+        points_gps: list,
+        nb_poteaux_traverses: nbTraverses,
+        nb_poteaux_implantes: nbImplantes,
+        nb_poteaux_armes: nbArmes,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _fully_loaded: true,
+      };
+      if (!prev._crochets_manual) {
+        const calc = calculateMaterials(next);
+        next.materiel_pose = {
+          ...(prev.materiel_pose || {}),
+          crochets: calc.crochets,
+        };
+        markDirty("materiel_pose.crochets");
+      }
+      dataRef.current = next;
+      saveInterventionLocally(next);
+      return next;
+    });
+    flushServerSync().catch(() => {});
+  }
+
+  function handlePoleSingleOptionChange(poleNum, optionKey) {
+    const num = Number(poleNum);
+    const currentLatestData = dataRef.current || data;
+    const list = [...(currentLatestData.points_gps || [])];
+    const poleIdx = list.findIndex(
+      (p) => p && p.type === "Poteau" && Number(p.numero) === num
+    );
+    if (poleIdx < 0) return;
+
+    const currentPole = list[poleIdx];
+    const isSbee = /sbee/i.test(currentPole.type_poteau || currentPole.proprietaire || "");
+
+    let isFat = Boolean(currentPole.is_poteau_fat);
+    let isImplante = Boolean(currentPole.implante);
+    let isArme = isSbee && Boolean(currentPole.arme);
+    let isTraverse = currentPole.traverse !== undefined ? Boolean(currentPole.traverse) : true;
+
+    if (optionKey === "traverse") {
+      isTraverse = !isTraverse;
+    } else if (optionKey === "implante") {
+      isImplante = !isImplante;
+    } else if (optionKey === "arme") {
+      if (!isSbee) return; // Strict constraint: only SBEE can be armed
+      isArme = !isArme;
+    } else if (optionKey === "fat") {
+      isFat = !isFat;
+    }
+
+    if (!isTraverse && !isImplante && !isArme && !isFat) {
+      isTraverse = true;
+    }
+
+    const labels = [];
+    if (isFat) labels.push("FAT");
+    if (isTraverse) labels.push("Traversé");
+    if (isImplante) labels.push("Implanté");
+    if (isArme) labels.push("Armé");
+    const sousType = labels.join(" + ") || "Traversé";
+
+    list[poleIdx] = {
+      ...currentPole,
+      is_poteau_fat: isFat,
+      implante: isImplante,
+      arme: isArme,
+      traverse: isTraverse,
+      sous_type: sousType,
+    };
+
+    const poleList = list.filter((p) => p && p.type === "Poteau");
+    const nbTraverses = poleList.filter((p) => Boolean(p.traverse)).length;
+    const nbImplantes = poleList.filter((p) => Boolean(p.implante)).length;
+    const nbArmes = poleList.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
+
+    markDirty("points_gps", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
+    setData((prev) => {
+      const next = {
+        ...prev,
+        points_gps: list,
+        nb_poteaux_traverses: nbTraverses,
+        nb_poteaux_implantes: nbImplantes,
+        nb_poteaux_armes: nbArmes,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        _fully_loaded: true,
+      };
+      if (!prev._crochets_manual) {
+        const calc = calculateMaterials(next);
+        next.materiel_pose = {
+          ...(prev.materiel_pose || {}),
+          crochets: calc.crochets,
+        };
+        markDirty("materiel_pose.crochets");
+      }
+      dataRef.current = next;
+      saveInterventionLocally(next);
+      return next;
+    });
+    flushServerSync().catch(() => {});
+  }
+  const handlePoleOptionToggle = handlePoleSingleOptionChange;
+
+  function handleAddPole() {
+    const currentLatestData = dataRef.current || data;
+    const existingNums = [
+      ...(currentLatestData.points_gps || [])
+        .filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0)
+        .map((p) => Number(p.numero)),
+      ...(whatsappPhotos || [])
+        .map((p) => {
+          const m = p?.slot?.match(/^poteau_(\d+)$/);
+          return m ? Number(m[1]) : 0;
+        })
+        .filter((n) => n > 0),
+    ];
+    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+
+    setSlotActionFeedback(`➕ Configuration Poteau ${nextNum} : Choisissez le Type puis l'Option`);
     setTimeout(() => setSlotActionFeedback(""), 4000);
-    setTimeout(() => {
-      const el = document.getElementById(`pole-slot-card-${nextNum}`);
-      if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, 60);
+
+    // Ouvre immédiatement la modale obligatoire séquentielle (Type -> Option -> Photo)
+    // SANS créer de poteau vide dans points_gps tant que le type, l'option et la photo ne sont pas validés
+    setPoleConfigModal({ poleNum: nextNum, isNew: true });
   }
 
   function handlePoleOptionChange(poleNum, optionKey, optionValue) {
@@ -1747,7 +2062,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const updatedPole = { ...currentPole, [optionKey]: optionValue };
 
     if (optionKey === "type_poteau") {
-      updatedPole.proprietaire = optionValue;
+      let normVal = optionValue;
+      if (/petit[\s_-]*jean|pj/i.test(optionValue)) normVal = "Petit Jean";
+      else if (/sbee/i.test(optionValue)) normVal = "SBEE";
+      updatedPole.type_poteau = normVal;
+      updatedPole.proprietaire = normVal;
     }
 
     if (optionKey === "is_poteau_fat") {
@@ -1872,17 +2191,31 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         console.warn("embedGpsOnPhoto warning:", embErr);
       }
 
+      const isSbee = /sbee/i.test(existingPole?.type_poteau || existingPole?.proprietaire || "");
+      const isTraverse = existingPole ? (existingPole.traverse !== undefined ? Boolean(existingPole.traverse) : (existingPole.sous_type !== "Implanté")) : true;
+      const isImplante = existingPole ? Boolean(existingPole.implante || (!existingPole.traverse && existingPole.sous_type === "Implanté")) : false;
+      const isArme = isSbee && (existingPole ? Boolean(existingPole.arme || (!existingPole.traverse && existingPole.sous_type === "Armé")) : false);
+      const isFat = Boolean(existingPole?.is_poteau_fat || String(existingPole?.sous_type || "").toLowerCase().includes("fat"));
+
+      const labels = [];
+      if (isFat) labels.push("FAT");
+      if (isTraverse) labels.push("Traversé");
+      if (isImplante) labels.push("Implanté");
+      if (isArme) labels.push("Armé");
+      const sousType = existingPole?.sous_type || labels.join(" + ") || "Traversé";
+
       const updatedPoint = {
         ...(existingPole || {}),
         id: existingPole?.id || crypto.randomUUID(),
         type: "Poteau",
         numero: Number(poleNum),
-        traverse: existingPole ? (existingPole.traverse !== undefined ? Boolean(existingPole.traverse) : existingPole.sous_type !== "Implanté") : true,
-        implante: existingPole ? Boolean(existingPole.implante) : false,
-        arme: existingPole ? Boolean(existingPole.arme) : false,
+        traverse: isTraverse,
+        implante: isImplante,
+        arme: isArme,
+        is_poteau_fat: isFat,
         type_poteau: existingPole?.type_poteau || existingPole?.proprietaire || "",
         proprietaire: existingPole?.type_poteau || existingPole?.proprietaire || "",
-        sous_type: existingPole?.implante ? "Implanté" : existingPole?.arme ? "Armé" : "Traversé",
+        sous_type: sousType,
         photo: embeddedPhoto,
         lat,
         lng,
@@ -1899,9 +2232,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
 
       const poleList = currentList.filter((p) => p && p.type === "Poteau");
-      const nbTraverses = poleList.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
-      const nbImplantes = poleList.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
-      const nbArmes = poleList.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+      const nbTraverses = poleList.filter((p) => Boolean(p.traverse)).length;
+      const nbImplantes = poleList.filter((p) => Boolean(p.implante)).length;
+      const nbArmes = poleList.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
 
       const galleryPhoto = {
         id: crypto.randomUUID(),
@@ -2000,9 +2333,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     );
 
     const remainingPoles = updatedPoints.filter((p) => p && p.type === "Poteau");
-    const nbTraverses = remainingPoles.filter((p) => p.traverse !== undefined ? Boolean(p.traverse) : (p.sous_type !== "Implanté")).length;
-    const nbImplantes = remainingPoles.filter((p) => p.implante !== undefined ? Boolean(p.implante) : (p.sous_type === "Implanté")).length;
-    const nbArmes = remainingPoles.filter((p) => p.arme !== undefined ? Boolean(p.arme) : (p.sous_type === "Armé")).length;
+    const nbTraverses = remainingPoles.filter((p) => Boolean(p.traverse)).length;
+    const nbImplantes = remainingPoles.filter((p) => Boolean(p.implante)).length;
+    const nbArmes = remainingPoles.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
 
     const targetPoleIds = new Set(targetPoles.map((p) => p.id).filter(Boolean));
     const nextPhotos = (whatsappPhotos || []).filter(
@@ -2186,12 +2519,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   }
 
   // ===== Handlers du module Vidéo Terrain =====
+  const handlePromptRetakeVideo = (video) => {
+    if (!video) return;
+    setRetakeTargetVideo(video);
+  };
+
   const handleVideoFileChange = async (e, source = "camera") => {
     const rawFiles = Array.from(e.target.files || []);
     e.target.value = "";
     if (rawFiles.length === 0) return;
 
     const isImported = source === "gallery";
+    const replaceTarget = videoTargetReplaceRef.current;
+    videoTargetReplaceRef.current = null;
 
     // Détermination immédiate des coordonnées initiales disponibles (0ms)
     const currentLatestData = dataRef.current || data;
@@ -2206,11 +2546,180 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const initialPrecision = fallbackBaseCoords.precision_m;
     let lieu = [currentLatestData.adresse_zone, currentLatestData.quartier, currentLatestData.ville].filter(Boolean).join(", ");
     const clientName = currentLatestData.nom_client || currentLatestData.nom_dossier || "Client";
-    const baseCount = (videosTerrain || []).length;
     const horodatage = new Date().toISOString();
 
-    // 1. CRÉATION ET INJECTION INSTANTANÉE DANS LE STATE (< 30ms)
-    // L'utilisateur voit toutes ses vidéos apparaître TOUT DE SUITE au même moment.
+    // --- CAS A : REPRISE / REMPLACEMENT D'UNE VIDÉO EXISTANTE ---
+    if (replaceTarget) {
+      const file = rawFiles[0];
+      const localUrl = URL.createObjectURL(file);
+      const replaceIndex = (videosTerrain || []).findIndex((v) => v.id === replaceTarget.id);
+
+      const updatedTargetVideo = {
+        ...replaceTarget,
+        url: localUrl,
+        thumbnail_url: "",
+        duration: 0,
+        size: file.size,
+        original_size: file.size,
+        ratio: "100%",
+        captured_at: horodatage,
+        cree_le: horodatage,
+        ajoute_par: currentUser || currentLatestData.nom_technicien || "",
+        status: "processing",
+        is_imported: isImported,
+        source,
+      };
+
+      let nextVideos = [...(videosTerrain || [])];
+      if (replaceIndex >= 0) {
+        nextVideos[replaceIndex] = updatedTargetVideo;
+      } else {
+        nextVideos = [...nextVideos, updatedTargetVideo];
+      }
+
+      setVideosTerrain(nextVideos);
+      update("videos_terrain", nextVideos);
+      saveInterventionLocally({ ...currentLatestData, videos_terrain: nextVideos });
+      setVideoStatus(`⚡ Reprise vidéo : optimisation et compression en cours…`);
+      setVideoProcessing(true);
+      setVideoProgress({ pct: 15, msg: `Optimisation de la vidéo reprise…` });
+
+      try {
+        let posResult = null;
+        if (!isImported) {
+          try {
+            posResult = await acquireBestPosition(file, fallbackBaseCoords);
+          } catch (gpsErr) {
+            console.warn("Échec acquireBestPosition vidéo reprise:", gpsErr);
+          }
+        }
+
+        const activeLat = posResult?.lat ?? replaceTarget.lat ?? initialLat;
+        const activeLng = posResult?.lng ?? replaceTarget.lng ?? initialLng;
+        const activePrecision = posResult?.precision_m ?? replaceTarget.precision_m ?? initialPrecision;
+
+        if (!lieu && activeLat != null && activeLng != null) {
+          try {
+            const zoneInfo = await reverseGeocodeZone(activeLat, activeLng);
+            if (zoneInfo?.label) lieu = zoneInfo.label;
+          } catch {}
+        }
+
+        const bannerInfo = {
+          client: updatedTargetVideo.nom_client,
+          type: updatedTargetVideo.label,
+          lieu: lieu || updatedTargetVideo.lieu,
+          lat: activeLat,
+          lng: activeLng,
+          precision_m: activePrecision || 10,
+          horodatage,
+          technicien: updatedTargetVideo.ajoute_par,
+        };
+
+        // Compression active HD + incrustation si vidéo caméra
+        let fileToUpload = file;
+        let thumbUrl = "";
+        let dur = 0;
+        let compSize = file.size;
+        let isStamped = false;
+
+        try {
+          const compResult = await compressVideo(file, {
+            bannerInfo: isImported ? null : bannerInfo,
+            onProgress: (pct, msg) => {
+              setVideoProgress({ pct: Math.min(92, 15 + Math.round(pct * 0.7)), msg });
+            },
+          });
+
+          if (compResult && compResult.blob && compResult.blob.size > 0) {
+            const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
+            const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
+            fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
+              type: compResult.blob.type || "video/mp4",
+            });
+            thumbUrl = compResult.thumbnailDataUrl || "";
+            dur = compResult.duration || 0;
+            compSize = compResult.compressedSize || fileToUpload.size;
+            isStamped = Boolean(compResult.stamped);
+          }
+        } catch (compErr) {
+          console.warn("Échec compression vidéo reprise:", compErr);
+        }
+
+        if (!thumbUrl) {
+          try {
+            const thumbResult = await generateVideoThumbnail(fileToUpload, 0.3, isImported ? null : bannerInfo);
+            thumbUrl = thumbResult?.thumbnailDataUrl || "";
+            dur = thumbResult?.duration || dur;
+          } catch {}
+        }
+
+        // Suppression de l'ancienne vidéo du serveur si elle y existait
+        if (replaceTarget.id && !replaceTarget.id.startsWith("vid_")) {
+          try {
+            await deleteInterventionMedia(replaceTarget.id);
+          } catch (delErr) {
+            console.warn("Suppression ancien média lors de reprise:", delErr);
+          }
+        }
+
+        // Upload serveur du nouveau fichier compressé
+        const uploaded = await uploadInterventionMedia({
+          interventionId: data.id,
+          type: "video",
+          file: fileToUpload,
+          latitude: activeLat,
+          longitude: activeLng,
+          precisionM: activePrecision,
+          capturedAt: horodatage,
+          thumbnailBase64: thumbUrl,
+          duration: dur,
+          label: updatedTargetVideo.label,
+          isImported,
+          source,
+        });
+
+        const finalVideo = {
+          ...updatedTargetVideo,
+          id: uploaded?.id || replaceTarget.id,
+          url: uploaded?.url || localUrl,
+          thumbnail_url: uploaded?.thumbnail_url || thumbUrl || "",
+          size: compSize,
+          duration: dur,
+          lat: activeLat,
+          lng: activeLng,
+          precision_m: activePrecision,
+          lieu: lieu || updatedTargetVideo.lieu,
+          status: "synced",
+          has_banner: !isImported && isStamped,
+          stamped: isStamped,
+        };
+
+        setVideosTerrain((prev) => {
+          const next = prev.map((v) => (v.id === replaceTarget.id || v.id === updatedTargetVideo.id ? finalVideo : v));
+          update("videos_terrain", next);
+          saveInterventionLocally({ ...dataRef.current, videos_terrain: next });
+          return next;
+        });
+
+        if (activeViewingVideo?.id === replaceTarget.id) {
+          setActiveViewingVideo(finalVideo);
+        }
+
+        flushServerSync().catch(() => {});
+        setVideoStatus("✅ Vidéo reprise et compressée avec succès !");
+        setTimeout(() => setVideoStatus(""), 5000);
+      } catch (err) {
+        console.warn("Erreur pipeline reprise vidéo:", err);
+      } finally {
+        setVideoProcessing(false);
+        setVideoProgress({ pct: 0, msg: "" });
+      }
+      return;
+    }
+
+    // --- CAS B : AJOUT NORMAL DE NOUVELLE(S) VIDÉO(S) ---
+    const baseCount = (videosTerrain || []).length;
     const newItemsWithFiles = rawFiles.map((file, idx) => {
       const videoNum = baseCount + idx + 1;
       const localId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
@@ -2248,23 +2757,22 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     saveInterventionLocally({ ...currentLatestData, videos_terrain: updatedVideos });
     setVideoStatus(`⚡ ${rawFiles.length} vidéo(s) ajoutée(s) instantanément.`);
     setVideoProcessing(true);
-    setVideoProgress({ pct: 15, msg: `📡 Acquisition GPS haute précision et analyse de la vidéo…` });
+    setVideoProgress({ pct: 15, msg: `Optimisation et compression des vidéos…` });
 
-    // 2. Traitement d'arrière-plan : acquisition GPS haute précision, bandeau et upload serveur
     try {
-      // A. Résolution active de la position GPS en direct (smartphone ou fallback)
       let posResult = null;
-      try {
-        posResult = await acquireBestPosition(rawFiles[0], fallbackBaseCoords);
-      } catch (gpsErr) {
-        console.warn("Échec acquireBestPosition vidéo:", gpsErr);
+      if (!isImported) {
+        try {
+          posResult = await acquireBestPosition(rawFiles[0], fallbackBaseCoords);
+        } catch (gpsErr) {
+          console.warn("Échec acquireBestPosition vidéo:", gpsErr);
+        }
       }
 
       const activeLat = posResult?.lat ?? initialLat;
       const activeLng = posResult?.lng ?? initialLng;
       const activePrecision = posResult?.precision_m ?? initialPrecision;
 
-      // Si le lieu est vide et qu'on a des coordonnées, tenter un géocodage inversé de zone
       if (!lieu && activeLat != null && activeLng != null) {
         try {
           const zoneInfo = await reverseGeocodeZone(activeLat, activeLng);
@@ -2274,13 +2782,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         } catch {}
       }
 
-      // Mettre à jour les coordonnées réelles de l'intervention si elles n'existaient pas
       if (activeLat != null && activeLng != null) {
         if (!currentLatestData.latitude) update("latitude", activeLat);
         if (!currentLatestData.longitude) update("longitude", activeLng);
       }
 
-      // B. Génération des miniatures avec bandeau GPS et upload serveur
       for (let i = 0; i < newItemsWithFiles.length; i++) {
         const { file, video } = newItemsWithFiles[i];
         video.lat = activeLat;
@@ -2299,18 +2805,54 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           technicien: video.ajoute_par,
         };
 
-        // Miniature : bandeau GPS uniquement pour les vidéos capturées à la caméra (les importées restent sans bandeau)
-        let thumbResult = null;
+        setVideoProgress({
+          pct: 20 + Math.round((i / newItemsWithFiles.length) * 60),
+          msg: isImported
+            ? `Compression vidéo HD #${i + 1} (${formatFileSize(file.size)})…`
+            : `Compression HD & gravure GPS #${i + 1} (${formatFileSize(file.size)})…`,
+        });
+
+        // Compression active HD + incrustation si vidéo caméra
+        let fileToUpload = file;
+        let thumbUrl = "";
+        let dur = 0;
+        let compSize = file.size;
+        let isStamped = false;
+
         try {
-          thumbResult = await generateVideoThumbnail(file, 0.3, isImported ? null : bannerInfo);
-        } catch (thumbErr) {
-          console.warn("Échec génération miniature:", thumbErr);
+          const compResult = await compressVideo(file, {
+            bannerInfo: isImported ? null : bannerInfo,
+            onProgress: (pct, msg) => {
+              setVideoProgress({
+                pct: Math.min(92, 20 + Math.round(pct * 0.65)),
+                msg,
+              });
+            },
+          });
+
+          if (compResult && compResult.blob && compResult.blob.size > 0) {
+            const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
+            const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
+            fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
+              type: compResult.blob.type || "video/mp4",
+            });
+            thumbUrl = compResult.thumbnailDataUrl || "";
+            dur = compResult.duration || 0;
+            compSize = compResult.compressedSize || fileToUpload.size;
+            isStamped = Boolean(compResult.stamped);
+          }
+        } catch (compErr) {
+          console.warn("Échec compression vidéo:", compErr);
         }
 
-        const thumbUrl = thumbResult?.thumbnailDataUrl || "";
-        const dur = thumbResult?.duration || 0;
+        if (!thumbUrl) {
+          try {
+            const thumbResult = await generateVideoThumbnail(fileToUpload, 0.3, isImported ? null : bannerInfo);
+            thumbUrl = thumbResult?.thumbnailDataUrl || "";
+            dur = thumbResult?.duration || dur;
+          } catch {}
+        }
 
-        // Mise à jour de la miniature locale et des coordonnées réelles
         setVideosTerrain((prev) => {
           const next = prev.map((v) =>
             v.id === video.id
@@ -2322,6 +2864,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   lieu: lieu || v.lieu,
                   thumbnail_url: thumbUrl || v.thumbnail_url,
                   duration: dur || v.duration,
+                  size: compSize,
+                  has_banner: !isImported && isStamped,
+                  stamped: isStamped,
                 }
               : v
           );
@@ -2330,12 +2875,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           return next;
         });
 
-        // Téléversement sécurisé vers le serveur en tâche de fond
         try {
           const uploaded = await uploadInterventionMedia({
             interventionId: data.id,
             type: "video",
-            file,
+            file: fileToUpload,
             latitude: video.lat,
             longitude: video.lng,
             precisionM: video.precision_m,
@@ -2355,8 +2899,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       ...v,
                       id: uploaded.id || v.id,
                       url: uploaded.url,
-                      thumbnail_url: uploaded.thumbnail_url || v.thumbnail_url,
+                      thumbnail_url: uploaded.thumbnail_url || thumbUrl || v.thumbnail_url,
                       status: "synced",
+                      size: compSize,
+                      has_banner: !isImported && isStamped,
+                      stamped: isStamped,
                     }
                   : v
               );
@@ -2371,7 +2918,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       }
 
       flushServerSync().catch(() => {});
-      setVideoStatus(`✅ ${rawFiles.length} vidéo(s) terrain prête(s) avec bandeau de localisation !`);
+      setVideoStatus(`✅ ${rawFiles.length} vidéo(s) terrain enregistrée(s) et compressée(s) !`);
       setTimeout(() => setVideoStatus(""), 7000);
     } catch (err) {
       console.warn("Erreur pipeline vidéo arrière-plan:", err);
@@ -2383,17 +2930,38 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   const handleDeleteVideo = async (videoToDelete) => {
     if (!videoToDelete) return;
-    const nextVideos = videosTerrain.filter((v) => v.id !== videoToDelete.id);
+    const vidIdStr = String(videoToDelete.id || "");
+    if (vidIdStr) {
+      deletedVideoIdsRef.current.add(vidIdStr);
+    }
+    markDirty("videos_terrain");
+    const nextVideos = (videosTerrain || []).filter((v) => String(v.id) !== vidIdStr);
     setVideosTerrain(nextVideos);
     update("videos_terrain", nextVideos);
-    flushServerSync().catch(() => {});
+
+    const localPayload = {
+      ...dataRef.current,
+      videos_terrain: nextVideos,
+      _deleted_video_ids: Array.from(deletedVideoIdsRef.current),
+      deleted_videos: Array.from(deletedVideoIdsRef.current),
+      _fully_loaded: true
+    };
+    saveInterventionLocally(localPayload);
+
+    if (activeViewingVideo && String(activeViewingVideo.id) === vidIdStr) {
+      setActiveViewingVideo(null);
+    }
 
     try {
-      await deleteInterventionMedia(videoToDelete.id);
+      if (vidIdStr && !vidIdStr.startsWith("vid_")) {
+        await deleteInterventionMedia(vidIdStr);
+      }
     } catch (err) {
       console.warn("Échec suppression distante média:", err);
     }
-    setVideoStatus("✓ Vidéo supprimée.");
+
+    flushServerSync().catch(() => {});
+    setVideoStatus("✓ Vidéo supprimée avec succès.");
     setTimeout(() => setVideoStatus(""), 4000);
   };
 
@@ -2576,6 +3144,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
         deleted_points: [...deletedGpsPointIdsRef.current],
         deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
+        deleted_videos: [...deletedVideoIdsRef.current],
+        _deleted_video_ids: [...deletedVideoIdsRef.current],
+        _fully_loaded: true,
       };
       // 1. Sauvegarde locale instantanée garantie à 100% (hors-ligne ou réseau lent)
       saveInterventionLocally(finalData);
@@ -2650,6 +3221,46 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           </button>
         </div>
       </header>
+
+      {data.tournee_du_jour && (
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          background: "#eff6ff",
+          border: "1.5px solid #bfdbfe",
+          borderRadius: 10,
+          padding: "8px 14px",
+          margin: "8px 0 12px",
+          flexWrap: "wrap",
+          gap: 8,
+          fontSize: 13
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 16 }}>🚗</span>
+            <span style={{ fontWeight: 700, color: "#1e40af" }}>
+              Tournée #{data.tournee_ordre || 1} • {data.tournee_du_jour}
+            </span>
+            {data.tournee_verrouille ? (
+              <span style={{ background: "#fef3c7", color: "#b45309", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
+                🔒 En attente
+              </span>
+            ) : (
+              <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
+                ⚡ En cours
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn-secondary"
+            style={{ padding: "4px 10px", fontSize: 12, fontWeight: 600 }}
+            onClick={() => handleClose("tournee")}
+          >
+            🚗 Revenir à la tournée
+          </button>
+        </div>
+      )}
 
       {isInterventionTerminee(data) && (
         <div className="status-banner" style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0", padding: "10px 14px", borderRadius: 8, margin: "12px 0", fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}>
@@ -3071,7 +3682,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   scanLabel="Scanner SN"
                   onChange={(v) => {
                     update("sn", v);
-                    if (!data.ont_sn) update("ont_sn", v);
+                    update("ont_sn", v);
                   }}
                   onScanClick={() => {
                     setScannerTarget("sn");
@@ -3372,7 +3983,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 <div>
                   <h3>Boîte à Photos CelPros</h3>
                   <p className="photos-progress-sub">
-                    {CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length} sur {CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length} photos obligatoires prêtes pour CelPros
+                    {(() => {
+                      const visibleSlots = CELPROS_PHOTO_SLOTS.filter((s) => !s.hidden && !s.optional);
+                      const readyCount = visibleSlots.filter((s) => {
+                        if (s.key === "contrat_client") {
+                          return (whatsappPhotos || []).some(
+                            (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "contrat_client" || p.slot?.startsWith("contrat_client") || p.type === "contrat_client")
+                          );
+                        }
+                        return !!getPhotoForSlot(s.key)?.url;
+                      }).length;
+                      return `${readyCount} sur ${visibleSlots.length} photos obligatoires prêtes pour CelPros`;
+                    })()}
                     {(() => {
                       const count = (whatsappPhotos || []).filter(
                         (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
@@ -3382,14 +4004,36 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   </p>
                 </div>
                 <div className="photos-progress-percent">
-                  {Math.round((CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length / Math.max(1, CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length)) * 100)}%
+                  {(() => {
+                    const visibleSlots = CELPROS_PHOTO_SLOTS.filter((s) => !s.hidden && !s.optional);
+                    const readyCount = visibleSlots.filter((s) => {
+                      if (s.key === "contrat_client") {
+                        return (whatsappPhotos || []).some(
+                          (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "contrat_client" || p.slot?.startsWith("contrat_client") || p.type === "contrat_client")
+                        );
+                      }
+                      return !!getPhotoForSlot(s.key)?.url;
+                    }).length;
+                    return `${Math.round((readyCount / Math.max(1, visibleSlots.length)) * 100)}%`;
+                  })()}
                 </div>
               </div>
               <div className="progress-bar-track">
                 <div
                   className="progress-bar-fill"
                   style={{
-                    width: `${(CELPROS_PHOTO_SLOTS.filter((s) => !s.optional && !!getPhotoForSlot(s.key)?.url).length / Math.max(1, CELPROS_PHOTO_SLOTS.filter((s) => !s.optional).length)) * 100}%`
+                    width: (() => {
+                      const visibleSlots = CELPROS_PHOTO_SLOTS.filter((s) => !s.hidden && !s.optional);
+                      const readyCount = visibleSlots.filter((s) => {
+                        if (s.key === "contrat_client") {
+                          return (whatsappPhotos || []).some(
+                            (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "contrat_client" || p.slot?.startsWith("contrat_client") || p.type === "contrat_client")
+                          );
+                        }
+                        return !!getPhotoForSlot(s.key)?.url;
+                      }).length;
+                      return `${(readyCount / Math.max(1, visibleSlots.length)) * 100}%`;
+                    })()
                   }}
                 />
               </div>
@@ -3399,18 +4043,28 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             </div>
 
             <div className="celpros-photos-grid">
-              {CELPROS_PHOTO_SLOTS.map((slot) => {
+              {CELPROS_PHOTO_SLOTS.filter((s) => !s.hidden).map((slot) => {
                 const isAutrePoteau = slot.key === "autre_poteau";
+                const isContratClient = slot.key === "contrat_client";
+                const isMultiSlot = isAutrePoteau || isContratClient;
+
                 const autrePhotos = isAutrePoteau
                   ? (whatsappPhotos || []).filter(
                       (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
                     )
                   : [];
-                const photo = isAutrePoteau ? (autrePhotos[0] || null) : getPhotoForSlot(slot.key);
-                const isTaken = isAutrePoteau ? autrePhotos.length > 0 : !!photo?.url;
+                const contratPhotos = isContratClient
+                  ? (whatsappPhotos || []).filter(
+                      (p) => p && !p.additionnelle && !p.is_additionnelle && !p.exclude_celpros && (p.slot === "contrat_client" || p.slot?.startsWith("contrat_client") || p.type === "contrat_client")
+                    )
+                  : [];
+                const multiPhotos = isAutrePoteau ? autrePhotos : contratPhotos;
+
+                const photo = isMultiSlot ? (multiPhotos[0] || null) : getPhotoForSlot(slot.key);
+                const isTaken = isMultiSlot ? multiPhotos.length > 0 : !!photo?.url;
 
                 return (
-                  <div key={slot.key} className={`photo-slot-card ${isTaken ? "taken" : "pending"} ${isAutrePoteau ? "autre-poteau-card" : ""}`}>
+                  <div key={slot.key} className={`photo-slot-card ${isTaken ? "taken" : "pending"} ${isAutrePoteau ? "autre-poteau-card" : ""} ${isContratClient ? "contrat-client-card" : ""}`}>
                     <div className="photo-slot-header">
                       <span className="photo-slot-icon">{slot.icon}</span>
                       <div className="photo-slot-titles">
@@ -3421,6 +4075,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                             ℹ️ Multi-photos autorisé • Ajouté sur CelPros au niveau poteau • Bande masquée pour lisibilité
                           </div>
                         )}
+                        {isContratClient && (
+                          <div style={{ marginTop: 3, fontSize: 11, color: "#0284c7", fontWeight: 600 }}>
+                            ℹ️ 2 contrats clients autorisés (signés) • Transférés sur CelPros • Bande masquée pour lisibilité
+                          </div>
+                        )}
                       </div>
                       <span
                         className={`photo-slot-badge ${isTaken ? "badge-success" : (slot.optional ? "badge-optional" : "badge-pending")}`}
@@ -3428,13 +4087,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                       >
                         {isAutrePoteau
                           ? (isTaken ? `✓ ${autrePhotos.length} photo${autrePhotos.length > 1 ? "s" : ""}` : "Optionnel")
+                          : isContratClient
+                          ? (isTaken ? `✓ ${contratPhotos.length}/2 contrat${contratPhotos.length > 1 ? "s" : ""}` : "Obligatoire")
                           : (isTaken ? "✓ Prête" : (slot.optional ? "Optionnel" : "En attente"))}
                       </span>
                     </div>
 
                     {isTaken ? (
-                      isAutrePoteau ? (
-                        <div className="photo-slot-preview-box autre-poteau-multi-box">
+                      isMultiSlot ? (
+                        <div className={`photo-slot-preview-box ${isAutrePoteau ? "autre-poteau-multi-box" : "contrat-multi-box"}`}>
                           <div
                             className="autre-poteau-gallery-grid"
                             style={{
@@ -3445,7 +4106,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                               width: "100%",
                             }}
                           >
-                            {autrePhotos.map((ap, apIdx) => (
+                            {multiPhotos.map((ap, apIdx) => (
                               <div
                                 key={ap.id || apIdx}
                                 className="autre-poteau-thumb-wrap"
@@ -3460,7 +4121,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                               >
                                 <img
                                   src={ap.url}
-                                  alt={`Autre poteau ${apIdx + 1}`}
+                                  alt={isContratClient ? `Contrat ${apIdx + 1}` : `Autre poteau ${apIdx + 1}`}
                                   style={{
                                     width: "100%",
                                     height: 80,
@@ -3471,10 +4132,10 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                   onClick={() => {
                                     setViewingPhoto({
                                       url: ap.url,
-                                      title: `Autre poteau #${apIdx + 1}`,
+                                      title: isContratClient ? `Photo contrat client #${apIdx + 1}` : `Autre poteau #${apIdx + 1}`,
                                       subtitle: ap.lieu || (ap.lat ? `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` : ""),
                                       info: [
-                                        { label: "Catégorie", val: `Autre poteau #${apIdx + 1}` },
+                                        { label: "Catégorie", val: isContratClient ? `Contrat client #${apIdx + 1}` : `Autre poteau #${apIdx + 1}` },
                                         ...(ap.lat ? [{ label: "GPS (enregistré sans bande)", val: `${ap.lat.toFixed(5)}, ${ap.lng.toFixed(5)}` }] : []),
                                         ...(ap.precision_m ? [{ label: "Précision", val: `±${ap.precision_m.toFixed(1)} m` }] : []),
                                         ...(ap.horodatage ? [{ label: "Prise le", val: new Date(ap.horodatage).toLocaleString() }] : []),
@@ -3495,11 +4156,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                   }}
                                 >
                                   <span style={{ fontWeight: 700, color: "#475569" }}>
-                                    #{apIdx + 1} {ap.lat != null ? "📍" : ""}
+                                    {isContratClient ? `Contrat #${apIdx + 1}` : `#${apIdx + 1}`} {ap.lat != null ? "📍" : ""}
                                   </span>
                                   <button
                                     type="button"
-                                    onClick={() => removeAutrePoteauPhoto(ap.id)}
+                                    onClick={() => (isContratClient ? removeContratPhoto(ap.id) : removeAutrePoteauPhoto(ap.id))}
                                     style={{
                                       border: "none",
                                       background: "none",
@@ -3520,29 +4181,33 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           </div>
 
                           <div className="photo-slot-actions" style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            <button
-                              type="button"
-                              className="btn-slot-subtle"
-                              disabled={slotCapturing}
-                              onClick={() => openSlotCamera("autre_poteau")}
-                            >
-                              📷 + Prendre photo
-                            </button>
-                            <button
-                              type="button"
-                              className="btn-slot-subtle"
-                              disabled={slotCapturing}
-                              onClick={() => openSlotGallery("autre_poteau")}
-                            >
-                              🖼️ + Importer
-                            </button>
+                            {(!isContratClient || multiPhotos.length < 2) && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn-slot-subtle"
+                                  disabled={slotCapturing}
+                                  onClick={() => openSlotCamera(slot.key)}
+                                >
+                                  📷 {isContratClient ? `+ Prendre contrat (${multiPhotos.length + 1}/2)` : "📷 + Prendre photo"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn-slot-subtle"
+                                  disabled={slotCapturing}
+                                  onClick={() => openSlotGallery(slot.key)}
+                                >
+                                  🖼️ {isContratClient ? `+ Importer contrat (${multiPhotos.length + 1}/2)` : "🖼️ + Importer"}
+                                </button>
+                              </>
+                            )}
                             <button
                               type="button"
                               className="btn-slot-subtle danger"
-                              onClick={() => removeSlotPhoto("autre_poteau")}
-                              title="Supprimer toutes les photos d'Autre poteau"
+                              onClick={() => removeSlotPhoto(slot.key)}
+                              title={isContratClient ? "Supprimer toutes les photos de contrat" : "Supprimer toutes les photos d'Autre poteau"}
                             >
-                              ✕ Tout retirer ({autrePhotos.length})
+                              ✕ Tout retirer ({multiPhotos.length})
                             </button>
                           </div>
                         </div>
@@ -3662,7 +4327,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           disabled={slotCapturing}
                           onClick={() => openSlotCamera(slot.key)}
                         >
-                          📷 Prendre photo
+                          📷 Prendre photo {isContratClient ? "(Contrat 1)" : ""}
                         </button>
                         <button
                           type="button"
@@ -3670,7 +4335,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           disabled={slotCapturing}
                           onClick={() => openSlotGallery(slot.key)}
                         >
-                          🖼️ Importer
+                          🖼️ Importer {isContratClient ? "(Contrat 1)" : ""}
                         </button>
                       </div>
                     )}
@@ -3880,16 +4545,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                     const lieu = wa?.lieu ?? pt?.lieu;
                     const horo = wa?.horodatage ?? pt?.horodatage;
 
+                    const typePoteau = pt.type_poteau || pt.proprietaire || "";
+                    const isPj = /petit[\s_-]*jean|pj/i.test(typePoteau);
+                    const isSbee = /sbee/i.test(typePoteau);
                     const isFatPole = Boolean(pt.is_poteau_fat || String(pt.sous_type || "").toLowerCase().includes("fat"));
                     const isTraverse = pt.traverse !== undefined ? Boolean(pt.traverse) : (!isFatPole && pt.sous_type !== "Implanté");
-                    const isImplante = Boolean(pt.implante);
-                    const isArme = Boolean(pt.arme);
-                    const typePoteau = pt.type_poteau || pt.proprietaire || "";
+                    const isImplante = Boolean(pt.implante || (!pt.traverse && pt.sous_type === "Implanté"));
+                    const isArme = isSbee && Boolean(pt.arme || (!pt.traverse && pt.sous_type === "Armé"));
 
                     const charBadges = [];
-                    if (typePoteau) charBadges.push(typePoteau);
+                    if (isPj) charBadges.push("Petit Jean");
+                    else if (isSbee) charBadges.push("SBEE");
+                    else if (typePoteau) charBadges.push(typePoteau);
                     if (isFatPole) charBadges.push("Poteau FAT");
-                    else if (isTraverse) charBadges.push("Traversé (Linéaire)");
+                    if (isTraverse) charBadges.push("Traversé");
                     if (isImplante) charBadges.push("Implanté");
                     if (isArme) charBadges.push("Armé");
                     const charTitle = charBadges.join(" • ") || "Poteau";
@@ -3908,63 +4577,54 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                                 <div className="pole-pills-group">
                                   <button
                                     type="button"
-                                    className={`pill-btn ${typePoteau === "Petit Jean" ? "active" : ""}`}
-                                    onClick={() =>
-                                      handlePoleOptionChange(
-                                        poleNum,
-                                        "type_poteau",
-                                        typePoteau === "Petit Jean" ? "" : "Petit Jean"
-                                      )
-                                    }
+                                    className={`pill-btn ${isPj ? "active" : ""}`}
+                                    onClick={() => handlePoleTypeChange(poleNum, "Petit Jean")}
                                   >
-                                    Petit Jean
+                                    {isPj ? "✓ Petit Jean" : "Petit Jean"}
                                   </button>
                                   <button
                                     type="button"
-                                    className={`pill-btn ${typePoteau === "SBEE" ? "active" : ""}`}
-                                    onClick={() =>
-                                      handlePoleOptionChange(
-                                        poleNum,
-                                        "type_poteau",
-                                        typePoteau === "SBEE" ? "" : "SBEE"
-                                      )
-                                    }
+                                    className={`pill-btn ${isSbee ? "active" : ""}`}
+                                    onClick={() => handlePoleTypeChange(poleNum, "SBEE")}
                                   >
-                                    SBEE
+                                    {isSbee ? "✓ SBEE" : "SBEE"}
                                   </button>
                                 </div>
                               </div>
                               <div className="pole-option-row">
                                 <span className="pole-option-label">Options :</span>
-                                <div className="pole-pills-group">
+                                <div className="pole-pills-group" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                                   <button
                                     type="button"
-                                    className={`pill-btn ${isTraverse && !isFatPole ? "active" : ""}`}
-                                    onClick={() => handlePoleOptionChange(poleNum, "traverse", !isTraverse)}
+                                    className={`pill-btn ${isTraverse ? "active" : ""}`}
+                                    onClick={() => handlePoleSingleOptionChange(poleNum, "traverse")}
                                   >
-                                    {isTraverse && !isFatPole ? "✓ Traversée" : "Traversée"}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={`pill-btn ${isFatPole ? "active" : ""}`}
-                                    style={isFatPole ? { background: "#0284c7", color: "#fff", borderColor: "#0284c7" } : {}}
-                                    onClick={() => handlePoleOptionChange(poleNum, "is_poteau_fat", !isFatPole)}
-                                  >
-                                    {isFatPole ? "✓ Poteau FAT" : "Poteau FAT"}
+                                    {isTraverse ? "✓ Traversé" : "Traversé"}
                                   </button>
                                   <button
                                     type="button"
                                     className={`pill-btn ${isImplante ? "active" : ""}`}
-                                    onClick={() => handlePoleOptionChange(poleNum, "implante", !isImplante)}
+                                    onClick={() => handlePoleSingleOptionChange(poleNum, "implante")}
                                   >
                                     {isImplante ? "✓ Implanté" : "Implanté"}
                                   </button>
                                   <button
                                     type="button"
                                     className={`pill-btn ${isArme ? "active" : ""}`}
-                                    onClick={() => handlePoleOptionChange(poleNum, "arme", !isArme)}
+                                    disabled={!isSbee}
+                                    title={!isSbee ? "Seuls les poteaux SBEE peuvent être armés" : "Armé"}
+                                    style={!isSbee ? { opacity: 0.45, cursor: "not-allowed" } : {}}
+                                    onClick={() => isSbee && handlePoleSingleOptionChange(poleNum, "arme")}
                                   >
                                     {isArme ? "✓ Armé" : "Armé"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={`pill-btn ${isFatPole ? "active" : ""}`}
+                                    style={isFatPole ? { background: "#0284c7", color: "#fff", borderColor: "#0284c7" } : {}}
+                                    onClick={() => handlePoleSingleOptionChange(poleNum, "fat")}
+                                  >
+                                    {isFatPole ? "✓ Poteau FAT" : "Poteau FAT"}
                                   </button>
                                 </div>
                               </div>
@@ -4033,6 +4693,26 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                               </div>
                             ) : (
                               <>
+                                {!isPj && !isSbee && (
+                                  <div
+                                    className="pole-unconfigured-notice"
+                                    onClick={() => setPoleConfigModal({ poleNum, actionAfter: "camera" })}
+                                    style={{
+                                      padding: "8px 10px",
+                                      background: "#fffbeb",
+                                      border: "1px dashed #f59e0b",
+                                      borderRadius: 8,
+                                      marginBottom: 10,
+                                      textAlign: "center",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    <span style={{ color: "#b45309", fontSize: 12, fontWeight: 700 }}>⚠️ Type de poteau non configuré</span>
+                                    <p style={{ margin: "2px 0 0", fontSize: 11, color: "#92400e" }}>
+                                      Cliquez ici pour choisir <strong>Petit Jean</strong> ou <strong>SBEE</strong> avant la photo.
+                                    </p>
+                                  </div>
+                                )}
                                 <button
                                   type="button"
                                   className="btn-slot-upload btn-camera"
@@ -4173,7 +4853,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   className="videos-terrain-grid"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
                     gap: 12,
                     marginTop: 14,
                   }}
@@ -4181,140 +4861,247 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   {videosTerrain.map((video, idx) => (
                     <div
                       key={video.id || idx}
-                      className="video-terrain-item"
-                      onClick={() => setActiveViewingVideo(video)}
+                      className="video-terrain-card"
                       style={{
-                        position: "relative",
-                        borderRadius: 10,
+                        display: "flex",
+                        flexDirection: "column",
+                        borderRadius: 12,
                         overflow: "hidden",
                         background: "#0f172a",
-                        border: "1px solid var(--border)",
-                        cursor: "pointer",
-                        aspectRatio: "16 / 10",
-                        boxShadow: "0 2px 4px rgba(0,0,0,0.06)",
+                        border: "1px solid var(--border, #334155)",
+                        boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
                         transition: "transform 0.15s ease",
                       }}
-                      title="Cliquer pour lire la vidéo"
                     >
-                      {video.thumbnail_url ? (
-                        <img
-                          src={video.thumbnail_url}
-                          alt={video.label || "Vidéo terrain"}
-                          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                        />
-                      ) : (
+                      {/* Zone miniature cliquable pour lancer la lecture */}
+                      <div
+                        onClick={() => setActiveViewingVideo(video)}
+                        style={{
+                          position: "relative",
+                          aspectRatio: "16 / 10",
+                          background: "#020617",
+                          cursor: "pointer",
+                          overflow: "hidden",
+                        }}
+                        title="Cliquer pour lire la vidéo"
+                      >
+                        {video.thumbnail_url ? (
+                          <img
+                            src={video.thumbnail_url}
+                            alt={video.label || "Vidéo terrain"}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : (
+                          <div
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              background: "#1e293b",
+                              color: "#94a3b8",
+                              gap: 4,
+                            }}
+                          >
+                            <span style={{ fontSize: 28 }}>🎬</span>
+                            <span style={{ fontSize: 11, color: "#64748b" }}>Vidéo terrain</span>
+                          </div>
+                        )}
+
+                        {/* Bouton de lecture centré */}
                         <div
                           style={{
-                            width: "100%",
-                            height: "100%",
+                            position: "absolute",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
+                            width: 38,
+                            height: 38,
+                            borderRadius: "50%",
+                            background: "rgba(0, 0, 0, 0.65)",
+                            backdropFilter: "blur(4px)",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            background: "#1e293b",
-                            color: "#94a3b8",
-                            fontSize: 28,
+                            color: "#fff",
+                            fontSize: 16,
+                            boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
                           }}
                         >
-                          🎬
+                          ▶
                         </div>
-                      )}
 
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "50%",
-                          left: "50%",
-                          transform: "translate(-50%, -50%)",
-                          width: 38,
-                          height: 38,
-                          borderRadius: "50%",
-                          background: "rgba(0, 0, 0, 0.65)",
-                          backdropFilter: "blur(4px)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#fff",
-                          fontSize: 16,
-                          boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
-                        }}
-                      >
-                        ▶
-                      </div>
+                        {/* Badge durée */}
+                        {video.duration > 0 && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              bottom: 6,
+                              left: 6,
+                              background: "rgba(0,0,0,0.78)",
+                              color: "#fff",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              backdropFilter: "blur(2px)",
+                            }}
+                          >
+                            ⏱️ {formatDuration(video.duration)}
+                          </span>
+                        )}
 
-                      {video.duration && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            bottom: 6,
-                            left: 6,
-                            background: "rgba(0,0,0,0.75)",
-                            color: "#fff",
-                            fontSize: 11,
-                            fontWeight: 600,
-                            padding: "2px 6px",
-                            borderRadius: 4,
-                          }}
-                        >
-                          ⏱️ {formatDuration(video.duration)}
-                        </span>
-                      )}
+                        {/* Badge taille compressée */}
+                        {video.size > 0 && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              bottom: 6,
+                              right: 6,
+                              background: "rgba(16, 185, 129, 0.88)",
+                              color: "#fff",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            {formatFileSize(video.size)}
+                          </span>
+                        )}
 
-                      {video.size && (
-                        <span
-                          style={{
-                            position: "absolute",
-                            bottom: 6,
-                            right: 6,
-                            background: "rgba(16, 185, 129, 0.85)",
-                            color: "#fff",
-                            fontSize: 10,
-                            fontWeight: 700,
-                            padding: "2px 5px",
-                            borderRadius: 4,
-                          }}
-                        >
-                          {formatFileSize(video.size)}
-                        </span>
-                      )}
-
-                      <span
-                        style={{
-                          position: "absolute",
-                          top: 6,
-                          left: 6,
-                          background: "rgba(0,0,0,0.65)",
-                          color: "#fff",
-                          fontSize: 11,
-                          fontWeight: 600,
-                          padding: "2px 6px",
-                          borderRadius: 4,
-                          maxWidth: "70%",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {video.label || `Vidéo #${idx + 1}`}
-                      </span>
-
-                      {(video.lat != null || video.lieu) && (
+                        {/* Badge GPS ou Import */}
                         <span
                           style={{
                             position: "absolute",
                             top: 6,
                             right: 6,
-                            background: "rgba(15, 23, 42, 0.75)",
-                            color: "#facc15",
+                            background: video.is_imported ? "rgba(71, 85, 105, 0.85)" : "rgba(15, 23, 42, 0.85)",
+                            color: video.is_imported ? "#cbd5e1" : "#facc15",
                             fontSize: 10,
                             fontWeight: 700,
                             padding: "2px 6px",
                             borderRadius: 4,
+                            border: video.is_imported ? "1px solid rgba(148, 163, 184, 0.3)" : "1px solid rgba(250, 204, 21, 0.4)",
                           }}
-                          title={video.lieu || (video.lat ? `${video.lat.toFixed(5)}, ${video.lng.toFixed(5)}` : "GPS")}
+                          title={video.is_imported ? "Vidéo importée (sans bandeau)" : "Vidéo capturée caméra avec bandeau GPS"}
                         >
-                          📍 GPS
+                          {video.is_imported ? "📁 Import" : "📍 GPS"}
                         </span>
-                      )}
+
+                        {video.status === "synced" && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              top: 6,
+                              left: 6,
+                              background: "rgba(16, 185, 129, 0.88)",
+                              color: "#fff",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            ✓ Synchro
+                          </span>
+                        )}
+                      </div>
+
+                      {/* En-tête titre et boutons tactiles au bas de la carte */}
+                      <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, background: "#0f172a" }}>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 600,
+                            color: "#f8fafc",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                          title={video.label || `Vidéo #${idx + 1}`}
+                        >
+                          {video.label || `Vidéo #${idx + 1}`}
+                        </div>
+
+                        {/* Boutons d'action : Lire, Reprendre, Supprimer */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6 }}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveViewingVideo(video)}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 4,
+                              padding: "6px 4px",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              borderRadius: 6,
+                              background: "#0284c7",
+                              color: "#ffffff",
+                              border: "none",
+                              cursor: "pointer",
+                            }}
+                            title="Lire la vidéo"
+                          >
+                            ▶ Lire
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handlePromptRetakeVideo(video);
+                            }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: 4,
+                              padding: "6px 4px",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              borderRadius: 6,
+                              background: "#1e293b",
+                              color: "#38bdf8",
+                              border: "1px solid #334155",
+                              cursor: "pointer",
+                            }}
+                            title="Reprendre ou remplacer cette vidéo"
+                          >
+                            🔄 Reprendre
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Supprimer ${video.label || "cette vidéo"} ?`)) {
+                                handleDeleteVideo(video);
+                              }
+                            }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: "6px 8px",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              borderRadius: 6,
+                              background: "rgba(239, 68, 68, 0.15)",
+                              color: "#f87171",
+                              border: "1px solid rgba(239, 68, 68, 0.25)",
+                              cursor: "pointer",
+                            }}
+                            title="Supprimer cette vidéo"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -4919,12 +5706,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           <section>
             <ScannableField
               label="ONT / SN"
-              value={data.ont_sn}
+              value={data.ont_sn || data.sn}
               placeholder="Ex: 485754437572231B8"
               scanLabel="Scanner SN"
               onChange={(v) => {
                 update("ont_sn", v);
-                if (!data.sn) update("sn", v);
+                update("sn", v);
               }}
               onScanClick={() => {
                 setScannerTarget("sn");
@@ -5126,7 +5913,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   <div>Poteaux enregistrés : <strong>{(finishSuccessData.points_gps || []).filter((p) => p && p.type === "Poteau").length}</strong></div>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, justifyContent: "stretch" }}>
+                <div style={{ display: "flex", gap: 10, justifyContent: "stretch", flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className="btn-secondary"
@@ -5139,6 +5926,32 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   >
                     <IconHome size={16} /> Accueil
                   </button>
+                  {finishSuccessData.tournee_du_jour && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      style={{
+                        flex: 1.1,
+                        padding: "12px 14px",
+                        fontSize: 14,
+                        fontWeight: 700,
+                        color: "#1e40af",
+                        background: "#eff6ff",
+                        borderColor: "#bfdbfe",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 6
+                      }}
+                      onClick={() => {
+                        setFinishModalOpen(false);
+                        setFinishSuccessData(null);
+                        onClose("tournee");
+                      }}
+                    >
+                      🚗 Tournée ({finishSuccessData.tournee_ordre ? `#${finishSuccessData.tournee_ordre + 1} suivant` : "du jour"})
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn-primary"
@@ -5238,8 +6051,169 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           clientName={data.nom_client || data.nom_dossier}
           onClose={() => setActiveViewingVideo(null)}
           onDelete={handleDeleteVideo}
+          onRetake={handlePromptRetakeVideo}
         />
       )}
+
+      {retakeTargetVideo && (
+        <div
+          className="modal-overlay"
+          onClick={() => setRetakeTargetVideo(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            backgroundColor: "rgba(15, 23, 42, 0.85)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10001,
+            padding: 16,
+          }}
+        >
+          <div
+            className="modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "#0f172a",
+              color: "#f8fafc",
+              borderRadius: 16,
+              maxWidth: 420,
+              width: "100%",
+              padding: 20,
+              boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+              border: "1px solid #334155",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+              <span style={{ fontSize: 24 }}>🔄</span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>
+                  Reprendre la vidéo
+                </h3>
+                <p style={{ margin: "2px 0 0", fontSize: 12, color: "#94a3b8" }}>
+                  {retakeTargetVideo.label || "Vidéo terrain"}
+                </p>
+              </div>
+            </div>
+
+            <p style={{ fontSize: 13, color: "#cbd5e1", lineHeight: 1.5, marginBottom: 16 }}>
+              Comment souhaitez-vous reprendre ou remplacer cette vidéo ? L'ancienne sera automatiquement remplacée et le nouveau fichier sera compressé en haute définition.
+            </p>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  const target = retakeTargetVideo;
+                  setRetakeTargetVideo(null);
+                  videoTargetReplaceRef.current = target;
+                  if (videoCameraInputRef.current) {
+                    videoCameraInputRef.current.value = "";
+                    videoCameraInputRef.current.click();
+                  }
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "12px 16px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  borderRadius: 10,
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                📹 Filmer à la caméra (avec bandeau GPS)
+              </button>
+
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  const target = retakeTargetVideo;
+                  setRetakeTargetVideo(null);
+                  videoTargetReplaceRef.current = target;
+                  if (videoGalleryInputRef.current) {
+                    videoGalleryInputRef.current.value = "";
+                    videoGalleryInputRef.current.click();
+                  }
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  padding: "12px 16px",
+                  fontSize: 14,
+                  fontWeight: 600,
+                  borderRadius: 10,
+                  background: "#1e293b",
+                  color: "#38bdf8",
+                  border: "1px solid #334155",
+                  cursor: "pointer",
+                }}
+              >
+                📁 Importer depuis la galerie (sans bandeau)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  videoTargetReplaceRef.current = null;
+                  setRetakeTargetVideo(null);
+                }}
+                style={{
+                  marginTop: 6,
+                  padding: "10px 16px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  borderRadius: 8,
+                  background: "transparent",
+                  color: "#94a3b8",
+                  border: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {poleConfigModal && (() => {
+        const poleNum = poleConfigModal.poleNum;
+        const currentPole = (data.points_gps || []).find(
+          (p) => p && p.type === "Poteau" && Number(p.numero) === Number(poleNum)
+        );
+        const rawType = currentPole?.type_poteau || currentPole?.proprietaire || "";
+        const initialType = /sbee/i.test(rawType) ? "SBEE" : (/petit[\s_-]*jean|pj/i.test(rawType) ? "Petit Jean" : "");
+        const initialOptions = {
+          traverse: currentPole ? (currentPole.traverse !== undefined ? Boolean(currentPole.traverse) : currentPole.sous_type !== "Implanté") : true,
+          implante: Boolean(currentPole?.implante || (!currentPole?.traverse && currentPole?.sous_type === "Implanté")),
+          arme: Boolean(currentPole?.arme || (!currentPole?.traverse && currentPole?.sous_type === "Armé")) && initialType === "SBEE",
+          fat: Boolean(currentPole?.is_poteau_fat || String(currentPole?.sous_type || "").toLowerCase().includes("fat")),
+        };
+
+        return (
+          <PoleConfigModalInner
+            poleNum={poleNum}
+            currentPole={currentPole}
+            initialType={initialType}
+            initialOptions={initialOptions}
+            isNew={poleConfigModal.isNew}
+            actionAfter={poleConfigModal.actionAfter}
+            onConfirm={(type, opts, action) => handleConfirmPoleConfig(poleNum, type, opts, action)}
+            onClose={() => setPoleConfigModal(null)}
+          />
+        );
+      })()}
 
       <BarcodeScannerModal
         isOpen={scannerOpen}
@@ -5257,6 +6231,399 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         }}
         onClose={() => setScannerOpen(false)}
       />
+    </div>
+  );
+}
+
+function PoleConfigModalInner({
+  poleNum,
+  currentPole,
+  initialType,
+  initialOptions,
+  isNew,
+  actionAfter,
+  onConfirm,
+  onClose,
+}) {
+  const [selectedType, setSelectedType] = useState(initialType || "");
+  const [isTraverse, setIsTraverse] = useState(initialOptions?.traverse ?? true);
+  const [isImplante, setIsImplante] = useState(Boolean(initialOptions?.implante));
+  const [isArme, setIsArme] = useState(Boolean(initialOptions?.arme) && initialType === "SBEE");
+  const [isFat, setIsFat] = useState(Boolean(initialOptions?.fat));
+
+  function handleSelectType(type) {
+    setSelectedType(type);
+    if (type !== "SBEE") {
+      setIsArme(false);
+    }
+  }
+
+  const isSbee = selectedType === "SBEE";
+  const hasAnyOption = isTraverse || isImplante || isArme || isFat;
+
+  // Étape courante : 1 (Type), 2 (Options), 3 (Photo)
+  const currentStep = !selectedType ? 1 : !hasAnyOption ? 2 : 3;
+
+  return (
+    <div
+      className="modal-overlay"
+      style={{
+        position: "fixed",
+        inset: 0,
+        backgroundColor: "rgba(15, 23, 42, 0.75)",
+        zIndex: 99999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "16px",
+      }}
+      onClick={onClose}
+    >
+      <div
+        className="modal-card"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#ffffff",
+          color: "#0f172a",
+          borderRadius: 16,
+          maxWidth: 480,
+          width: "100%",
+          padding: "24px",
+          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.2)",
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 22 }}>📍</span>
+            <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: "#0f172a" }}>
+              {isNew ? `Ajout Poteau ${poleNum}` : `Configuration Poteau ${poleNum}`}
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fermer"
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: 22,
+              cursor: "pointer",
+              color: "#64748b",
+              lineHeight: 1,
+              padding: "4px 8px",
+            }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Stepper progress indicator */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 18 }}>
+          <div
+            style={{
+              flex: 1,
+              height: 6,
+              borderRadius: 3,
+              background: "#0284c7",
+              transition: "background 0.2s",
+            }}
+          />
+          <div
+            style={{
+              flex: 1,
+              height: 6,
+              borderRadius: 3,
+              background: currentStep >= 2 ? "#0284c7" : "#e2e8f0",
+              transition: "background 0.2s",
+            }}
+          />
+          <div
+            style={{
+              flex: 1,
+              height: 6,
+              borderRadius: 3,
+              background: currentStep >= 3 ? "#0284c7" : "#e2e8f0",
+              transition: "background 0.2s",
+            }}
+          />
+        </div>
+
+        {/* 1. Choix du Type (Obligatoire) - Première question */}
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <label style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
+              1. Type de poteau <span style={{ color: "#dc2626" }}>*</span>
+            </label>
+            {selectedType && (
+              <span style={{ fontSize: 12, color: "#0284c7", fontWeight: 700 }}>
+                ✓ {selectedType}
+              </span>
+            )}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => handleSelectType("Petit Jean")}
+              style={{
+                padding: "14px 12px",
+                borderRadius: 10,
+                border: selectedType === "Petit Jean" ? "2px solid #0284c7" : "1px solid #cbd5e1",
+                background: selectedType === "Petit Jean" ? "#f0f9ff" : "#f8fafc",
+                color: selectedType === "Petit Jean" ? "#0369a1" : "#334155",
+                fontWeight: selectedType === "Petit Jean" ? 700 : 500,
+                fontSize: 14,
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              <IconPole size={24} color={selectedType === "Petit Jean" ? "#0284c7" : "#64748b"} />
+              <span>{selectedType === "Petit Jean" ? "✓ Petit Jean" : "Petit Jean"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleSelectType("SBEE")}
+              style={{
+                padding: "14px 12px",
+                borderRadius: 10,
+                border: selectedType === "SBEE" ? "2px solid #0284c7" : "1px solid #cbd5e1",
+                background: selectedType === "SBEE" ? "#f0f9ff" : "#f8fafc",
+                color: selectedType === "SBEE" ? "#0369a1" : "#334155",
+                fontWeight: selectedType === "SBEE" ? 700 : 500,
+                fontSize: 14,
+                cursor: "pointer",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              <IconZap size={24} color={selectedType === "SBEE" ? "#0284c7" : "#64748b"} />
+              <span>{selectedType === "SBEE" ? "✓ SBEE" : "SBEE"}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 2. Caractéristiques du poteau (Plusieurs choix possibles) */}
+        {selectedType ? (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <label style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>
+                2. Caractéristiques du poteau <span style={{ color: "#dc2626" }}>*</span>
+              </label>
+              <span style={{ fontSize: 11, color: "#64748b", fontStyle: "italic" }}>
+                Plusieurs choix possibles
+              </span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => setIsTraverse((prev) => !prev)}
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 8,
+                  border: isTraverse ? "2px solid #0284c7" : "1px solid #e2e8f0",
+                  background: isTraverse ? "#e0f2fe" : "#ffffff",
+                  color: isTraverse ? "#0369a1" : "#334155",
+                  fontWeight: isTraverse ? 700 : 500,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <IconCable size={16} color={isTraverse ? "#0284c7" : "#64748b"} />
+                <span>{isTraverse ? "✓ Traversé" : "Traversé"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsImplante((prev) => !prev)}
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 8,
+                  border: isImplante ? "2px solid #0284c7" : "1px solid #e2e8f0",
+                  background: isImplante ? "#e0f2fe" : "#ffffff",
+                  color: isImplante ? "#0369a1" : "#334155",
+                  fontWeight: isImplante ? 700 : 500,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <IconPole size={16} color={isImplante ? "#0284c7" : "#64748b"} />
+                <span>{isImplante ? "✓ Implanté" : "Implanté"}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={!isSbee}
+                onClick={() => isSbee && setIsArme((prev) => !prev)}
+                title={!isSbee ? "Seuls les poteaux SBEE peuvent être armés" : "Armé"}
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 8,
+                  border: isArme ? "2px solid #0284c7" : "1px solid #e2e8f0",
+                  background: !isSbee ? "#f1f5f9" : isArme ? "#e0f2fe" : "#ffffff",
+                  color: !isSbee ? "#94a3b8" : isArme ? "#0369a1" : "#334155",
+                  fontWeight: isArme ? 700 : 500,
+                  fontSize: 13,
+                  cursor: !isSbee ? "not-allowed" : "pointer",
+                  opacity: !isSbee ? 0.6 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <IconHardware size={16} color={isArme ? "#0284c7" : "#64748b"} />
+                <span>{isArme ? "✓ Armé (SBEE)" : isSbee ? "Armé (SBEE)" : "Armé (SBEE seul)"}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsFat((prev) => !prev)}
+                style={{
+                  padding: "12px 10px",
+                  borderRadius: 8,
+                  border: isFat ? "2px solid #0284c7" : "1px solid #e2e8f0",
+                  background: isFat ? "#e0f2fe" : "#ffffff",
+                  color: isFat ? "#0369a1" : "#334155",
+                  fontWeight: isFat ? 700 : 500,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  justifyContent: "center",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <IconServer size={16} color={isFat ? "#0284c7" : "#64748b"} />
+                <span>{isFat ? "✓ Poteau FAT" : "Poteau FAT"}</span>
+              </button>
+            </div>
+            {!isSbee && (
+              <p style={{ margin: "6px 0 0", fontSize: 11, color: "#64748b", fontStyle: "italic" }}>
+                ℹ Seuls les poteaux SBEE peuvent être armés.
+              </p>
+            )}
+          </div>
+        ) : (
+          <div
+            style={{
+              padding: "10px 14px",
+              background: "#f8fafc",
+              border: "1px dashed #cbd5e1",
+              borderRadius: 8,
+              marginBottom: 16,
+              color: "#64748b",
+              fontSize: 12,
+              textAlign: "center",
+            }}
+          >
+            👉 Sélectionnez <strong>Petit Jean</strong> ou <strong>SBEE</strong> pour afficher les caractéristiques.
+          </div>
+        )}
+
+        {/* 3. Prise ou import photo (Affiché UNIQUEMENT si Type ET au moins une Caractéristique sont choisis) */}
+        {selectedType && hasAnyOption ? (
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ display: "block", fontSize: 14, fontWeight: 700, marginBottom: 6, color: "#1e293b" }}>
+              3. Photo du poteau <span style={{ color: "#dc2626" }}>*</span>
+            </label>
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: "#64748b" }}>
+              La prise ou l&apos;import de la photo est <strong>obligatoire</strong> pour valider ce poteau.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() =>
+                  onConfirm(
+                    selectedType,
+                    { traverse: isTraverse, implante: isImplante, arme: isArme && isSbee, fat: isFat },
+                    "camera"
+                  )
+                }
+                style={{
+                  padding: "14px 12px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "#0284c7",
+                  color: "#ffffff",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                  boxShadow: "0 4px 6px -1px rgba(2, 132, 199, 0.3)",
+                }}
+              >
+                <span style={{ fontSize: 18 }}>📷</span>
+                <span>Prendre photo</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onConfirm(
+                    selectedType,
+                    { traverse: isTraverse, implante: isImplante, arme: isArme && isSbee, fat: isFat },
+                    "gallery"
+                  )
+                }
+                style={{
+                  padding: "14px 12px",
+                  borderRadius: 10,
+                  border: "1.5px solid #cbd5e1",
+                  background: "#f8fafc",
+                  color: "#1e293b",
+                  fontWeight: 600,
+                  fontSize: 14,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 8,
+                }}
+              >
+                <span style={{ fontSize: 18 }}>🖼️</span>
+                <span>Importer photo</span>
+              </button>
+            </div>
+          </div>
+        ) : selectedType ? (
+          <div
+            style={{
+              padding: "10px 14px",
+              background: "#f8fafc",
+              border: "1px dashed #cbd5e1",
+              borderRadius: 8,
+              marginBottom: 8,
+              color: "#64748b",
+              fontSize: 12,
+              textAlign: "center",
+            }}
+          >
+            👉 Choisissez au moins une <strong>Caractéristique</strong> ci-dessus pour activer la capture photo.
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

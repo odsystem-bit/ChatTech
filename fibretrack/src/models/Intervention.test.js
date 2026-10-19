@@ -19,17 +19,17 @@ test("ensureInterventionDefaults normalizes poles with independent options", () 
         numero: 1,
         type_poteau: "Petit Jean",
         traverse: true,
-        implante: false,
-        arme: true,
+        implante: true,
+        arme: false,
       },
       {
         id: "p2",
         type: "Poteau",
         numero: 2,
         type_poteau: "SBEE",
-        traverse: false,
-        implante: true,
-        arme: false,
+        traverse: true,
+        implante: false,
+        arme: true,
       },
     ],
   };
@@ -42,20 +42,50 @@ test("ensureInterventionDefaults normalizes poles with independent options", () 
   assert.equal(p1.type_poteau, "Petit Jean");
   assert.equal(p1.proprietaire, "Petit Jean");
   assert.equal(p1.traverse, true);
-  assert.equal(p1.implante, false);
-  assert.equal(p1.arme, true);
+  assert.equal(p1.implante, true);
+  assert.equal(p1.arme, false);
 
   const p2 = output.points_gps[1];
   assert.equal(p2.numero, 2);
   assert.equal(p2.type_poteau, "SBEE");
   assert.equal(p2.proprietaire, "SBEE");
-  assert.equal(p2.traverse, false);
-  assert.equal(p2.implante, true);
-  assert.equal(p2.arme, false);
+  assert.equal(p2.traverse, true);
+  assert.equal(p2.implante, false);
+  assert.equal(p2.arme, true);
 
-  // Counters: 1 traversé (p1), 1 implanté (p2), 1 armé (p1)
-  assert.equal(output.nb_poteaux_traverses, 1);
+  // Counters: 2 traversés (p1, p2), 1 implanté (p1), 1 armé (p2)
+  assert.equal(output.nb_poteaux_traverses, 2);
   assert.equal(output.nb_poteaux_implantes, 1);
+  assert.equal(output.nb_poteaux_armes, 1);
+});
+
+test("Petit Jean pole cannot be armé, only SBEE poles can be armés", () => {
+  const input = {
+    points_gps: [
+      {
+        id: "pj1",
+        type: "Poteau",
+        numero: 1,
+        type_poteau: "Petit Jean",
+        traverse: true,
+        implante: true,
+        arme: true, // Interdit sur Petit Jean -> normalisé à false
+      },
+      {
+        id: "sbee1",
+        type: "Poteau",
+        numero: 2,
+        type_poteau: "SBEE",
+        traverse: true,
+        implante: true,
+        arme: true, // Autorisé sur SBEE
+      },
+    ],
+  };
+
+  const output = ensureInterventionDefaults(input);
+  assert.equal(output.points_gps[0].arme, false);
+  assert.equal(output.points_gps[1].arme, true);
   assert.equal(output.nb_poteaux_armes, 1);
 });
 
@@ -74,7 +104,7 @@ test("ensureInterventionDefaults handles backward compatibility from legacy sous
         type: "Poteau",
         numero: 2,
         sous_type: "Armé",
-        proprietaire: "Petit Jean",
+        proprietaire: "SBEE",
       },
     ],
   };
@@ -86,7 +116,7 @@ test("ensureInterventionDefaults handles backward compatibility from legacy sous
 
   assert.equal(output.points_gps[1].arme, true);
   assert.equal(output.points_gps[1].traverse, true); // sous_type !== "Implanté"
-  assert.equal(output.points_gps[1].type_poteau, "Petit Jean");
+  assert.equal(output.points_gps[1].type_poteau, "SBEE");
 
   assert.equal(output.nb_poteaux_traverses, 1);
   assert.equal(output.nb_poteaux_implantes, 1);
@@ -128,7 +158,7 @@ test("Pole removal preserves other pole numbers and updates counters", () => {
     points_gps: [
       { id: "p1", type: "Poteau", numero: 1, traverse: true, implante: false, arme: false },
       { id: "p2", type: "Poteau", numero: 2, traverse: true, implante: true, arme: false },
-      { id: "p3", type: "Poteau", numero: 3, traverse: false, implante: false, arme: true },
+      { id: "p3", type: "Poteau", numero: 3, type_poteau: "SBEE", traverse: false, implante: false, arme: true },
     ],
   });
 
@@ -137,7 +167,7 @@ test("Pole removal preserves other pole numbers and updates counters", () => {
   const remainingPoles = updatedPoints.filter((p) => p && p.type === "Poteau");
   const nbTraverses = remainingPoles.filter((p) => Boolean(p.traverse)).length;
   const nbImplantes = remainingPoles.filter((p) => Boolean(p.implante)).length;
-  const nbArmes = remainingPoles.filter((p) => Boolean(p.arme)).length;
+  const nbArmes = remainingPoles.filter((p) => Boolean(p.arme) && /sbee/i.test(p.type_poteau || p.proprietaire || "")).length;
 
   const afterRemoval = ensureInterventionDefaults({
     ...initial,
