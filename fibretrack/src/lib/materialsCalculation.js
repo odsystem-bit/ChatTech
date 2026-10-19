@@ -5,6 +5,7 @@
  * - Poteau linéaire : 2 crochets par poteau
  * - Poteau FAT : 1 crochet par poteau
  * - Piton : 1 unité obligatoire par client
+ * - Cheville : 1 unité par défaut par client (utilisée lors de la pose du piton)
  * - ONT : valeur par défaut de 1 (pas d'OTP)
  * - PTO : valeur par défaut de 1
  */
@@ -18,6 +19,7 @@
  *   nbLinearPoles: number,
  *   nbFatPoles: number,
  *   piton: number,
+ *   cheville: number,
  *   pto: number,
  *   ont: number,
  *   otp: number,
@@ -31,6 +33,7 @@ export function calculateMaterials(intervention) {
       nbLinearPoles: 0,
       nbFatPoles: 0,
       piton: 1,
+      cheville: 1,
       pto: 1,
       otp: 1,
       ont: 1,
@@ -87,6 +90,9 @@ export function calculateMaterials(intervention) {
   // Piton : 1 obligatoire par client
   const piton = mp.piton !== undefined && mp.piton !== null && mp.piton !== "" ? Number(mp.piton) : 1;
 
+  // Cheville : 1 par défaut par client (utilisée lors de la pose du piton, modifiable à 0 en cas exceptionnel)
+  const cheville = mp.cheville !== undefined && mp.cheville !== null && mp.cheville !== "" ? Number(mp.cheville) : 1;
+
   // PTO : 1 par défaut
   const pto = mp.pto !== undefined && mp.pto !== null && mp.pto !== ""
     ? Number(mp.pto)
@@ -127,6 +133,7 @@ export function calculateMaterials(intervention) {
     nbLinearPoles,
     nbFatPoles,
     piton,
+    cheville,
     pto,
     otp: ont,
     ont,

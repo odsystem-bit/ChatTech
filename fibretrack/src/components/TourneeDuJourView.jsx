@@ -540,8 +540,22 @@ export default function TourneeDuJourView({
 
       {/* ===== MODALE DE CONFIRMATION AVANT DE LANCER L'INTERVENTION ===== */}
       {launchConfirmDossier && (
-        <div className="modal-overlay" onClick={() => setLaunchConfirmDossier(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(15, 23, 42, 0.75)",
+            backdropFilter: "blur(4px)",
+            padding: 16,
+          }}
+          onClick={() => setLaunchConfirmDossier(null)}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480, width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
             <div className="modal-header">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <IconUnlock size={22} color="var(--primary, #2563eb)" />
@@ -630,8 +644,22 @@ export default function TourneeDuJourView({
 
       {/* ===== MODALE DE CONFIRMATION DE SUPPRESSION DÉFINITIVE ===== */}
       {deleteConfirmDossier && (
-        <div className="modal-overlay" onClick={() => setDeleteConfirmDossier(null)}>
-          <div className="modal-card modal-card-danger" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(15, 23, 42, 0.75)",
+            backdropFilter: "blur(4px)",
+            padding: 16,
+          }}
+          onClick={() => setDeleteConfirmDossier(null)}
+        >
+          <div className="modal-card modal-card-danger" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480, width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
             <div className="modal-header" style={{ borderBottom: "1px solid var(--border-light, #e2e8f0)", paddingBottom: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{
@@ -747,7 +775,21 @@ export default function TourneeDuJourView({
 
       {/* ===== MODALE D'IMPORT EXPRESS DU LISTING DU JOUR ===== */}
       {importModalOpen && (
-        <div className="modal-overlay" onClick={() => !importing && setImportModalOpen(false)}>
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(15, 23, 42, 0.75)",
+            backdropFilter: "blur(4px)",
+            padding: 16,
+          }}
+          onClick={() => !importing && setImportModalOpen(false)}
+        >
           <div className="modal-card tournee-import-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -864,8 +906,22 @@ export default function TourneeDuJourView({
 
       {/* ===== MODALE DE DÉCLARATION NON TRAITÉ ===== */}
       {cancelModalDossier && (
-        <div className="modal-overlay" onClick={() => setCancelModalDossier(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440 }}>
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 999999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "rgba(15, 23, 42, 0.75)",
+            backdropFilter: "blur(4px)",
+            padding: 16,
+          }}
+          onClick={() => setCancelModalDossier(null)}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 440, width: "100%", maxHeight: "90vh", overflowY: "auto" }}>
             <div className="modal-header">
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <IconXCircle size={20} color="var(--danger, #ef4444)" />

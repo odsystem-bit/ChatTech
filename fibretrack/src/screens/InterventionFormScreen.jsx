@@ -201,6 +201,7 @@ const MATERIEL_STANDARD = [
   { key: "crochets", label: "Crochets" },
   { key: "susp", label: "Suspente (Susp)" },
   { key: "piton", label: "Piton" },
+  { key: "cheville", label: "Cheville" },
   { key: "pto", label: "PTO" },
   { key: "ont", label: "ONT" },
   { key: "closer", label: "Closer" },

@@ -540,11 +540,12 @@ test("saveInterventionLocally with _fully_loaded: true permanently deletes photo
   assert.equal(fatPhoto.url, "data:image/jpeg;base64,newfatimg");
 });
 
-test("Default materials rules: empty intervention defaults to piton=1, pto=1, ont=1, crochets=0 and no OTP duplicate", () => {
+test("Default materials rules: empty intervention defaults to piton=1, cheville=1, pto=1, ont=1, crochets=0 and no OTP duplicate", () => {
   const intv = createEmptyIntervention("Technicien");
   const defaulted = ensureInterventionDefaults(intv);
 
   assert.equal(defaulted.materiel_pose.piton, 1, "Piton doit être 1");
+  assert.equal(defaulted.materiel_pose.cheville, 1, "Cheville doit être 1 par défaut");
   assert.equal(defaulted.materiel_pose.pto, 1, "PTO doit être 1");
   assert.equal(defaulted.materiel_pose.ont, 1, "ONT doit être 1");
   assert.equal(defaulted.materiel_pose.otp, undefined, "Il ne doit pas y avoir d'OTP en double dans materiel_pose");

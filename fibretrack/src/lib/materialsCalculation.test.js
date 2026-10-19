@@ -15,6 +15,7 @@ test("calculateMaterials - Exemple concret de l'utilisateur (1 linéaire + 1 FAT
   assert.equal(result.nbLinearPoles, 1, "Doit détecter 1 poteau linéaire");
   assert.equal(result.nbFatPoles, 1, "Doit détecter 1 poteau FAT");
   assert.equal(result.piton, 1, "Piton par défaut = 1");
+  assert.equal(result.cheville, 1, "Cheville par défaut = 1 (utilisée avec le piton)");
   assert.equal(result.crochets, 4, "Calcul des crochets : 1 lin * 2 + 1 FAT * 1 + 1 piton * 1 = 4 crochets");
   assert.equal(result.otp, 1, "OTP/ONT par défaut = 1");
   assert.equal(result.pto, 1, "PTO par défaut = 1");
@@ -90,4 +91,19 @@ test("calculateMaterials - Intervention totalement vierge (0 poteaux, sans FAT) 
   const blank = {};
   const result = calculateMaterials(blank);
   assert.equal(result.crochets, 0, "0 poteau et 0 FAT = 0 crochet");
+  assert.equal(result.cheville, 1, "Cheville par défaut = 1");
+  assert.equal(result.piton, 1, "Piton par défaut = 1");
 });
+
+test("calculateMaterials - Cheville modifiable à 0 pour cas exceptionnel sans cheville", () => {
+  const intervention = {
+    materiel_pose: {
+      piton: 1,
+      cheville: 0, // Cas exceptionnel où on n'installe pas de cheville
+    },
+  };
+  const result = calculateMaterials(intervention);
+  assert.equal(result.cheville, 0, "Doit respecter la cheville à 0 pour les cas exceptionnels");
+  assert.equal(result.piton, 1);
+});
+

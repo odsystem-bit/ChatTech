@@ -395,6 +395,13 @@ export function ensureInterventionDefaults(data) {
     rawMp.piton = Number(rawMp.piton);
   }
 
+  // Cheville : 1 par défaut par client (utilisée lors de la pose du piton, modifiable à 0 en cas exceptionnel)
+  if (rawMp.cheville === undefined || rawMp.cheville === null || rawMp.cheville === "") {
+    rawMp.cheville = 1;
+  } else {
+    rawMp.cheville = Number(rawMp.cheville);
+  }
+
   // PTO : 1 par défaut
   if (rawMp.pto === undefined || rawMp.pto === null || rawMp.pto === "") {
     rawMp.pto = (data.pto_qte !== undefined && data.pto_qte !== null && data.pto_qte !== "") ? Number(data.pto_qte) : 1;
@@ -948,6 +955,7 @@ export function createEmptyIntervention(technicien, initialNom = "") {
     materiel_pose: {
       crochets: 0,
       piton: 1,
+      cheville: 1,
       pto: 1,
       ont: 1,
     },
