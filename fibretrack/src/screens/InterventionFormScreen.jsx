@@ -45,6 +45,7 @@ import {
   formatFileSize,
   formatDuration,
   compressVideo,
+  generateVideoThumbnail,
 } from "../lib/videoCompression";
 import {
   uploadInterventionMedia,
@@ -213,7 +214,7 @@ const MATERIEL_STANDARD = [
   { key: "poteau_sbee_arme", label: "Poteau SBEE armé" },
 ];
 
-export default function InterventionFormScreen({ intervention, onClose, onFinish, currentUser }) {
+export default function InterventionFormScreen({ intervention, onClose, onFinish, currentUser, onOpenReport }) {
   const [data, setData] = useState(() => ensureInterventionDefaults(intervention));
   const dirtyFieldsRef = useRef(new Set());
   const dirtyRevisionsRef = useRef(new Map());
@@ -262,6 +263,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const videoGalleryInputRef = useRef(null);
   const videoTargetReplaceRef = useRef(null);
   const [retakeTargetVideo, setRetakeTargetVideo] = useState(null);
+  const activeVideoUploadsRef = useRef(new Set());
 
   const [saveStatus, setSaveStatus] = useState("");
   const [viewingPhoto, setViewingPhoto] = useState(null);
@@ -282,74 +284,150 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     dataRef.current = data;
   }, [data]);
 
-  // Synchronisation sécurisée si les photos ou points arrivent depuis un rechargement ou autre agent
+  const whatsappPhotosRef = useRef(whatsappPhotos);
+  useEffect(() => {
+    whatsappPhotosRef.current = whatsappPhotos;
+  }, [whatsappPhotos]);
+
+  const videosTerrainRef = useRef(videosTerrain);
+  useEffect(() => {
+    videosTerrainRef.current = videosTerrain;
+  }, [videosTerrain]);
+
+  const lastKnownSignatureRef = useRef(
+    intervention?.updated_at
+      ? `${intervention.updated_at}_${(intervention.whatsapp_photos || []).length}_${(intervention.videos_terrain || []).length}`
+      : ""
+  );
+
+  const mergeIncomingPhotos = useCallback((prevPhotos, remotePhotos) => {
+    const deletedIds = deletedWhatsappPhotoIdsRef.current;
+    const isMultiFn = (p) =>
+      !p?.slot ||
+      p.additionnelle ||
+      p.is_additionnelle ||
+      p.slot === "additionnelle" ||
+      String(p.slot).startsWith("additionnelle_") ||
+      p.slot === "autre_poteau" ||
+      String(p.slot).startsWith("autre_poteau") ||
+      p.slot === "contrat_client" ||
+      String(p.slot).startsWith("contrat_client") ||
+      String(p.slot).startsWith("media_");
+
+    const incoming = (Array.isArray(remotePhotos) ? remotePhotos : []).filter((p) => {
+      if (!p) return false;
+      if (p.id && deletedIds.has(p.id)) return false;
+      if (!isMultiFn(p)) {
+        if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+        if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+      }
+      return true;
+    });
+    if (!prevPhotos || prevPhotos.length === 0) return incoming;
+    const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
+    const incomingSingleSlots = new Set(
+      incoming.filter((p) => p && !isMultiFn(p)).map((p) => p?.slot).filter(Boolean)
+    );
+    const localUnsynced = prevPhotos.filter((p) => {
+      if (!p) return false;
+      if (p.id && deletedIds.has(p.id)) return false;
+      const isMulti = isMultiFn(p);
+      if (!isMulti) {
+        if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
+        if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
+      }
+      if (p.id && incomingIds.has(p.id)) return false;
+      if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
+      // Conserver les photos locales en attente d'envoi (base64) ou si whatsapp_photos est dirty
+      return String(p.url || "").startsWith("data:image") || dirtyFieldsRef.current.has("whatsapp_photos");
+    });
+    return [...incoming, ...localUnsynced];
+  }, []);
+
+  const mergeIncomingVideos = useCallback((prevVideos, remoteVideos) => {
+    const deletedIds = deletedVideoIdsRef.current;
+    const incoming = (Array.isArray(remoteVideos) ? remoteVideos : []).filter(
+      (v) => v && v.id && !deletedIds.has(String(v.id)) && (!v.url || !String(v.url).startsWith("blob:"))
+    );
+    if (!prevVideos || prevVideos.length === 0) return incoming;
+    const incomingIds = new Set(incoming.map((v) => String(v?.id)).filter(Boolean));
+    const incomingUrls = new Set(incoming.map((v) => String(v?.url || "")).filter(Boolean));
+    const localInFlight = prevVideos.filter((v) => {
+      if (!v || !v.id || deletedIds.has(String(v.id))) return false;
+      if (incomingIds.has(String(v.id))) return false;
+      if (v.url && incomingUrls.has(String(v.url))) return false;
+      return v.status === "uploading" || v.status === "processing" || String(v.url || "").startsWith("blob:");
+    });
+    return [...incoming, ...localInFlight];
+  }, []);
+
+  // Synchronisation sécurisée si les photos, points, vidéos ou champs arrivent depuis un rechargement ou un coéquipier
   useEffect(() => {
     if (!intervention) return;
+    let mergedWa = null;
+    let mergedVids = null;
+
     if (Array.isArray(intervention.whatsapp_photos)) {
-      setWhatsappPhotos((prev) => {
-        const deletedIds = deletedWhatsappPhotoIdsRef.current;
-        const incoming = intervention.whatsapp_photos.filter((p) => {
-          if (!p) return false;
-          if (p.id && deletedIds.has(p.id)) return false;
-          const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
-          if (!isMulti) {
-            if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-            if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
-          }
-          return true;
-        });
-        if (!prev || prev.length === 0) return incoming;
-        const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-        const incomingSingleSlots = new Set(
-          incoming
-            .filter((p) => p && !p.additionnelle && !p.is_additionnelle && p.slot !== "additionnelle" && !String(p.slot).startsWith("additionnelle_") && p.slot !== "autre_poteau" && !String(p.slot).startsWith("autre_poteau"))
-            .map((p) => p?.slot)
-            .filter(Boolean)
-        );
-        const localUnsynced = prev.filter((p) => {
-          if (!p) return false;
-          if (p.id && deletedIds.has(p.id)) return false;
-          const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
-          if (!isMulti) {
-            if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-            if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
-          }
-          if (p.id && incomingIds.has(p.id)) return false;
-          if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
-          return true;
-        });
-        return [...incoming, ...localUnsynced];
-      });
+      mergedWa = mergeIncomingPhotos(whatsappPhotosRef.current, intervention.whatsapp_photos);
+      setWhatsappPhotos(mergedWa);
+      whatsappPhotosRef.current = mergedWa;
     }
-    if (Array.isArray(intervention.points_gps)) {
-      setData((prev) => {
+    if (Array.isArray(intervention.videos_terrain)) {
+      mergedVids = mergeIncomingVideos(videosTerrainRef.current, intervention.videos_terrain);
+      setVideosTerrain(mergedVids);
+      videosTerrainRef.current = mergedVids;
+    }
+
+    setData((prev) => {
+      const next = { ...prev };
+      for (const [field, value] of Object.entries(intervention)) {
+        if (["points_gps", "whatsapp_photos", "videos_terrain", "_fully_loaded"].includes(field)) continue;
+        if (field === "materiel_pose" && value && typeof value === "object") {
+          const mp = { ...(prev.materiel_pose || {}) };
+          for (const [desig, qty] of Object.entries(value)) {
+            if (!dirtyFieldsRef.current.has(`materiel_pose.${desig}`)) mp[desig] = qty;
+          }
+          next.materiel_pose = mp;
+          continue;
+        }
+        if (!dirtyFieldsRef.current.has(field)) {
+          const prevVal = prev[field];
+          const prevIsFilled = typeof prevVal === "string" ? prevVal.trim() !== "" : (prevVal !== null && prevVal !== undefined && prevVal !== 0);
+          const remoteIsEmpty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
+          if (!(prevIsFilled && remoteIsEmpty)) {
+            next[field] = value;
+          }
+        }
+      }
+      if (Array.isArray(intervention.points_gps)) {
         const deletedIds = deletedGpsPointIdsRef.current;
         const incoming = intervention.points_gps.filter((p) => {
           const key = p?.id || p?.horodatage;
           return !key || !deletedIds.has(key);
         });
         if (!prev.points_gps || prev.points_gps.length === 0) {
-          return { ...prev, points_gps: incoming };
+          next.points_gps = incoming;
+        } else {
+          const incomingKeys = new Set(incoming.map((p) => p?.id || p?.horodatage).filter(Boolean));
+          const incomingPoleNums = new Set(
+            incoming.filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0).map((p) => Number(p.numero))
+          );
+          const localUnsynced = (prev.points_gps || []).filter((p) => {
+            const key = p?.id || p?.horodatage;
+            if (!key || incomingKeys.has(key) || deletedIds.has(key)) return false;
+            if (p.type === "Poteau" && Number(p.numero) > 0 && incomingPoleNums.has(Number(p.numero))) return false;
+            return String(p.photo || "").startsWith("data:image") || dirtyFieldsRef.current.has("points_gps");
+          });
+          next.points_gps = [...incoming, ...localUnsynced];
         }
-        const incomingKeys = new Set(incoming.map((p) => p?.id || p?.horodatage).filter(Boolean));
-        const localUnsynced = (prev.points_gps || []).filter((p) => {
-          const key = p?.id || p?.horodatage;
-          return key && !incomingKeys.has(key) && !deletedIds.has(key);
-        });
-        return { ...prev, points_gps: [...incoming, ...localUnsynced] };
-      });
-    }
-    if (Array.isArray(intervention.videos_terrain)) {
-      setVideosTerrain((prev) => {
-        const deletedIds = deletedVideoIdsRef.current;
-        const incoming = intervention.videos_terrain.filter((v) => v && v.id && !deletedIds.has(v.id));
-        if (!prev || prev.length === 0) return incoming;
-        const incomingIds = new Set(incoming.map((v) => v?.id).filter(Boolean));
-        const localUnsynced = prev.filter((v) => v && v.id && !incomingIds.has(v.id) && !deletedIds.has(v.id));
-        return [...incoming, ...localUnsynced];
-      });
-    }
-  }, [intervention]);
+      }
+      if (mergedWa !== null) next.whatsapp_photos = mergedWa;
+      if (mergedVids !== null) next.videos_terrain = mergedVids;
+      next._fully_loaded = true;
+      dataRef.current = next;
+      return next;
+    });
+  }, [intervention, mergeIncomingPhotos, mergeIncomingVideos]);
 
   // Saisie rapide des informations client
   const [quickClientOpen, setQuickClientOpen] = useState(true);
@@ -425,21 +503,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const currentData = dataRef.current;
     if (!currentData) return;
 
-    // Optimisation majeure : n'envoyer les photos lourdes que si elles ont été expressément modifiées
     const isWaPhotosDirty = dirtySnapshot.has("whatsapp_photos");
     const isGpsDirty = dirtySnapshot.has("points_gps");
     const isVideosDirty = dirtySnapshot.has("videos_terrain");
 
+    const currentWaList = Array.isArray(whatsappPhotosRef.current) && whatsappPhotosRef.current.length > 0
+      ? whatsappPhotosRef.current
+      : (Array.isArray(currentData.whatsapp_photos) ? currentData.whatsapp_photos : []);
+    const currentVideosList = (Array.isArray(videosTerrainRef.current) ? videosTerrainRef.current : (currentData.videos_terrain || []))
+      .filter((v) => v && (!v.url || !String(v.url).startsWith("blob:")));
+
     const payload = {
       ...currentData,
-      whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? (currentData.whatsapp_photos ?? whatsappPhotos) : [],
-      points_gps: isGpsDirty || !currentData.updated_at ? currentData.points_gps : [],
-      videos_terrain: isVideosDirty || !currentData.updated_at ? (currentData.videos_terrain ?? videosTerrain) : [],
+      whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? currentWaList : [],
+      points_gps: isGpsDirty || !currentData.updated_at ? (currentData.points_gps || []) : [],
+      videos_terrain: isVideosDirty || !currentData.updated_at ? currentVideosList : [],
       changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
       deleted_points: [...deletedGpsPointIdsRef.current],
       deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
       deleted_videos: [...deletedVideoIdsRef.current],
       _deleted_video_ids: [...deletedVideoIdsRef.current],
+      _fully_loaded: true,
     };
 
     try {
@@ -452,9 +536,40 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         for (const id of payload.deleted_whatsapp_photos) deletedWhatsappPhotoIdsRef.current.delete(id);
         for (const id of payload.deleted_points) deletedGpsPointIdsRef.current.delete(id);
         for (const id of (payload.deleted_videos || [])) deletedVideoIdsRef.current.delete(id);
-        if (saved?.updated_at) {
-          setData((prev) => ({ ...prev, updated_at: saved.updated_at, modifie_le: saved.updated_at }));
+
+        // Remplacer immédiatement les lourdes chaînes base64 en mémoire par les URLs https:// renvoyées par le serveur
+        // et intégrer les photos/poteaux/vidéos ajoutés en parallèle par le reste de l'équipe !
+        let nextWa = null;
+        if (Array.isArray(saved.whatsapp_photos) && (isWaPhotosDirty || saved.whatsapp_photos.length > 0)) {
+          nextWa = mergeIncomingPhotos(whatsappPhotosRef.current, saved.whatsapp_photos);
+          setWhatsappPhotos(nextWa);
+          whatsappPhotosRef.current = nextWa;
         }
+        let nextVids = null;
+        if (Array.isArray(saved.videos_terrain) && (isVideosDirty || saved.videos_terrain.length > 0)) {
+          nextVids = mergeIncomingVideos(videosTerrainRef.current, saved.videos_terrain);
+          setVideosTerrain(nextVids);
+          videosTerrainRef.current = nextVids;
+        }
+
+        if (saved?.updated_at) {
+          lastKnownSignatureRef.current = saved.updated_at;
+        }
+
+        setData((prev) => {
+          const next = {
+            ...prev,
+            ...(saved?.updated_at ? { updated_at: saved.updated_at, modifie_le: saved.updated_at } : {}),
+            ...(nextWa !== null ? { whatsapp_photos: nextWa } : {}),
+            ...(nextVids !== null ? { videos_terrain: nextVids } : {}),
+          };
+          if (Array.isArray(saved.points_gps) && (isGpsDirty || saved.points_gps.length > 0) && !dirtyFieldsRef.current.has("points_gps")) {
+            next.points_gps = saved.points_gps;
+          }
+          dataRef.current = next;
+          saveInterventionLocally(next);
+          return next;
+        });
         setSaveStatus("✓ Enregistré");
       } else {
         setSaveStatus("✓ Sauvegardé (en attente réseau)");
@@ -463,7 +578,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       // En cas de réseau instable, les données restent garanties dans le cache local
       setSaveStatus("✓ Sauvegardé (local)");
     }
-  }, [whatsappPhotos, videosTerrain]);
+  }, [mergeIncomingPhotos, mergeIncomingVideos]);
 
   useEffect(() => {
     if (finishingRef.current || dirtyFieldsRef.current.size === 0) return;
@@ -475,9 +590,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
   const handleClose = useCallback(async () => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    if (activeVideoUploadsRef.current.size > 0) {
+      setSaveStatus("⏳ Finalisation de l'envoi vidéo…");
+      try {
+        await Promise.allSettled([...activeVideoUploadsRef.current]);
+      } catch {}
+    }
     const latest = dataRef.current;
     if (latest) {
-      saveInterventionLocally(latest);
+      saveInterventionLocally({
+        ...latest,
+        whatsapp_photos: whatsappPhotosRef.current,
+        videos_terrain: videosTerrainRef.current,
+        _fully_loaded: true,
+      });
       try {
         await flushServerSync();
       } catch {}
@@ -488,7 +614,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   useEffect(() => {
     function handleBeforeUnload() {
       if (dataRef.current) {
-        saveInterventionLocally(dataRef.current);
+        saveInterventionLocally({
+          ...dataRef.current,
+          whatsapp_photos: whatsappPhotosRef.current,
+          videos_terrain: videosTerrainRef.current,
+          _fully_loaded: true,
+        });
         flushServerSync().catch(() => {});
       }
     }
@@ -503,20 +634,45 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const refreshRemoteFields = async () => {
       if (!data.id || finishingRef.current) return;
       try {
-        // Vérification ultra-rapide (50 octets) : est-ce que le serveur a une date plus récente ?
-        const remoteUpdated = await checkInterventionUpdatedAt(data.id);
-        if (!active || !remoteUpdated) return;
-        const remoteTime = toNormalizedTimestamp(remoteUpdated);
-        const localTime = toNormalizedTimestamp(data.updated_at || data.modifie_le);
-        if (localTime >= remoteTime) return; // Déjà à jour
+        // Vérification ultra-rapide (50 octets) par signature (date + empreinte des médias) :
+        // Détecte instantanément si un coéquipier a ajouté une photo, vidéo ou information
+        const check = await checkInterventionUpdatedAt(data.id);
+        if (!active || !check) return;
+        const currentSig = check.signature || check.updated_at || "";
+        const remoteUpdated = check.updated_at || "";
 
-        const remote = await getInterventionLight(data.id);
+        // Si la signature du serveur est identique à celle qu'on a déjà traitée, rien à faire
+        if (lastKnownSignatureRef.current && currentSig && currentSig === lastKnownSignatureRef.current) {
+          return;
+        }
+
+        // Récupérer la fiche complète dès qu'une photo ou vidéo est ajoutée/mise à jour par un coéquipier
+        const remote = await getIntervention(data.id);
         if (!active || !remote) return;
+        lastKnownSignatureRef.current = currentSig || remote.updated_at || "";
+
+        let mergedWa = null;
+        if (Array.isArray(remote.whatsapp_photos)) {
+          mergedWa = mergeIncomingPhotos(whatsappPhotosRef.current, remote.whatsapp_photos);
+          setWhatsappPhotos(mergedWa);
+          whatsappPhotosRef.current = mergedWa;
+        }
+
+        let mergedVids = null;
+        if (Array.isArray(remote.videos_terrain)) {
+          mergedVids = mergeIncomingVideos(videosTerrainRef.current, remote.videos_terrain);
+          setVideosTerrain(mergedVids);
+          videosTerrainRef.current = mergedVids;
+        }
+
         setData((previous) => {
           const next = {
             ...previous,
             updated_at: remote.updated_at || remoteUpdated,
             modifie_le: remote.updated_at || remoteUpdated,
+            ...(mergedWa !== null ? { whatsapp_photos: mergedWa } : {}),
+            ...(mergedVids !== null ? { videos_terrain: mergedVids } : {}),
+            _fully_loaded: true,
           };
           for (const [field, value] of Object.entries(remote)) {
             if (field === "materiel_pose") {
@@ -525,7 +681,24 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 if (!dirtyFieldsRef.current.has(`materiel_pose.${designation}`)) material[designation] = quantity;
               }
               next.materiel_pose = material;
-            } else if (!["points_gps", "whatsapp_photos", "signature_client", "signature_technicien"].includes(field)) {
+            } else if (field === "points_gps" && Array.isArray(value)) {
+              const deletedIds = deletedGpsPointIdsRef.current;
+              const incomingPts = value.filter((p) => {
+                const key = p?.id || p?.horodatage;
+                return !key || !deletedIds.has(key);
+              });
+              const incomingKeys = new Set(incomingPts.map((p) => p?.id || p?.horodatage).filter(Boolean));
+              const incomingPoleNums = new Set(
+                incomingPts.filter((p) => p && p.type === "Poteau" && Number(p.numero) > 0).map((p) => Number(p.numero))
+              );
+              const localUnsyncedPts = (previous.points_gps || []).filter((p) => {
+                const key = p?.id || p?.horodatage;
+                if (!key || incomingKeys.has(key) || deletedIds.has(key)) return false;
+                if (p.type === "Poteau" && Number(p.numero) > 0 && incomingPoleNums.has(Number(p.numero))) return false;
+                return String(p.photo || "").startsWith("data:image") || dirtyFieldsRef.current.has("points_gps");
+              });
+              next.points_gps = [...incomingPts, ...localUnsyncedPts];
+            } else if (!["whatsapp_photos", "videos_terrain", "points_gps", "_fully_loaded"].includes(field)) {
               // Protéger les champs dirty ou en cours de saisie
               const isDirty = dirtyFieldsRef.current.has(field) ||
                 ((field === "nom_client" || field === "nom_dossier" || field === "nom_client_declaration") &&
@@ -537,9 +710,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 const remoteIsEmpty = value === null || value === undefined || (typeof value === "string" && value.trim() === "");
 
                 // Règle d'or : ne jamais écraser une valeur locale existante par du vide ou null distant
-                if (prevIsFilled && remoteIsEmpty) {
-                  // Garder la valeur locale
-                } else {
+                if (!(prevIsFilled && remoteIsEmpty)) {
                   next[field] = value;
                 }
               }
@@ -558,7 +729,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       active = false;
       clearInterval(timer);
     };
-  }, [data.id, data.updated_at, data.modifie_le]);
+  }, [data.id, mergeIncomingPhotos, mergeIncomingVideos]);
 
   const [manualRefreshing, setManualRefreshing] = useState(false);
 
@@ -569,10 +740,29 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     try {
       const fresh = await getIntervention(data.id);
       if (fresh) {
+        if (fresh.updated_at) {
+          lastKnownSignatureRef.current = fresh.updated_at;
+        }
         const fullIntervention = { ...fresh, _fully_loaded: true };
-        saveInterventionLocally(fullIntervention);
+        const mergedWa = Array.isArray(fullIntervention.whatsapp_photos)
+          ? mergeIncomingPhotos(whatsappPhotosRef.current, fullIntervention.whatsapp_photos)
+          : whatsappPhotosRef.current;
+        const mergedVids = Array.isArray(fullIntervention.videos_terrain)
+          ? mergeIncomingVideos(videosTerrainRef.current, fullIntervention.videos_terrain)
+          : videosTerrainRef.current;
+
+        setWhatsappPhotos(mergedWa);
+        whatsappPhotosRef.current = mergedWa;
+        setVideosTerrain(mergedVids);
+        videosTerrainRef.current = mergedVids;
+
         setData((prev) => {
-          const merged = { ...fullIntervention };
+          const merged = {
+            ...fullIntervention,
+            whatsapp_photos: mergedWa,
+            videos_terrain: mergedVids,
+            _fully_loaded: true,
+          };
           for (const dirtyField of dirtyFieldsRef.current) {
             if (dirtyField.startsWith("materiel_pose.")) {
               const desig = dirtyField.replace("materiel_pose.", "");
@@ -580,7 +770,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 ...(merged.materiel_pose || {}),
                 [desig]: prev.materiel_pose?.[desig],
               };
-            } else if (dirtyField in prev) {
+            } else if (dirtyField in prev && !["whatsapp_photos", "videos_terrain"].includes(dirtyField)) {
               merged[dirtyField] = prev[dirtyField];
             }
           }
@@ -590,45 +780,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             }
           }
           dataRef.current = merged;
+          saveInterventionLocally(merged);
           return merged;
         });
-
-        if (Array.isArray(fullIntervention.whatsapp_photos)) {
-          setWhatsappPhotos((prev) => {
-            const deletedIds = deletedWhatsappPhotoIdsRef.current;
-            const incoming = fullIntervention.whatsapp_photos.filter((p) => {
-              if (!p) return false;
-              if (p.id && deletedIds.has(p.id)) return false;
-              const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
-              if (!isMulti) {
-                if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-                if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
-              }
-              return true;
-            });
-            if (!prev || prev.length === 0) return incoming;
-            const incomingIds = new Set(incoming.map((p) => p?.id).filter(Boolean));
-            const incomingSingleSlots = new Set(
-              incoming
-                .filter((p) => p && !p.additionnelle && !p.is_additionnelle && p.slot !== "additionnelle" && !String(p.slot).startsWith("additionnelle_") && p.slot !== "autre_poteau" && !String(p.slot).startsWith("autre_poteau"))
-                .map((p) => p?.slot)
-                .filter(Boolean)
-            );
-            const localUnsynced = prev.filter((p) => {
-              if (!p) return false;
-              if (p.id && deletedIds.has(p.id)) return false;
-              const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
-              if (!isMulti) {
-                if (p.slot && (deletedIds.has(p.slot) || deletedIds.has(`slot_${p.slot}`))) return false;
-                if (p.type && p.type !== "poteau" && (deletedIds.has(p.type) || deletedIds.has(`slot_${p.type}`))) return false;
-              }
-              if (p.id && incomingIds.has(p.id)) return false;
-              if (!isMulti && p.slot && incomingSingleSlots.has(p.slot)) return false;
-              return true;
-            });
-            return [...incoming, ...localUnsynced];
-          });
-        }
         setSaveStatus("✓ Données actualisées");
       }
     } catch (err) {
@@ -638,19 +792,12 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setManualRefreshing(false);
       setTimeout(() => setSaveStatus((s) => (s && s.includes("Actualisation") ? "" : s)), 2500);
     }
-  }, [data.id, manualRefreshing]);
+  }, [data.id, manualRefreshing, mergeIncomingPhotos, mergeIncomingVideos]);
 
   useEffect(() => {
-    async function handleVisibilityChange() {
-      if (document.visibilityState === "visible" && data.id && !finishingRef.current && dirtyFieldsRef.current.size === 0) {
-        try {
-          const remoteUpdated = await checkInterventionUpdatedAt(data.id);
-          const remoteTime = toNormalizedTimestamp(remoteUpdated);
-          const localTime = toNormalizedTimestamp(data.updated_at || data.modifie_le);
-          if (remoteTime > localTime) {
-            handleManualRefreshIntervention();
-          }
-        } catch {}
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible" && data.id && !finishingRef.current) {
+        handleManualRefreshIntervention();
       }
     }
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -659,7 +806,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleVisibilityChange);
     };
-  }, [data.id, data.updated_at, data.modifie_le, handleManualRefreshIntervention]);
+  }, [data.id, handleManualRefreshIntervention]);
 
 
   function update(field, value) {
@@ -887,7 +1034,15 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       };
       setWhatsappPhotos((prev) => {
         const filtered = slot ? prev.filter((p) => p.slot !== slot) : prev;
-        return [...filtered, galleryPhoto];
+        const nextList = [...filtered, galleryPhoto];
+        whatsappPhotosRef.current = nextList;
+        setData((prevData) => {
+          const nextData = { ...prevData, whatsapp_photos: nextList, _fully_loaded: true };
+          dataRef.current = nextData;
+          saveInterventionLocally(nextData);
+          return nextData;
+        });
+        return nextList;
       });
       markDirty("whatsapp_photos");
 
@@ -1243,29 +1398,42 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     setSlotCapturing(true);
     setSlotActionFeedback(`Capture et géolocalisation pour "${slotLabel}"…`);
     try {
-      const [photoDataUrl, pos] = await Promise.all([
+      const currentLatestData = dataRef.current || data;
+      const fallbackBaseCoords = {
+        lat: currentLatestData.latitude || (Array.isArray(currentLatestData.points_gps) ? currentLatestData.points_gps.find((p) => p?.lat != null)?.lat : null),
+        lng: currentLatestData.longitude || (Array.isArray(currentLatestData.points_gps) ? currentLatestData.points_gps.find((p) => p?.lng != null)?.lng : null),
+        precision_m: 15,
+      };
+
+      const [photoDataUrl, posResult] = await Promise.all([
         readFileAsDataUrl(file),
-        getCurrentPositionHighAccuracy(),
+        acquireBestPosition(file, fallbackBaseCoords),
       ]);
 
       if (e.target) e.target.value = "";
 
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      const precision_m = pos.coords.accuracy;
+      const lat = posResult?.lat ?? null;
+      const lng = posResult?.lng ?? null;
+      const precision_m = posResult?.precision_m ?? null;
       const horodatage = new Date().toISOString();
 
-      setSlotActionFeedback(`Géocodage de l'adresse…`);
-      const lieu = await reverseGeocode(lat, lng);
+      let lieu = "";
+      if (lat != null && lng != null) {
+        setSlotActionFeedback(`Géocodage de l'adresse…`);
+        try {
+          lieu = await reverseGeocode(lat, lng);
+        } catch {}
+      }
 
       const embeddedPhoto = await embedGpsOnPhoto(photoDataUrl, {
         type: `${slotLabel} - ${data.nom_client || "Intervention"}`,
         lieu,
         lat,
         lng,
-        precision_m,
+        precision_m: precision_m || 10,
         horodatage,
         noBanner,
+        warning: posResult?.warning,
       });
 
       const newPhoto = {
@@ -1297,9 +1465,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         const existingAutre = (whatsappPhotos || []).filter(
           (p) => p && (p.slot === "autre_poteau" || p.slot?.startsWith("autre_poteau") || p.type === "autre_poteau")
         );
-        newPhoto.name = `autre_poteau_${existingAutre.length + 1}.jpg`;
-        newPhoto.label = `Autre poteau (${existingAutre.length + 1})`;
-        newPhoto.description = `Autre poteau ${existingAutre.length + 1} - ${data.nom_client || "Intervention"}`;
+        const maxAutreNum = existingAutre.reduce((max, p, idx) => {
+          const m = String(p?.name || p?.label || p?.slot || "").match(/(\d+)/);
+          const n = m ? Number(m[1]) : idx + 1;
+          return n > max ? n : max;
+        }, existingAutre.length);
+        const nextAutreNum = maxAutreNum + 1;
+        newPhoto.slot = `autre_poteau_${nextAutreNum}`;
+        newPhoto.type = "autre_poteau";
+        newPhoto.name = `autre_poteau_${nextAutreNum}.jpg`;
+        newPhoto.label = `Autre poteau (${nextAutreNum})`;
+        newPhoto.description = `Autre poteau ${nextAutreNum} - ${data.nom_client || "Intervention"}`;
+        deletedWhatsappPhotoIdsRef.current.delete(newPhoto.slot);
         nextPhotos = [...(whatsappPhotos || []), newPhoto];
       } else if (slotKey === "contrat_client") {
         const existingContrats = (whatsappPhotos || []).filter(
@@ -1516,6 +1693,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (confirm("Supprimer définitivement cette photo d'Autre poteau ?")) {
       markDirty("whatsapp_photos");
       deletedWhatsappPhotoIdsRef.current.add(photoId);
+      if (target.slot && target.slot !== "autre_poteau") {
+        deletedWhatsappPhotoIdsRef.current.add(target.slot);
+      }
 
       const nextPhotos = (whatsappPhotos || []).filter((p) => p && p.id !== photoId);
       const nextData = {
@@ -1551,7 +1731,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     if (confirm("Supprimer définitivement cette photo de contrat client ?")) {
       markDirty("whatsapp_photos");
       deletedWhatsappPhotoIdsRef.current.add(photoId);
-      if (target.slot) deletedWhatsappPhotoIdsRef.current.add(target.slot);
+      if (target.slot && target.slot !== "contrat_client") {
+        deletedWhatsappPhotoIdsRef.current.add(target.slot);
+      }
 
       const nextPhotos = (whatsappPhotos || []).filter((p) => p && p.id !== photoId);
       const nextData = {
@@ -2549,384 +2731,389 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     const clientName = currentLatestData.nom_client || currentLatestData.nom_dossier || "Client";
     const horodatage = new Date().toISOString();
 
-    // --- CAS A : REPRISE / REMPLACEMENT D'UNE VIDÉO EXISTANTE ---
-    if (replaceTarget) {
-      const file = rawFiles[0];
-      const localUrl = URL.createObjectURL(file);
-      const replaceIndex = (videosTerrain || []).findIndex((v) => v.id === replaceTarget.id);
+    const uploadTask = (async () => {
+      // --- CAS A : REPRISE / REMPLACEMENT D'UNE VIDÉO EXISTANTE ---
+      if (replaceTarget) {
+        const file = rawFiles[0];
+        const localUrl = URL.createObjectURL(file);
+        const replaceIndex = (videosTerrainRef.current || []).findIndex((v) => v.id === replaceTarget.id);
 
-      const updatedTargetVideo = {
-        ...replaceTarget,
-        url: localUrl,
-        thumbnail_url: "",
-        duration: 0,
-        size: file.size,
-        original_size: file.size,
-        ratio: "100%",
-        captured_at: horodatage,
-        cree_le: horodatage,
-        ajoute_par: currentUser || currentLatestData.nom_technicien || "",
-        status: "processing",
-        is_imported: isImported,
-        source,
-      };
+        const updatedTargetVideo = {
+          ...replaceTarget,
+          url: localUrl,
+          thumbnail_url: "",
+          duration: 0,
+          size: file.size,
+          original_size: file.size,
+          ratio: "100%",
+          captured_at: horodatage,
+          cree_le: horodatage,
+          ajoute_par: currentUser || currentLatestData.nom_technicien || "",
+          status: "uploading",
+          is_imported: isImported,
+          source,
+        };
 
-      let nextVideos = [...(videosTerrain || [])];
-      if (replaceIndex >= 0) {
-        nextVideos[replaceIndex] = updatedTargetVideo;
-      } else {
-        nextVideos = [...nextVideos, updatedTargetVideo];
+        let nextVideos = [...(videosTerrainRef.current || [])];
+        if (replaceIndex >= 0) {
+          nextVideos[replaceIndex] = updatedTargetVideo;
+        } else {
+          nextVideos = [...nextVideos, updatedTargetVideo];
+        }
+
+        setVideosTerrain(nextVideos);
+        videosTerrainRef.current = nextVideos;
+        setVideoStatus(`⏳ Envoi de la vidéo reprise au serveur…`);
+        setVideoProcessing(true);
+        setVideoProgress({ pct: 15, msg: `Préparation et envoi de la vidéo…` });
+
+        try {
+          let posResult = null;
+          if (!isImported) {
+            try {
+              posResult = await acquireBestPosition(file, fallbackBaseCoords);
+            } catch (gpsErr) {
+              console.warn("Échec acquireBestPosition vidéo reprise:", gpsErr);
+            }
+          }
+
+          const activeLat = posResult?.lat ?? replaceTarget.lat ?? initialLat;
+          const activeLng = posResult?.lng ?? replaceTarget.lng ?? initialLng;
+          const activePrecision = posResult?.precision_m ?? replaceTarget.precision_m ?? initialPrecision;
+
+          if (!lieu && activeLat != null && activeLng != null) {
+            try {
+              const zoneInfo = await reverseGeocodeZone(activeLat, activeLng);
+              if (zoneInfo?.label) lieu = zoneInfo.label;
+            } catch {}
+          }
+
+          const bannerInfo = {
+            client: updatedTargetVideo.nom_client,
+            type: updatedTargetVideo.label,
+            lieu: lieu || updatedTargetVideo.lieu,
+            lat: activeLat,
+            lng: activeLng,
+            precision_m: activePrecision || 10,
+            horodatage,
+            technicien: updatedTargetVideo.ajoute_par,
+          };
+
+          let fileToUpload = file;
+          let thumbUrl = "";
+          let dur = 0;
+          let compSize = file.size;
+          let isStamped = false;
+
+          // Extraction ultra-rapide (< 0.4s) de la miniature et de la durée
+          try {
+            const thumbResult = await generateVideoThumbnail(file, 0.3, isImported ? null : bannerInfo);
+            thumbUrl = thumbResult?.thumbnailDataUrl || "";
+            dur = thumbResult?.duration || 0;
+          } catch {}
+
+          // Compression lente uniquement si la vidéo dépasse 25 Mo (évite 30s de lecture temps-réel bloquante avant l'upload)
+          if (file.size > 25 * 1024 * 1024) {
+            try {
+              const compResult = await compressVideo(file, {
+                bannerInfo: isImported ? null : bannerInfo,
+                onProgress: (pct, msg) => {
+                  setVideoProgress({ pct: Math.min(80, 15 + Math.round(pct * 0.65)), msg });
+                },
+              });
+
+              if (compResult && compResult.blob && compResult.blob.size > 25 * 1024) {
+                const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
+                const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
+                fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
+                  type: compResult.blob.type || "video/mp4",
+                });
+                thumbUrl = compResult.thumbnailDataUrl || thumbUrl;
+                dur = compResult.duration || dur;
+                compSize = compResult.compressedSize || fileToUpload.size;
+                isStamped = Boolean(compResult.stamped);
+              }
+            } catch (compErr) {
+              console.warn("Échec compression vidéo reprise:", compErr);
+            }
+          }
+
+          setVideoProgress({ pct: 85, msg: `Téléversement vers le serveur…` });
+
+          // Suppression de l'ancienne vidéo du serveur si elle y existait
+          if (replaceTarget.id && !replaceTarget.id.startsWith("vid_")) {
+            try {
+              await deleteInterventionMedia(replaceTarget.id);
+            } catch (delErr) {
+              console.warn("Suppression ancien média lors de reprise:", delErr);
+            }
+          }
+
+          // Upload serveur immédiat
+          const uploaded = await uploadInterventionMedia({
+            interventionId: data.id,
+            type: "video",
+            file: fileToUpload,
+            latitude: activeLat,
+            longitude: activeLng,
+            precisionM: activePrecision,
+            capturedAt: horodatage,
+            thumbnailBase64: thumbUrl,
+            duration: dur,
+            label: updatedTargetVideo.label,
+            isImported,
+            source,
+          });
+
+          const finalVideo = {
+            ...updatedTargetVideo,
+            id: uploaded?.id || replaceTarget.id,
+            url: uploaded?.url || localUrl,
+            thumbnail_url: uploaded?.thumbnail_url || thumbUrl || "",
+            size: compSize,
+            duration: dur,
+            lat: activeLat,
+            lng: activeLng,
+            precision_m: activePrecision,
+            lieu: lieu || updatedTargetVideo.lieu,
+            status: uploaded?.url ? "synced" : "error",
+            has_banner: !isImported && isStamped,
+            stamped: isStamped,
+          };
+
+          setVideosTerrain((prev) => {
+            const next = prev.map((v) => (v.id === replaceTarget.id || v.id === updatedTargetVideo.id ? finalVideo : v));
+            videosTerrainRef.current = next;
+            update("videos_terrain", next);
+            saveInterventionLocally({ ...dataRef.current, videos_terrain: next, _fully_loaded: true });
+            return next;
+          });
+
+          if (activeViewingVideo?.id === replaceTarget.id) {
+            setActiveViewingVideo(finalVideo);
+          }
+
+          flushServerSync().catch(() => {});
+          setVideoStatus("✅ Vidéo synchronisée avec toute l'équipe !");
+          setTimeout(() => setVideoStatus(""), 5000);
+        } catch (err) {
+          console.warn("Erreur pipeline reprise vidéo:", err);
+          setVideoStatus(`⚠️ Échec d'envoi vidéo (${err?.message || "réseau"}).`);
+        } finally {
+          setVideoProcessing(false);
+          setVideoProgress({ pct: 0, msg: "" });
+        }
+        return;
       }
 
-      setVideosTerrain(nextVideos);
-      update("videos_terrain", nextVideos);
-      saveInterventionLocally({ ...currentLatestData, videos_terrain: nextVideos });
-      setVideoStatus(`⚡ Reprise vidéo : optimisation et compression en cours…`);
+      // --- CAS B : AJOUT NORMAL DE NOUVELLE(S) VIDÉO(S) ---
+      const baseCount = (videosTerrainRef.current || []).length;
+      const newItemsWithFiles = rawFiles.map((file, idx) => {
+        const videoNum = baseCount + idx + 1;
+        const localId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+        const localUrl = URL.createObjectURL(file);
+        return {
+          file,
+          video: {
+            id: localId,
+            url: localUrl,
+            thumbnail_url: "",
+            label: `Vidéo Terrain #${videoNum} - ${clientName}`,
+            nom_client: clientName,
+            lieu: lieu || "",
+            duration: 0,
+            size: file.size,
+            original_size: file.size,
+            ratio: "100%",
+            lat: initialLat,
+            lng: initialLng,
+            precision_m: initialPrecision,
+            cree_le: horodatage,
+            captured_at: horodatage,
+            ajoute_par: currentUser || currentLatestData.nom_technicien || "",
+            status: "uploading",
+            is_imported: isImported,
+            source: source,
+          },
+        };
+      });
+
+      const immediateNewVideos = newItemsWithFiles.map((item) => item.video);
+      const updatedVideos = [...(videosTerrainRef.current || []), ...immediateNewVideos];
+      setVideosTerrain(updatedVideos);
+      videosTerrainRef.current = updatedVideos;
+      // Ne pas appeler update("videos_terrain") tant que l'URL est un blob: local, pour éviter d'envoyer un blob: au serveur
+      setVideoStatus(`⏳ Envoi de ${rawFiles.length} vidéo(s) au serveur pour toute l'équipe…`);
       setVideoProcessing(true);
-      setVideoProgress({ pct: 15, msg: `Optimisation de la vidéo reprise…` });
+      setVideoProgress({ pct: 20, msg: `Préparation et envoi au serveur…` });
 
       try {
         let posResult = null;
         if (!isImported) {
           try {
-            posResult = await acquireBestPosition(file, fallbackBaseCoords);
+            posResult = await acquireBestPosition(rawFiles[0], fallbackBaseCoords);
           } catch (gpsErr) {
-            console.warn("Échec acquireBestPosition vidéo reprise:", gpsErr);
+            console.warn("Échec acquireBestPosition vidéo:", gpsErr);
           }
         }
 
-        const activeLat = posResult?.lat ?? replaceTarget.lat ?? initialLat;
-        const activeLng = posResult?.lng ?? replaceTarget.lng ?? initialLng;
-        const activePrecision = posResult?.precision_m ?? replaceTarget.precision_m ?? initialPrecision;
+        const activeLat = posResult?.lat ?? initialLat;
+        const activeLng = posResult?.lng ?? initialLng;
+        const activePrecision = posResult?.precision_m ?? initialPrecision;
 
         if (!lieu && activeLat != null && activeLng != null) {
           try {
             const zoneInfo = await reverseGeocodeZone(activeLat, activeLng);
-            if (zoneInfo?.label) lieu = zoneInfo.label;
+            if (zoneInfo?.label) {
+              lieu = zoneInfo.label;
+            }
           } catch {}
         }
 
-        const bannerInfo = {
-          client: updatedTargetVideo.nom_client,
-          type: updatedTargetVideo.label,
-          lieu: lieu || updatedTargetVideo.lieu,
-          lat: activeLat,
-          lng: activeLng,
-          precision_m: activePrecision || 10,
-          horodatage,
-          technicien: updatedTargetVideo.ajoute_par,
-        };
+        if (activeLat != null && activeLng != null) {
+          if (!currentLatestData.latitude) update("latitude", activeLat);
+          if (!currentLatestData.longitude) update("longitude", activeLng);
+        }
 
-        // Compression active HD + incrustation si vidéo caméra
-        let fileToUpload = file;
-        let thumbUrl = "";
-        let dur = 0;
-        let compSize = file.size;
-        let isStamped = false;
+        let syncedCount = 0;
+        for (let i = 0; i < newItemsWithFiles.length; i++) {
+          const { file, video } = newItemsWithFiles[i];
+          video.lat = activeLat;
+          video.lng = activeLng;
+          video.precision_m = activePrecision;
+          if (lieu) video.lieu = lieu;
 
-        try {
-          const compResult = await compressVideo(file, {
-            bannerInfo: isImported ? null : bannerInfo,
-            onProgress: (pct, msg) => {
-              setVideoProgress({ pct: Math.min(92, 15 + Math.round(pct * 0.7)), msg });
-            },
+          const bannerInfo = {
+            client: video.nom_client,
+            type: video.label,
+            lieu: video.lieu,
+            lat: video.lat,
+            lng: video.lng,
+            precision_m: video.precision_m || 10,
+            horodatage: video.captured_at,
+            technicien: video.ajoute_par,
+          };
+
+          let fileToUpload = file;
+          let thumbUrl = "";
+          let dur = 0;
+          let compSize = file.size;
+          let isStamped = false;
+
+          // 1. Extraction immédiate (< 0.4s) de la miniature et durée
+          try {
+            const thumbResult = await generateVideoThumbnail(file, 0.3, isImported ? null : bannerInfo);
+            thumbUrl = thumbResult?.thumbnailDataUrl || "";
+            dur = thumbResult?.duration || 0;
+          } catch {}
+
+          // 2. Compression uniquement si la vidéo dépasse 25 Mo (évite l'attente de lecture 1x de 20-30s avant upload !)
+          if (file.size > 25 * 1024 * 1024) {
+            try {
+              const compResult = await compressVideo(file, {
+                bannerInfo: isImported ? null : bannerInfo,
+                onProgress: (pct, msg) => {
+                  setVideoProgress({
+                    pct: Math.min(80, 20 + Math.round(pct * 0.6)),
+                    msg,
+                  });
+                },
+              });
+
+              if (compResult && compResult.blob && compResult.blob.size > 25 * 1024) {
+                const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
+                const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
+                fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
+                  type: compResult.blob.type || "video/mp4",
+                });
+                thumbUrl = compResult.thumbnailDataUrl || thumbUrl;
+                dur = compResult.duration || dur;
+                compSize = compResult.compressedSize || fileToUpload.size;
+                isStamped = Boolean(compResult.stamped);
+              }
+            } catch (compErr) {
+              console.warn("Échec compression vidéo:", compErr);
+            }
+          }
+
+          setVideoProgress({
+            pct: 80 + Math.round(((i + 0.5) / newItemsWithFiles.length) * 18),
+            msg: `Envoi serveur vidéo #${i + 1} (${formatFileSize(fileToUpload.size)})…`,
           });
 
-          if (compResult && compResult.blob && compResult.blob.size > 0) {
-            const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
-            const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
-            fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
-              type: compResult.blob.type || "video/mp4",
+          try {
+            const uploaded = await uploadInterventionMedia({
+              interventionId: data.id,
+              type: "video",
+              file: fileToUpload,
+              latitude: video.lat,
+              longitude: video.lng,
+              precisionM: video.precision_m,
+              capturedAt: video.captured_at,
+              thumbnailBase64: thumbUrl,
+              duration: dur,
+              label: video.label,
+              isImported,
+              source,
             });
-            thumbUrl = compResult.thumbnailDataUrl || "";
-            dur = compResult.duration || 0;
-            compSize = compResult.compressedSize || fileToUpload.size;
-            isStamped = Boolean(compResult.stamped);
+
+            if (uploaded && uploaded.url) {
+              syncedCount++;
+              setVideosTerrain((prev) => {
+                const next = prev.map((v) =>
+                  v.id === video.id
+                    ? {
+                        ...v,
+                        id: uploaded.id || v.id,
+                        url: uploaded.url,
+                        thumbnail_url: uploaded.thumbnail_url || thumbUrl || v.thumbnail_url,
+                        duration: dur || v.duration,
+                        lat: activeLat,
+                        lng: activeLng,
+                        precision_m: activePrecision,
+                        lieu: lieu || v.lieu,
+                        status: "synced",
+                        size: compSize,
+                        has_banner: !isImported && isStamped,
+                        stamped: isStamped,
+                      }
+                    : v
+                );
+                videosTerrainRef.current = next;
+                update("videos_terrain", next);
+                saveInterventionLocally({ ...dataRef.current, videos_terrain: next, _fully_loaded: true });
+                return next;
+              });
+            }
+          } catch (uploadErr) {
+            console.warn("Upload distant vidéo échoué:", uploadErr);
+            setVideosTerrain((prev) => {
+              const next = prev.map((v) =>
+                v.id === video.id ? { ...v, status: "error", thumbnail_url: thumbUrl || v.thumbnail_url, duration: dur || v.duration } : v
+              );
+              videosTerrainRef.current = next;
+              return next;
+            });
           }
-        } catch (compErr) {
-          console.warn("Échec compression vidéo reprise:", compErr);
-        }
-
-        if (!thumbUrl) {
-          try {
-            const thumbResult = await generateVideoThumbnail(fileToUpload, 0.3, isImported ? null : bannerInfo);
-            thumbUrl = thumbResult?.thumbnailDataUrl || "";
-            dur = thumbResult?.duration || dur;
-          } catch {}
-        }
-
-        // Suppression de l'ancienne vidéo du serveur si elle y existait
-        if (replaceTarget.id && !replaceTarget.id.startsWith("vid_")) {
-          try {
-            await deleteInterventionMedia(replaceTarget.id);
-          } catch (delErr) {
-            console.warn("Suppression ancien média lors de reprise:", delErr);
-          }
-        }
-
-        // Upload serveur du nouveau fichier compressé
-        const uploaded = await uploadInterventionMedia({
-          interventionId: data.id,
-          type: "video",
-          file: fileToUpload,
-          latitude: activeLat,
-          longitude: activeLng,
-          precisionM: activePrecision,
-          capturedAt: horodatage,
-          thumbnailBase64: thumbUrl,
-          duration: dur,
-          label: updatedTargetVideo.label,
-          isImported,
-          source,
-        });
-
-        const finalVideo = {
-          ...updatedTargetVideo,
-          id: uploaded?.id || replaceTarget.id,
-          url: uploaded?.url || localUrl,
-          thumbnail_url: uploaded?.thumbnail_url || thumbUrl || "",
-          size: compSize,
-          duration: dur,
-          lat: activeLat,
-          lng: activeLng,
-          precision_m: activePrecision,
-          lieu: lieu || updatedTargetVideo.lieu,
-          status: "synced",
-          has_banner: !isImported && isStamped,
-          stamped: isStamped,
-        };
-
-        setVideosTerrain((prev) => {
-          const next = prev.map((v) => (v.id === replaceTarget.id || v.id === updatedTargetVideo.id ? finalVideo : v));
-          update("videos_terrain", next);
-          saveInterventionLocally({ ...dataRef.current, videos_terrain: next });
-          return next;
-        });
-
-        if (activeViewingVideo?.id === replaceTarget.id) {
-          setActiveViewingVideo(finalVideo);
         }
 
         flushServerSync().catch(() => {});
-        setVideoStatus("✅ Vidéo reprise et compressée avec succès !");
-        setTimeout(() => setVideoStatus(""), 5000);
+        if (syncedCount === rawFiles.length) {
+          setVideoStatus(`✅ ${syncedCount} vidéo(s) terrain synchronisée(s) avec toute l'équipe !`);
+        } else {
+          setVideoStatus(`⚠️ ${syncedCount}/${rawFiles.length} vidéo(s) synchronisée(s). Vérifiez le réseau pour les vidéos en attente.`);
+        }
+        setTimeout(() => setVideoStatus(""), 7000);
       } catch (err) {
-        console.warn("Erreur pipeline reprise vidéo:", err);
+        console.warn("Erreur pipeline vidéo arrière-plan:", err);
       } finally {
         setVideoProcessing(false);
         setVideoProgress({ pct: 0, msg: "" });
       }
-      return;
-    }
+    })();
 
-    // --- CAS B : AJOUT NORMAL DE NOUVELLE(S) VIDÉO(S) ---
-    const baseCount = (videosTerrain || []).length;
-    const newItemsWithFiles = rawFiles.map((file, idx) => {
-      const videoNum = baseCount + idx + 1;
-      const localId = "vid_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
-      const localUrl = URL.createObjectURL(file);
-      return {
-        file,
-        video: {
-          id: localId,
-          url: localUrl,
-          thumbnail_url: "",
-          label: `Vidéo Terrain #${videoNum} - ${clientName}`,
-          nom_client: clientName,
-          lieu: lieu || "",
-          duration: 0,
-          size: file.size,
-          original_size: file.size,
-          ratio: "100%",
-          lat: initialLat,
-          lng: initialLng,
-          precision_m: initialPrecision,
-          cree_le: horodatage,
-          captured_at: horodatage,
-          ajoute_par: currentUser || currentLatestData.nom_technicien || "",
-          status: "local",
-          is_imported: isImported,
-          source: source,
-        },
-      };
-    });
-
-    const immediateNewVideos = newItemsWithFiles.map((item) => item.video);
-    const updatedVideos = [...(videosTerrain || []), ...immediateNewVideos];
-    setVideosTerrain(updatedVideos);
-    update("videos_terrain", updatedVideos);
-    saveInterventionLocally({ ...currentLatestData, videos_terrain: updatedVideos });
-    setVideoStatus(`⚡ ${rawFiles.length} vidéo(s) ajoutée(s) instantanément.`);
-    setVideoProcessing(true);
-    setVideoProgress({ pct: 15, msg: `Optimisation et compression des vidéos…` });
-
-    try {
-      let posResult = null;
-      if (!isImported) {
-        try {
-          posResult = await acquireBestPosition(rawFiles[0], fallbackBaseCoords);
-        } catch (gpsErr) {
-          console.warn("Échec acquireBestPosition vidéo:", gpsErr);
-        }
-      }
-
-      const activeLat = posResult?.lat ?? initialLat;
-      const activeLng = posResult?.lng ?? initialLng;
-      const activePrecision = posResult?.precision_m ?? initialPrecision;
-
-      if (!lieu && activeLat != null && activeLng != null) {
-        try {
-          const zoneInfo = await reverseGeocodeZone(activeLat, activeLng);
-          if (zoneInfo?.label) {
-            lieu = zoneInfo.label;
-          }
-        } catch {}
-      }
-
-      if (activeLat != null && activeLng != null) {
-        if (!currentLatestData.latitude) update("latitude", activeLat);
-        if (!currentLatestData.longitude) update("longitude", activeLng);
-      }
-
-      for (let i = 0; i < newItemsWithFiles.length; i++) {
-        const { file, video } = newItemsWithFiles[i];
-        video.lat = activeLat;
-        video.lng = activeLng;
-        video.precision_m = activePrecision;
-        if (lieu) video.lieu = lieu;
-
-        const bannerInfo = {
-          client: video.nom_client,
-          type: video.label,
-          lieu: video.lieu,
-          lat: video.lat,
-          lng: video.lng,
-          precision_m: video.precision_m || 10,
-          horodatage: video.captured_at,
-          technicien: video.ajoute_par,
-        };
-
-        setVideoProgress({
-          pct: 20 + Math.round((i / newItemsWithFiles.length) * 60),
-          msg: isImported
-            ? `Compression vidéo HD #${i + 1} (${formatFileSize(file.size)})…`
-            : `Compression HD & gravure GPS #${i + 1} (${formatFileSize(file.size)})…`,
-        });
-
-        // Compression active HD + incrustation si vidéo caméra
-        let fileToUpload = file;
-        let thumbUrl = "";
-        let dur = 0;
-        let compSize = file.size;
-        let isStamped = false;
-
-        try {
-          const compResult = await compressVideo(file, {
-            bannerInfo: isImported ? null : bannerInfo,
-            onProgress: (pct, msg) => {
-              setVideoProgress({
-                pct: Math.min(92, 20 + Math.round(pct * 0.65)),
-                msg,
-              });
-            },
-          });
-
-          if (compResult && compResult.blob && compResult.blob.size > 0) {
-            const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
-            const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
-            fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
-              type: compResult.blob.type || "video/mp4",
-            });
-            thumbUrl = compResult.thumbnailDataUrl || "";
-            dur = compResult.duration || 0;
-            compSize = compResult.compressedSize || fileToUpload.size;
-            isStamped = Boolean(compResult.stamped);
-          }
-        } catch (compErr) {
-          console.warn("Échec compression vidéo:", compErr);
-        }
-
-        if (!thumbUrl) {
-          try {
-            const thumbResult = await generateVideoThumbnail(fileToUpload, 0.3, isImported ? null : bannerInfo);
-            thumbUrl = thumbResult?.thumbnailDataUrl || "";
-            dur = thumbResult?.duration || dur;
-          } catch {}
-        }
-
-        setVideosTerrain((prev) => {
-          const next = prev.map((v) =>
-            v.id === video.id
-              ? {
-                  ...v,
-                  lat: activeLat,
-                  lng: activeLng,
-                  precision_m: activePrecision,
-                  lieu: lieu || v.lieu,
-                  thumbnail_url: thumbUrl || v.thumbnail_url,
-                  duration: dur || v.duration,
-                  size: compSize,
-                  has_banner: !isImported && isStamped,
-                  stamped: isStamped,
-                }
-              : v
-          );
-          update("videos_terrain", next);
-          saveInterventionLocally({ ...dataRef.current, videos_terrain: next });
-          return next;
-        });
-
-        try {
-          const uploaded = await uploadInterventionMedia({
-            interventionId: data.id,
-            type: "video",
-            file: fileToUpload,
-            latitude: video.lat,
-            longitude: video.lng,
-            precisionM: video.precision_m,
-            capturedAt: video.captured_at,
-            thumbnailBase64: thumbUrl,
-            duration: dur,
-            label: video.label,
-            isImported,
-            source,
-          });
-
-          if (uploaded && uploaded.url) {
-            setVideosTerrain((prev) => {
-              const next = prev.map((v) =>
-                v.id === video.id
-                  ? {
-                      ...v,
-                      id: uploaded.id || v.id,
-                      url: uploaded.url,
-                      thumbnail_url: uploaded.thumbnail_url || thumbUrl || v.thumbnail_url,
-                      status: "synced",
-                      size: compSize,
-                      has_banner: !isImported && isStamped,
-                      stamped: isStamped,
-                    }
-                  : v
-              );
-              update("videos_terrain", next);
-              saveInterventionLocally({ ...dataRef.current, videos_terrain: next });
-              return next;
-            });
-          }
-        } catch (uploadErr) {
-          console.warn("Upload distant différé (vidéo conservée localement):", uploadErr);
-        }
-      }
-
-      flushServerSync().catch(() => {});
-      setVideoStatus(`✅ ${rawFiles.length} vidéo(s) terrain enregistrée(s) et compressée(s) !`);
-      setTimeout(() => setVideoStatus(""), 7000);
-    } catch (err) {
-      console.warn("Erreur pipeline vidéo arrière-plan:", err);
-    } finally {
-      setVideoProcessing(false);
-      setVideoProgress({ pct: 0, msg: "" });
-    }
+    activeVideoUploadsRef.current.add(uploadTask);
+    uploadTask.finally(() => activeVideoUploadsRef.current.delete(uploadTask));
   };
 
   const handleDeleteVideo = async (videoToDelete) => {
@@ -2936,8 +3123,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       deletedVideoIdsRef.current.add(vidIdStr);
     }
     markDirty("videos_terrain");
-    const nextVideos = (videosTerrain || []).filter((v) => String(v.id) !== vidIdStr);
+    const nextVideos = (videosTerrainRef.current || []).filter((v) => String(v.id) !== vidIdStr);
     setVideosTerrain(nextVideos);
+    videosTerrainRef.current = nextVideos;
     update("videos_terrain", nextVideos);
 
     const localPayload = {
@@ -3133,13 +3321,20 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     setFinishing(true);
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     try {
-      const dirtySnapshot = new Set([...dirtyFieldsRef.current, "statut"]);
+      if (activeVideoUploadsRef.current.size > 0) {
+        setSaveStatus("⏳ Envoi des vidéos en cours avant clôture…");
+        try {
+          await Promise.allSettled([...activeVideoUploadsRef.current]);
+        } catch {}
+      }
+      const dirtySnapshot = new Set([...dirtyFieldsRef.current, "statut", "whatsapp_photos", "points_gps", "videos_terrain"]);
       markDirty("statut");
+      const cleanVideos = (videosTerrainRef.current || []).filter((v) => v && (!v.url || !String(v.url).startsWith("blob:")));
       const finalData = {
-        ...data,
+        ...dataRef.current,
         statut: "termine",
-        whatsapp_photos: whatsappPhotos,
-        videos_terrain: videosTerrain,
+        whatsapp_photos: whatsappPhotosRef.current,
+        videos_terrain: cleanVideos,
         modifie_par: currentUser,
         modifie_le: new Date().toISOString(),
         changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
@@ -3152,15 +3347,23 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       // 1. Sauvegarde locale instantanée garantie à 100% (hors-ligne ou réseau lent)
       saveInterventionLocally(finalData);
       setData(finalData);
+      dataRef.current = finalData;
 
       let completeData = finalData;
       // 2. Synchronisation serveur
       try {
         saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
         const saved = await saveQueueRef.current;
-        if (saved?.updated_at) {
-          completeData = { ...finalData, updated_at: saved.updated_at };
-          setData((prev) => ({ ...prev, updated_at: saved.updated_at }));
+        if (saved) {
+          completeData = {
+            ...finalData,
+            ...(saved.updated_at ? { updated_at: saved.updated_at, modifie_le: saved.updated_at } : {}),
+            ...(Array.isArray(saved.whatsapp_photos) ? { whatsapp_photos: saved.whatsapp_photos } : {}),
+            ...(Array.isArray(saved.points_gps) ? { points_gps: saved.points_gps } : {}),
+            ...(Array.isArray(saved.videos_terrain) ? { videos_terrain: saved.videos_terrain } : {}),
+          };
+          setData(completeData);
+          dataRef.current = completeData;
         }
       } catch (netErr) {
         console.warn("finish server sync warning (saved locally):", netErr);
@@ -3216,6 +3419,26 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             >
               {saveStatus}
             </span>
+          )}
+          {typeof onOpenReport === "function" && (
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => onOpenReport(dataRef.current || data)}
+              title="Consulter et générer les rapports d'intervention"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                background: "#f0fdf4",
+                borderColor: "#86efac",
+                color: "#166534",
+                fontWeight: 700,
+              }}
+            >
+              <IconFileText size={14} />
+              <span>Rapports</span>
+            </button>
           )}
           <button type="button" className="btn-secondary" onClick={handleClose}>
             Retour
@@ -5300,22 +5523,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                     <button
                       type="button"
-                      className="btn-primary btn-large"
-                      onClick={sendPhotosViaWhatsapp}
-                      disabled={selectedPhotoIds.size === 0}
-                      style={{ flex: 1, minWidth: 200 }}
-                    >
-                      Envoyer sur WhatsApp ({selectedPhotoIds.size})
-                    </button>
-                    <button
-                      type="button"
                       className="btn-secondary btn-large"
                       onClick={downloadSelectedPhotos}
                       disabled={selectedPhotoIds.size === 0}
                       style={{ padding: "10px 16px" }}
                       title="Télécharger les photos sélectionnées dans un dossier au nom du client dans Téléchargements"
                     >
-                      📁 Dossier photos ({selectedPhotoIds.size})
+                      📁 Télécharger les photos ({selectedPhotoIds.size})
                     </button>
                   </div>
                 </>
@@ -5664,22 +5878,13 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                     <button
                       type="button"
-                      className="btn-primary btn-large"
-                      onClick={sendPhotosViaWhatsapp}
-                      disabled={selectedPhotoIds.size === 0}
-                      style={{ flex: 1, minWidth: 200 }}
-                    >
-                      Envoyer sur WhatsApp ({selectedPhotoIds.size})
-                    </button>
-                    <button
-                      type="button"
                       className="btn-secondary btn-large"
                       onClick={downloadSelectedPhotos}
                       disabled={selectedPhotoIds.size === 0}
                       style={{ padding: "10px 16px" }}
                       title="Télécharger les photos sélectionnées dans un dossier au nom du client dans Téléchargements"
                     >
-                      📁 Dossier photos ({selectedPhotoIds.size})
+                      📁 Télécharger les photos ({selectedPhotoIds.size})
                     </button>
                   </div>
                 </>

@@ -18,7 +18,7 @@ function buildApiUrl(action) {
   return `${API_URL}?${params.toString()}`;
 }
 
-async function apiPost(action, body = {}, timeoutMs = 25000) {
+async function apiPost(action, body = {}, timeoutMs = 45000) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   const url = buildApiUrl(action);
@@ -76,6 +76,26 @@ async function apiGet(action, timeoutMs = 20000) {
   }
 }
 
+function evictOldStoredInterventions(keepId = "") {
+  try {
+    if (typeof localStorage === "undefined" || typeof localStorage.key !== "function") return;
+    const outboxIds = new Set(getSyncOutbox().map((item) => item?.id).filter(Boolean));
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith("fibretrack_intv_") || k.startsWith("chaptech_intv_"))) {
+        const id = k.replace(/^(fibretrack_intv_|chaptech_intv_)/, "");
+        if (id !== keepId && !outboxIds.has(id)) {
+          keysToRemove.push(k);
+        }
+      }
+    }
+    for (const k of keysToRemove) {
+      try { localStorage.removeItem(k); } catch {}
+    }
+  } catch {}
+}
+
 // ===== GESTION DE LA FILE D'ATTENTE OUTBOX HORS-LIGNE =====
 const OUTBOX_KEY = "fibretrack_sync_outbox";
 const outboxListeners = new Set();
@@ -104,7 +124,13 @@ export function setSyncOutbox(queue) {
     localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
     notifyOutboxChange(queue.length);
   } catch (e) {
-    console.warn("setSyncOutbox error:", e);
+    evictOldStoredInterventions();
+    try {
+      localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
+      notifyOutboxChange(queue.length);
+    } catch (e2) {
+      console.warn("setSyncOutbox error:", e2);
+    }
   }
 }
 
@@ -144,10 +170,17 @@ export async function flushSyncOutbox() {
         const res = await apiPost("intervention_save", {
           ...item.intervention,
           expected_updated_at: item.intervention.updated_at || "",
-        }, 15000);
-        if (res?.updated_at) {
-          item.intervention.updated_at = res.updated_at;
-          saveInterventionLocally(item.intervention);
+        }, 45000);
+        if (res) {
+          const updatedIntv = {
+            ...item.intervention,
+            ...(res.updated_at ? { updated_at: res.updated_at, modifie_le: res.updated_at } : {}),
+            ...(Array.isArray(res.whatsapp_photos) ? { whatsapp_photos: res.whatsapp_photos } : {}),
+            ...(Array.isArray(res.points_gps) ? { points_gps: res.points_gps } : {}),
+            ...(Array.isArray(res.videos_terrain) ? { videos_terrain: res.videos_terrain } : {}),
+            _fully_loaded: true,
+          };
+          saveInterventionLocally(updatedIntv);
         }
         removeFromOutbox(item.id);
       } catch (err) {
@@ -247,33 +280,33 @@ export function ensureInterventionDefaults(data) {
 
   const deduplicatedPoles = [];
   rawPolesList.forEach((p, idx) => {
-    const num = Number(p.numero || idx + 1);
+    const rawNum = Number(p.numero);
+    const num = rawNum > 0 ? rawNum : idx + 1;
     const candidate = { ...p, numero: num };
     const existingIdx = deduplicatedPoles.findIndex((ex) => {
-      if (ex.id && candidate.id && ex.id === candidate.id) return true;
-      const numEx = Number(ex.numero);
-      const numCand = Number(candidate.numero);
+      if (ex.id && candidate.id) {
+        return ex.id === candidate.id;
+      }
+      const numEx = Number(ex._rawNumero ?? ex.numero);
+      const numCand = rawNum;
       if (numEx > 0 && numCand > 0) {
         return numEx === numCand;
+      }
+      if (numEx > 0 || numCand > 0) {
+        return false;
       }
       const latA = ex.lat ?? ex.latitude;
       const lngA = ex.lng ?? ex.longitude;
       const latB = candidate.lat ?? candidate.latitude;
       const lngB = candidate.lng ?? candidate.longitude;
       if (latA != null && lngA != null && latB != null && lngB != null) {
-        if (Math.abs(latA - latB) < 0.00005 && Math.abs(lngA - lngB) < 0.00005) return true;
+        if (Math.abs(latA - latB) < 0.00001 && Math.abs(lngA - lngB) < 0.00001) return true;
       }
-      const isImpA = Boolean(ex.implante) || ["implanté", "implante"].includes(String(ex.sous_type || "").toLowerCase().trim());
-      const isImpB = Boolean(candidate.implante) || ["implanté", "implante"].includes(String(candidate.sous_type || "").toLowerCase().trim());
-      const isArmA = Boolean(ex.arme) && !ex.traverse && ex.sous_type !== "Traversé";
-      const isArmB = Boolean(candidate.arme) && !candidate.traverse && candidate.sous_type !== "Traversé";
-      const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
-      const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
-      return catA === catB;
+      return false;
     });
 
     if (existingIdx === -1) {
-      deduplicatedPoles.push(candidate);
+      deduplicatedPoles.push({ ...candidate, _rawNumero: rawNum });
     } else {
       const existing = deduplicatedPoles[existingIdx];
       const normType = (/petit[\s_-]*jean|pj/i.test(candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "")) ? "Petit Jean" : (/sbee/i.test(candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "")) ? "SBEE" : (candidate.type_poteau || candidate.proprietaire || existing.type_poteau || existing.proprietaire || "");
@@ -298,7 +331,10 @@ export function ensureInterventionDefaults(data) {
 
   if (fatPoint) pointsGps.unshift(fatPoint);
   deduplicatedPoles.sort((a, b) => Number(a.numero) - Number(b.numero));
-  pointsGps.push(...deduplicatedPoles);
+  deduplicatedPoles.forEach((p) => {
+    delete p._rawNumero;
+    pointsGps.push(p);
+  });
   if (abonnePoint) pointsGps.push(abonnePoint);
 
   const existingPoleNums = new Set(deduplicatedPoles.map((p) => Number(p.numero)));
@@ -731,7 +767,16 @@ export function saveInterventionLocally(intervention) {
       }
     }
 
-    localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
+    try {
+      localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
+    } catch (quotaErr) {
+      evictOldStoredInterventions(defaulted.id);
+      try {
+        localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
+      } catch (quotaErr2) {
+        console.warn("saveInterventionLocally quota error after eviction:", quotaErr2);
+      }
+    }
 
     // 2. Mettre à jour la liste en cache pour la page d'accueil (en version légère sans base64)
     const list = getCached();
@@ -772,11 +817,14 @@ export async function saveIntervention(intervention) {
       ...intervention,
       expected_updated_at: intervention.updated_at || "",
     });
-    if (response?.updated_at) {
+    if (response) {
       intervention = {
         ...intervention,
-        updated_at: response.updated_at,
-        modifie_le: response.updated_at,
+        ...(response.updated_at ? { updated_at: response.updated_at, modifie_le: response.updated_at } : {}),
+        ...(Array.isArray(response.whatsapp_photos) ? { whatsapp_photos: response.whatsapp_photos } : {}),
+        ...(Array.isArray(response.points_gps) ? { points_gps: response.points_gps } : {}),
+        ...(Array.isArray(response.videos_terrain) ? { videos_terrain: response.videos_terrain } : {}),
+        _fully_loaded: true,
       };
       saveInterventionLocally(intervention);
     }
@@ -816,40 +864,63 @@ export async function getIntervention(id) {
         const localTime = toNormalizedTimestamp(local.updated_at || local.modifie_le);
         const remoteTime = toNormalizedTimestamp(defaultedRemote.updated_at || defaultedRemote.modifie_le);
         const hasUnsyncedOutbox = getSyncOutbox().some((item) => item.id === id);
+        finalIntv = { ...defaultedRemote };
         if (hasUnsyncedOutbox && localTime > remoteTime) {
-          finalIntv = { ...defaultedRemote, ...local };
+          // Préserver les champs locaux en attente d'envoi réseau sans écraser les photos/vidéos distantes
+          for (const [key, val] of Object.entries(local)) {
+            if (
+              !["whatsapp_photos", "videos_terrain", "points_gps", "_deleted_photo_ids", "_deleted_video_ids", "deleted_videos"].includes(key) &&
+              val !== undefined &&
+              val !== null &&
+              val !== ""
+            ) {
+              finalIntv[key] = val;
+            }
+          }
         } else {
-          finalIntv = { ...defaultedRemote };
           for (const key of ["nom_client", "nom_dossier", "telephone_ligne", "mobile", "adresse_zone", "msan", "fat_ref", "port"]) {
             if (!finalIntv[key] && local[key]) {
               finalIntv[key] = local[key];
             }
           }
-          // Préserver les photos locales additionnelles ou slots non encore synchronisés
-          if (Array.isArray(local.whatsapp_photos) && local.whatsapp_photos.length > 0) {
-            const remotePhotoIds = new Set((finalIntv.whatsapp_photos || []).map((p) => p?.id).filter(Boolean));
-            const deletedPhotoIds = new Set(Array.isArray(local._deleted_photo_ids) ? local._deleted_photo_ids : []);
-            const unsyncedPhotos = local.whatsapp_photos.filter((p) => p && p.id && !remotePhotoIds.has(p.id) && !deletedPhotoIds.has(p.id));
-            if (unsyncedPhotos.length > 0) {
-              finalIntv.whatsapp_photos = [...(finalIntv.whatsapp_photos || []), ...unsyncedPhotos];
-            }
-          }
-
-          // Préserver les vidéos locales non encore synchronisées en respectant les suppressions
-          const deletedVideoIds = new Set(
-            (Array.isArray(local._deleted_video_ids) ? local._deleted_video_ids : []).concat(
-              Array.isArray(local.deleted_videos) ? local.deleted_videos : []
-            ).map(String)
+        }
+        // Préserver uniquement les photos locales non encore envoyées au serveur (en base64 ou dans l'outbox)
+        if (Array.isArray(local.whatsapp_photos) && local.whatsapp_photos.length > 0) {
+          const remotePhotoIds = new Set((finalIntv.whatsapp_photos || []).map((p) => p?.id).filter(Boolean));
+          const remoteSingleSlots = new Set(
+            (finalIntv.whatsapp_photos || [])
+              .filter((p) => p && !p.additionnelle && !p.is_additionnelle && p.slot !== "additionnelle" && !String(p.slot).startsWith("additionnelle_") && p.slot !== "autre_poteau" && !String(p.slot).startsWith("autre_poteau"))
+              .map((p) => p?.slot)
+              .filter(Boolean)
           );
-          if (Array.isArray(finalIntv.videos_terrain)) {
-            finalIntv.videos_terrain = finalIntv.videos_terrain.filter((v) => v && v.id && !deletedVideoIds.has(String(v.id)));
+          const deletedPhotoIds = new Set(Array.isArray(local._deleted_photo_ids) ? local._deleted_photo_ids : []);
+          const unsyncedPhotos = local.whatsapp_photos.filter((p) => {
+            if (!p || !p.id || remotePhotoIds.has(p.id) || deletedPhotoIds.has(p.id)) return false;
+            const isUnsynced = hasUnsyncedOutbox || String(p.url || "").startsWith("data:image");
+            if (!isUnsynced) return false;
+            const isMulti = !p.slot || p.additionnelle || p.is_additionnelle || p.slot === "additionnelle" || String(p.slot).startsWith("additionnelle_") || p.slot === "autre_poteau" || String(p.slot).startsWith("autre_poteau");
+            if (!isMulti && p.slot && remoteSingleSlots.has(p.slot)) return false;
+            return true;
+          });
+          if (unsyncedPhotos.length > 0) {
+            finalIntv.whatsapp_photos = [...(finalIntv.whatsapp_photos || []), ...unsyncedPhotos];
           }
-          if (Array.isArray(local.videos_terrain) && local.videos_terrain.length > 0) {
-            const remoteVideoIds = new Set((finalIntv.videos_terrain || []).map((v) => String(v?.id)).filter(Boolean));
-            const unsyncedVideos = local.videos_terrain.filter((v) => v && v.id && !remoteVideoIds.has(String(v.id)) && !deletedVideoIds.has(String(v.id)));
-            if (unsyncedVideos.length > 0) {
-              finalIntv.videos_terrain = [...(finalIntv.videos_terrain || []), ...unsyncedVideos];
-            }
+        }
+
+        // Préserver les vidéos locales valides (non blob: périmées) en respectant les suppressions
+        const deletedVideoIds = new Set(
+          (Array.isArray(local._deleted_video_ids) ? local._deleted_video_ids : []).concat(
+            Array.isArray(local.deleted_videos) ? local.deleted_videos : []
+          ).map(String)
+        );
+        if (Array.isArray(finalIntv.videos_terrain)) {
+          finalIntv.videos_terrain = finalIntv.videos_terrain.filter((v) => v && v.id && !deletedVideoIds.has(String(v.id)) && (!v.url || !String(v.url).startsWith("blob:")));
+        }
+        if (Array.isArray(local.videos_terrain) && local.videos_terrain.length > 0) {
+          const remoteVideoIds = new Set((finalIntv.videos_terrain || []).map((v) => String(v?.id)).filter(Boolean));
+          const unsyncedVideos = local.videos_terrain.filter((v) => v && v.id && !remoteVideoIds.has(String(v.id)) && !deletedVideoIds.has(String(v.id)) && v.url && !String(v.url).startsWith("blob:"));
+          if (unsyncedVideos.length > 0) {
+            finalIntv.videos_terrain = [...(finalIntv.videos_terrain || []), ...unsyncedVideos];
           }
         }
       }
@@ -868,12 +939,21 @@ export async function getInterventionLight(id) {
 }
 
 export async function checkInterventionUpdatedAt(id) {
-  if (!id) return "";
+  if (!id) return null;
   try {
     const res = await apiPost("intervention_updated_at", { id }, 8000);
-    return res?.updated_at || "";
+    if (!res) return null;
+    const updatedAt = res?.updated_at || "";
+    const signature = res?.signature || updatedAt || "";
+    return {
+      updated_at: updatedAt,
+      signature: signature,
+      toString() {
+        return signature;
+      },
+    };
   } catch {
-    return "";
+    return null;
   }
 }
 

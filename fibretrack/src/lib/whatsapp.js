@@ -3,6 +3,7 @@
 // 2. Rapport de Conformité : Structure épurée conforme aux audits terrain
 
 import { calculateMaterials } from "./materialsCalculation.js";
+import { isInterventionTerminee } from "./interventionFilters.js";
 
 function cleanStr(s) {
   return s == null ? "" : String(s).trim();
@@ -102,34 +103,25 @@ function getGpsCoordinatesString(p) {
 
 function arePolesDuplicates(a, b) {
   if (!a || !b) return false;
-  if (a.id && b.id && a.id === b.id) return true;
+  if (a.id && b.id) {
+    return String(a.id) === String(b.id);
+  }
+  if (a.horodatage && b.horodatage && String(a.horodatage) !== String(b.horodatage)) {
+    return false;
+  }
+  const photoA = a.photo_url || a.photo || "";
+  const photoB = b.photo_url || b.photo || "";
+  if (photoA && photoB && String(photoA) !== String(photoB)) {
+    return false;
+  }
 
   const numA = Number(a.numero);
   const numB = Number(b.numero);
-  if (numA > 0 && numB > 0) {
-    if (numA !== numB) return false;
-  }
-
-  const latA = a.lat ?? a.latitude;
-  const lngA = a.lng ?? a.longitude;
-  const latB = b.lat ?? b.latitude;
-  const lngB = b.lng ?? b.longitude;
-
-  if (latA != null && lngA != null && latB != null && lngB != null) {
-    if (Math.abs(latA - latB) < 0.00005 && Math.abs(lngA - lngB) < 0.00005) {
-      return true;
-    }
-  }
+  if (!numA || !numB || numA !== numB) return false;
 
   const isImpA = isPoleImplante(a);
   const isImpB = isPoleImplante(b);
-  const isArmA = isPoleArme(a) && !a.traverse && a.sous_type !== "Traversé";
-  const isArmB = isPoleArme(b) && !b.traverse && b.sous_type !== "Traversé";
-  const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
-  const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
-
-  if (catA !== catB) return false;
-  if (!numA || !numB || numA !== numB) return false;
+  if (isImpA !== isImpB) return false;
 
   const txtA = `${a.proprietaire || ""} ${a.type_poteau || ""} ${a.nom || ""}`.toLowerCase();
   const txtB = `${b.proprietaire || ""} ${b.type_poteau || ""} ${b.nom || ""}`.toLowerCase();
@@ -140,6 +132,31 @@ function arePolesDuplicates(a, b) {
 
   if ((aIsSbee && bIsPj) || (aIsPj && bIsSbee)) {
     return false;
+  }
+
+  const latA = Number(a.lat ?? a.latitude);
+  const lngA = Number(a.lng ?? a.longitude);
+  const latB = Number(b.lat ?? b.latitude);
+  const lngB = Number(b.lng ?? b.longitude);
+  const hasGpsA = !isNaN(latA) && !isNaN(lngA) && latA !== 0 && lngA !== 0;
+  const hasGpsB = !isNaN(latB) && !isNaN(lngB) && latB !== 0 && lngB !== 0;
+  if (hasGpsA && hasGpsB) {
+    if (Math.abs(latA - latB) >= 0.00001 || Math.abs(lngA - lngB) >= 0.00001) {
+      return false;
+    }
+  }
+
+  const isArmA = isPoleArme(a) && !a.traverse && !a.traversed && a.sous_type !== "Traversé";
+  const isArmB = isPoleArme(b) && !b.traverse && !b.traversed && b.sous_type !== "Traversé";
+  const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
+  const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
+
+  if (catA !== catB) {
+    const sameOwner = (aIsSbee && bIsSbee) || (aIsPj && bIsPj);
+    const sameExactGps = hasGpsA && hasGpsB && Math.abs(latA - latB) < 0.00001 && Math.abs(lngA - lngB) < 0.00001;
+    if (!sameOwner || !sameExactGps || a.id || b.id) {
+      return false;
+    }
   }
 
   return true;
@@ -236,6 +253,7 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const uniqueImplantes = poteauxImplantes.length;
   const rawImplantes = Number(d.nb_poteaux_implantes ?? 0);
   const nbImplantes = uniqueImplantes > 0 ? (rawImplantes > uniqueImplantes ? uniqueImplantes : (rawImplantes || uniqueImplantes)) : rawImplantes;
+  const pjImplantes = poles.filter((p) => isPetitJeanPole(p) && isPoleImplante(p));
 
   const chefEquipe = cleanStr(d.nom_technicien || d.nom_equipe) || "Chef d'équipe";
 
@@ -315,7 +333,7 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
       : []),
     `*Nombre de poteaux armés : ${fmt2(nbArmes)}*`,
     `*Nombre de poteaux traversés : ${fmt2(nbTraverses)}*`,
-    `*Nombre de poteaux implantés: ${fmt2(nbImplantes)}*`,
+    `*Nombre de poteaux implantés: ${fmt2(nbImplantes)}${pjImplantes.length > 0 ? (pjImplantes.length === nbImplantes ? " (Petit Jean)" : ` (${fmt2(pjImplantes.length)} Petit Jean)`) : ""}*`,
     `*ONT: ${fmt2(ontQte)}*`,
     `*PTO: ${fmt2(ptoQte)}*`,
     `*Jarretière: ${fmt2(jarretiereQte)}*`,
@@ -344,7 +362,7 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
 
   // Regroupement des poteaux traversés par propriétaire
   const sbeeTraverses = poteauxTraverses.filter(isSbeePole);
-  const pjTraverses = poteauxTraverses.filter(isPetitJeanPole);
+  const pjTraverses = poles.filter(isPetitJeanPole);
   const otherTraverses = poteauxTraverses.filter((p) => !isSbeePole(p) && !isPetitJeanPole(p));
 
   // Poteaux SBEE
@@ -368,7 +386,8 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
     lignes.push(`*GPS poteaux Petit Jean*`);
     pjTraverses.forEach((p, idx) => {
       const num = p.numero || sbeeTraverses.length + idx + 1;
-      lignes.push(`*GPS PT${num}: ${getGpsCoordinatesString(p)}*`);
+      const isImp = isPoleImplante(p);
+      lignes.push(`*GPS PT${num}${isImp ? " (Implanté)" : ""}: ${getGpsCoordinatesString(p)}*`);
     });
     lignes.push(``);
   }
@@ -395,12 +414,16 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   lignes.push(``);
 
   // Poteaux Implantés
-  lignes.push(`*Poteaux implanté : ${fmt2(nbImplantes)}*`);
+  const countImpLabel = pjImplantes.length > 0
+    ? `*Poteaux implanté : ${fmt2(nbImplantes)} (Petit Jean)*`
+    : `*Poteaux implanté : ${fmt2(nbImplantes)}*`;
+  lignes.push(countImpLabel);
   if (poteauxImplantes.length > 0) {
     lignes.push(`*GPS poteaux implantés*`);
     poteauxImplantes.forEach((p, idx) => {
       const num = p.numero || idx + 1;
-      lignes.push(`*GPS PT${num}: ${getGpsCoordinatesString(p)}*`);
+      const isPj = isPetitJeanPole(p);
+      lignes.push(`*GPS PT${num}${isPj ? " (Poteau Petit Jean implanté)" : ""}: ${getGpsCoordinatesString(p)}*`);
     });
   }
   lignes.push(``);
@@ -432,8 +455,9 @@ export function generateConformiteReport(intervention) {
   const poteauxArmes = poles.filter(isPoleArme);
 
   const sbeePoles = poteauxTraverses.filter(isSbeePole);
-  const pjPoles = poteauxTraverses.filter(isPetitJeanPole);
+  const pjPoles = poles.filter(isPetitJeanPole);
   const otherTraverses = poteauxTraverses.filter((p) => !isSbeePole(p) && !isPetitJeanPole(p));
+  const pjImplantes = poles.filter((p) => isPetitJeanPole(p) && isPoleImplante(p));
 
   const countSbee = sbeePoles.length || (poteauxTraverses.length > 0 && pjPoles.length === 0 ? poteauxTraverses.length : 0);
   const countPj = pjPoles.length;
@@ -500,10 +524,14 @@ export function generateConformiteReport(intervention) {
     ``,
     `Poteaux SBEE : ${fmt2(countSbee)}`,
     ``,
-    `${countPj > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPj)}`,
+    pjImplantes.length > 0
+      ? `${countPj > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPj)} (${pjImplantes.length === countPj ? (countPj > 1 ? "Implantés" : "Implanté") : `${fmt2(pjImplantes.length)} implanté${pjImplantes.length > 1 ? "s" : ""}`})`
+      : `${countPj > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPj)}`,
     ...(countOther > 0 ? [``, `Autres poteaux : ${fmt2(countOther)}`] : []),
     ``,
-    `Poteaux implantés : ${fmt2(nbImplantes)}`,
+    pjImplantes.length > 0
+      ? `Poteaux implantés : ${fmt2(nbImplantes)} (${pjImplantes.length === nbImplantes ? (nbImplantes > 1 ? "Poteaux Petit Jean" : "Petit Jean") : `dont ${fmt2(pjImplantes.length)} Petit Jean`})`
+      : `Poteaux implantés : ${fmt2(nbImplantes)}`,
     ``,
     `Poteaux armés : ${fmt2(nbArmes)}`,
     ...(d.debit_descendant || d.debit_montant || d.debit_ping
@@ -556,10 +584,12 @@ export function generateConformiteReport(intervention) {
 
   // Liste ou ligne unique GPS Petit Jean
   if (pjPoles.length === 1) {
-    const lat = pjPoles[0].lat ?? pjPoles[0].latitude;
-    const lng = pjPoles[0].lng ?? pjPoles[0].longitude;
+    const p = pjPoles[0];
+    const lat = p.lat ?? p.latitude;
+    const lng = p.lng ?? p.longitude;
+    const isImp = isPoleImplante(p);
     lignes.push(``);
-    lignes.push(`GPS poteau Petit Jean : ${lat}, ${lng}`);
+    lignes.push(`GPS poteau Petit Jean${isImp ? " (Implanté)" : ""} : ${lat}, ${lng}`);
   } else if (pjPoles.length > 1) {
     lignes.push(``);
     lignes.push(`GPS poteaux Petit Jean :`);
@@ -568,7 +598,8 @@ export function generateConformiteReport(intervention) {
       const num = p.numero || idx + 1;
       const lat = p.lat ?? p.latitude;
       const lng = p.lng ?? p.longitude;
-      lignes.push(`- PT${num} : ${lat}, ${lng}`);
+      const isImp = isPoleImplante(p);
+      lignes.push(`- PT${num}${isImp ? " (Petit Jean implanté)" : ""} : ${lat}, ${lng}`);
     });
   }
 
@@ -581,7 +612,128 @@ export function generateConformiteReport(intervention) {
       const num = p.numero || idx + 1;
       const lat = p.lat ?? p.latitude;
       const lng = p.lng ?? p.longitude;
-      lignes.push(`- Poteau (Implanté) ${num} : ${lat}, ${lng}`);
+      const isPj = isPetitJeanPole(p);
+      lignes.push(`- PT${num}${isPj ? " (Poteau Petit Jean implanté)" : " (Implanté)"} : ${lat}, ${lng}`);
+    });
+  }
+
+  return lignes.join("\n");
+}
+
+/**
+ * 3. RAPPORT DU JOUR (RAPPORT GLOBAL CONFORMITÉ DE LA TOURNÉE DU JOUR)
+ * Génère le récapitulatif consolidé de la journée selon le format officiel APK :
+ * 
+ * *RAPPORT GLOBAL CONFORMITÉ*
+ * 
+ * Equipe : ADMIN
+ * 
+ * *Date* : 20/10/26
+ * 
+ * 👉 *Dossiers traités* : 2/2
+ * 
+ * 1_ 0121256589	 Houeto Olatounde O'neil luce
+ * 
+ * 2_ 0121291924	 ABDOU RAZACK  IMOROU
+ * 
+ * 👉 *Dossiers Validés* : 2/2
+ * 
+ * 1_ 0121256589	 Houeto Olatounde O'neil luce
+ * 
+ * 2_ 0121291924	 ABDOU RAZACK  IMOROU
+ * 
+ * @param {Array} interventionsList - Ensemble des dossiers connus ou de la tournée
+ * @param {Object} currentIntervention - Dossier actif en cours de consultation
+ * @param {Object} options - Options de forçage (date, equipe, totalRecus, countTraites, countValides)
+ * @returns {string}
+ */
+export function generateRapportDuJour(interventionsList = [], currentIntervention = null, options = {}) {
+  const current = currentIntervention || {};
+  const list = Array.isArray(interventionsList) && interventionsList.length > 0
+    ? interventionsList
+    : (current.id ? [current] : []);
+
+  // Détermination de la date cible
+  const targetDateRaw = options.date || current.tournee_du_jour || current.date || new Date();
+  const dObj = new Date(targetDateRaw);
+  const validDate = isNaN(dObj.getTime()) ? new Date() : dObj;
+
+  // Format Date JJ/MM/AA (ex: 20/10/26)
+  const dayStr = String(validDate.getDate()).padStart(2, "0");
+  const monthStr = String(validDate.getMonth() + 1).padStart(2, "0");
+  const yearStr = String(validDate.getFullYear()).slice(-2);
+  const formattedDate = `${dayStr}/${monthStr}/${yearStr}`;
+
+  // Détermination du nom de l'équipe
+  const equipeName = cleanStr(
+    options.equipe || current.nom_equipe || current.chef_equipe || current.nom_technicien || "ADMIN"
+  ) || "ADMIN";
+
+  // Filtrer les interventions de la même journée
+  const targetIso = validDate.toISOString().slice(0, 10);
+  const dayItems = list.filter((item) => {
+    if (!item || item.supprime_le) return false;
+    if (item.tournee_du_jour) return item.tournee_du_jour === targetIso;
+    if (item.date) return String(item.date).slice(0, 10) === targetIso;
+    return true;
+  });
+
+  // Si le dossier courant n'est pas dans la liste filtrée (ex: chargé seul), l'ajouter
+  if (current.id && !dayItems.some((i) => i.id === current.id)) {
+    dayItems.push(current);
+  }
+
+  // Dossiers traités (démarrés, en cours ou terminés)
+  const traites = dayItems.filter((i) => {
+    if (i.id === current.id) return true;
+    const s = String(i.statut || "").trim().toLowerCase();
+    if (s === "non_traite" || s === "annule" || s === "supprime") return false;
+    if (i.tournee_verrouille && (s === "en_attente" || s === "")) return false;
+    return true;
+  });
+
+  // Dossiers validés (effectivement terminés avec succès)
+  const valides = dayItems.filter((i) => {
+    if (i.id === current.id) return isInterventionTerminee(current) || true;
+    return isInterventionTerminee(i);
+  });
+
+  const totalRecus = options.totalRecus ?? options.recus ?? Math.max(dayItems.length, traites.length, 1);
+  const countTraites = options.countTraites ?? options.realises ?? traites.length;
+  const countValides = options.countValides ?? valides.length;
+
+  const formatDossierLine = (item, idx) => {
+    const tel = cleanStr(item.telephone_ligne || item.mobile || item.telephone || item.telephone_fixe || "-");
+    const nom = cleanStr(item.nom_client || item.nom_dossier || "Client");
+    return `${idx + 1}_ ${tel}\t ${nom}`;
+  };
+
+  const lignes = [
+    `*RAPPORT GLOBAL CONFORMITÉ*`,
+    ``,
+    `Equipe : ${equipeName}`,
+    ``,
+    `*Date* : ${formattedDate}`,
+    ``,
+    `👉 *Dossiers traités* : ${countTraites}/${totalRecus}`,
+  ];
+
+  if (traites.length > 0) {
+    lignes.push(``);
+    traites.forEach((item, idx) => {
+      lignes.push(formatDossierLine(item, idx));
+      if (idx < traites.length - 1) lignes.push(``);
+    });
+  }
+
+  lignes.push(``);
+  lignes.push(`👉 *Dossiers Validés* : ${countValides}/${totalRecus}`);
+
+  if (valides.length > 0) {
+    lignes.push(``);
+    valides.forEach((item, idx) => {
+      lignes.push(formatDossierLine(item, idx));
+      if (idx < valides.length - 1) lignes.push(``);
     });
   }
 

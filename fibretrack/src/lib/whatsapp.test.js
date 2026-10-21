@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateGlobalReport, generateConformiteReport, fmt2 } from "./whatsapp.js";
+import { generateGlobalReport, generateConformiteReport, generateRapportDuJour, fmt2 } from "./whatsapp.js";
 
 test("Rapport Global - génère la structure exacte avec puces en gras (*...*)", () => {
   const mockIntervention = {
@@ -254,4 +254,81 @@ test("Rapport - extrait automatiquement le GPS FAT et Abonné depuis les photos 
   assert.ok(confRep.includes("GPS FAT : 6.36541, 2.41289"));
   assert.ok(confRep.includes("GPS abonné : 6.3662, 2.41355"));
 });
+
+test("Rapport du Jour - génère la structure exacte officielle APK avec dossiers traités et validés", () => {
+  const intv1 = {
+    id: "1",
+    nom_client: "Houeto Olatounde O'neil luce",
+    telephone_ligne: "0121256589",
+    statut: "termine",
+    date: "2026-10-20",
+    nom_equipe: "ADMIN",
+  };
+  const intv2 = {
+    id: "2",
+    nom_client: "ABDOU RAZACK  IMOROU",
+    telephone_ligne: "0121291924",
+    statut: "termine",
+    date: "2026-10-20",
+    nom_equipe: "ADMIN",
+  };
+
+  const report = generateRapportDuJour([intv1, intv2], intv1, {
+    date: "2026-10-20",
+    equipe: "ADMIN",
+  });
+
+  assert.ok(report.includes("*RAPPORT GLOBAL CONFORMITÉ*"));
+  assert.ok(report.includes("Equipe : ADMIN"));
+  assert.ok(report.includes("*Date* : 20/10/26"));
+  assert.ok(report.includes("👉 *Dossiers traités* : 2/2"));
+  assert.ok(report.includes("1_ 0121256589\t Houeto Olatounde O'neil luce"));
+  assert.ok(report.includes("2_ 0121291924\t ABDOU RAZACK  IMOROU"));
+  assert.ok(report.includes("👉 *Dossiers Validés* : 2/2"));
+});
+
+test("Déduplication poteaux WhatsApp - ne fusionne jamais deux poteaux distincts partageant les mêmes coordonnées GPS", () => {
+  const intv = {
+    nom_technicien: "Test",
+    date: "2026-10-20",
+    nom_client: "CLIENT GPS IDENTIQUE",
+    points_gps: [
+      { id: "p1", type: "Poteau", numero: 1, proprietaire: "SBEE", traverse: true, lat: 6.3801, lng: 2.6101 },
+      { id: "p2", type: "Poteau", numero: 2, proprietaire: "SBEE", traverse: true, lat: 6.3801, lng: 2.6101 },
+      { id: "p3", type: "Poteau", numero: 1, proprietaire: "SBEE", implante: true, lat: 6.3801, lng: 2.6101 },
+    ],
+  };
+
+  const report = generateGlobalReport(intv);
+  assert.ok(report.includes("*Nombre de poteaux traversés : 02*"));
+  assert.ok(report.includes("*Nombre de poteaux implantés: 01*"));
+  assert.ok(report.includes("*GPS PT1: 6.3801,2.6101*"));
+  assert.ok(report.includes("*GPS PT2: 6.3801,2.6101*"));
+});
+
+test("Poteau Petit Jean implanté - clarification sans doublon ambigu", () => {
+  const intv = {
+    nom_technicien: "Rodolpho",
+    date: "2026-10-21",
+    nom_client: "SAGBOHAN MANZOUROU ABIODOUN",
+    points_gps: [
+      { id: "p1", type: "Poteau", numero: 1, proprietaire: "SBEE", traverse: true, lat: 6.3866, lng: 2.5438 },
+      { id: "p2", type: "Poteau", numero: 2, proprietaire: "Petit Jean", traverse: true, implante: true, lat: 6.3867, lng: 2.5437 },
+    ],
+  };
+
+  const global = generateGlobalReport(intv);
+  assert.ok(global.includes("*Nombre de poteaux traversés : 02*"));
+  assert.ok(global.includes("*Nombre de poteaux implantés: 01 (Petit Jean)*"));
+  assert.ok(global.includes("*GPS PT2 (Implanté): 6.3867,2.5437*"));
+  assert.ok(global.includes("*GPS PT2 (Poteau Petit Jean implanté): 6.3867,2.5437*"));
+
+  const conformite = generateConformiteReport(intv);
+  assert.ok(conformite.includes("Poteau Petit Jean : 01 (Implanté)"));
+  assert.ok(conformite.includes("Poteaux implantés : 01 (Petit Jean)"));
+  assert.ok(conformite.includes("GPS poteau Petit Jean (Implanté) : 6.3867, 2.5437"));
+  assert.ok(conformite.includes("- PT2 (Poteau Petit Jean implanté) : 6.3867, 2.5437"));
+});
+
+
 
