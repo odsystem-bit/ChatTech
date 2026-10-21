@@ -253,7 +253,10 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   const uniqueImplantes = poteauxImplantes.length;
   const rawImplantes = Number(d.nb_poteaux_implantes ?? 0);
   const nbImplantes = uniqueImplantes > 0 ? (rawImplantes > uniqueImplantes ? uniqueImplantes : (rawImplantes || uniqueImplantes)) : rawImplantes;
-  const pjImplantes = poles.filter((p) => isPetitJeanPole(p) && isPoleImplante(p));
+  const pjPoles = poles.filter(isPetitJeanPole);
+  const pjImplantes = pjPoles.filter(isPoleImplante);
+  const pjNonImplantes = pjPoles.filter((p) => !isPoleImplante(p));
+  const otherImplantes = poles.filter((p) => !isPetitJeanPole(p) && isPoleImplante(p));
 
   const chefEquipe = cleanStr(d.nom_technicien || d.nom_equipe) || "Chef d'équipe";
 
@@ -333,7 +336,9 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
       : []),
     `*Nombre de poteaux armés : ${fmt2(nbArmes)}*`,
     `*Nombre de poteaux traversés : ${fmt2(nbTraverses)}*`,
-    `*Nombre de poteaux implantés: ${fmt2(nbImplantes)}${pjImplantes.length > 0 ? (pjImplantes.length === nbImplantes ? " (Petit Jean)" : ` (${fmt2(pjImplantes.length)} Petit Jean)`) : ""}*`,
+    pjImplantes.length > 0 && otherImplantes.length === 0
+      ? `*Nombre de poteaux Petit Jean implantés: ${fmt2(pjImplantes.length)}*`
+      : `*Nombre de poteaux implantés: ${fmt2(nbImplantes)}*`,
     `*ONT: ${fmt2(ontQte)}*`,
     `*PTO: ${fmt2(ptoQte)}*`,
     `*Jarretière: ${fmt2(jarretiereQte)}*`,
@@ -362,7 +367,6 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
 
   // Regroupement des poteaux traversés par propriétaire
   const sbeeTraverses = poteauxTraverses.filter(isSbeePole);
-  const pjTraverses = poles.filter(isPetitJeanPole);
   const otherTraverses = poteauxTraverses.filter((p) => !isSbeePole(p) && !isPetitJeanPole(p));
 
   // Poteaux SBEE
@@ -372,7 +376,7 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
       const num = p.numero || idx + 1;
       lignes.push(`*GPS PT${num}: ${getGpsCoordinatesString(p)}*`);
     });
-  } else if (poteauxTraverses.length > 0 && pjTraverses.length === 0) {
+  } else if (poteauxTraverses.length > 0 && pjPoles.length === 0) {
     // Si aucun propriétaire n'a été spécifié sur les poteaux, ils sont traités par défaut comme SBEE
     poteauxTraverses.forEach((p, idx) => {
       const num = p.numero || idx + 1;
@@ -381,13 +385,22 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   }
   lignes.push(``);
 
-  // Poteaux Petit Jean
-  if (pjTraverses.length > 0) {
+  // Poteaux Petit Jean non implantés
+  if (pjNonImplantes.length > 0) {
     lignes.push(`*GPS poteaux Petit Jean*`);
-    pjTraverses.forEach((p, idx) => {
+    pjNonImplantes.forEach((p, idx) => {
       const num = p.numero || sbeeTraverses.length + idx + 1;
-      const isImp = isPoleImplante(p);
-      lignes.push(`*GPS PT${num}${isImp ? " (Implanté)" : ""}: ${getGpsCoordinatesString(p)}*`);
+      lignes.push(`*GPS PT${num}: ${getGpsCoordinatesString(p)}*`);
+    });
+    lignes.push(``);
+  }
+
+  // Poteaux Petit Jean implantés
+  if (pjImplantes.length > 0) {
+    lignes.push(pjImplantes.length > 1 ? `*GPS poteaux Petit Jean implantés*` : `*GPS poteau Petit Jean implanté*`);
+    pjImplantes.forEach((p, idx) => {
+      const num = p.numero || idx + 1;
+      lignes.push(`*GPS PT${num}: ${getGpsCoordinatesString(p)}*`);
     });
     lignes.push(``);
   }
@@ -413,20 +426,16 @@ export function generateGlobalReport(intervention, compteurJour = {}) {
   }
   lignes.push(``);
 
-  // Poteaux Implantés
-  const countImpLabel = pjImplantes.length > 0
-    ? `*Poteaux implanté : ${fmt2(nbImplantes)} (Petit Jean)*`
-    : `*Poteaux implanté : ${fmt2(nbImplantes)}*`;
-  lignes.push(countImpLabel);
-  if (poteauxImplantes.length > 0) {
+  // Poteaux Implantés autres que Petit Jean
+  if (otherImplantes.length > 0) {
+    lignes.push(`*Poteaux implanté : ${fmt2(otherImplantes.length)}*`);
     lignes.push(`*GPS poteaux implantés*`);
-    poteauxImplantes.forEach((p, idx) => {
+    otherImplantes.forEach((p, idx) => {
       const num = p.numero || idx + 1;
-      const isPj = isPetitJeanPole(p);
-      lignes.push(`*GPS PT${num}${isPj ? " (Poteau Petit Jean implanté)" : ""}: ${getGpsCoordinatesString(p)}*`);
+      lignes.push(`*GPS PT${num}: ${getGpsCoordinatesString(p)}*`);
     });
+    lignes.push(``);
   }
-  lignes.push(``);
 
   // Points Abonné & FAT
   lignes.push(`*GPS abonné: ${latAbonne}*`);
@@ -456,12 +465,16 @@ export function generateConformiteReport(intervention) {
 
   const sbeePoles = poteauxTraverses.filter(isSbeePole);
   const pjPoles = poles.filter(isPetitJeanPole);
+  const pjImplantes = pjPoles.filter(isPoleImplante);
+  const pjNonImplantes = pjPoles.filter((p) => !isPoleImplante(p));
   const otherTraverses = poteauxTraverses.filter((p) => !isSbeePole(p) && !isPetitJeanPole(p));
-  const pjImplantes = poles.filter((p) => isPetitJeanPole(p) && isPoleImplante(p));
+  const otherImplantes = poles.filter((p) => !isPetitJeanPole(p) && isPoleImplante(p));
 
   const countSbee = sbeePoles.length || (poteauxTraverses.length > 0 && pjPoles.length === 0 ? poteauxTraverses.length : 0);
-  const countPj = pjPoles.length;
+  const countPjNonImp = pjNonImplantes.length;
+  const countPjImp = pjImplantes.length;
   const countOther = otherTraverses.length;
+  const countOtherImp = otherImplantes.length;
 
   const abonnePt = pts.find((p) => p && ["abonné", "abonne", "client"].includes(String(p.type || "").toLowerCase()));
   const fatPt = pts.find((p) => p && String(p.type || "").toLowerCase() === "fat");
@@ -523,24 +536,38 @@ export function generateConformiteReport(intervention) {
     `Poteaux traversés : ${fmt2(nbTraverses)}`,
     ``,
     `Poteaux SBEE : ${fmt2(countSbee)}`,
-    ``,
-    pjImplantes.length > 0
-      ? `${countPj > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPj)} (${pjImplantes.length === countPj ? (countPj > 1 ? "Implantés" : "Implanté") : `${fmt2(pjImplantes.length)} implanté${pjImplantes.length > 1 ? "s" : ""}`})`
-      : `${countPj > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPj)}`,
-    ...(countOther > 0 ? [``, `Autres poteaux : ${fmt2(countOther)}`] : []),
-    ``,
-    pjImplantes.length > 0
-      ? `Poteaux implantés : ${fmt2(nbImplantes)} (${pjImplantes.length === nbImplantes ? (nbImplantes > 1 ? "Poteaux Petit Jean" : "Petit Jean") : `dont ${fmt2(pjImplantes.length)} Petit Jean`})`
-      : `Poteaux implantés : ${fmt2(nbImplantes)}`,
-    ``,
-    `Poteaux armés : ${fmt2(nbArmes)}`,
-    ...(d.debit_descendant || d.debit_montant || d.debit_ping
-      ? [
-          ``,
-          `Débit Wi-Fi : ${d.debit_descendant || "-"} Mb/s (Desc.) / ${d.debit_montant || "-"} Mb/s (Mont.) / ${d.debit_ping || "-"} ms (Ping)`,
-        ]
-      : []),
   ];
+
+  if (countPjNonImp > 0) {
+    lignes.push(``);
+    lignes.push(`${countPjNonImp > 1 ? "Poteaux" : "Poteau"} Petit Jean : ${fmt2(countPjNonImp)}`);
+  }
+
+  if (countPjImp > 0) {
+    lignes.push(``);
+    lignes.push(`${countPjImp > 1 ? "Poteaux" : "Poteau"} Petit Jean implantés : ${fmt2(countPjImp)}`);
+  }
+
+  if (countOther > 0) {
+    lignes.push(``);
+    lignes.push(`Autres poteaux : ${fmt2(countOther)}`);
+  }
+
+  if (countOtherImp > 0) {
+    lignes.push(``);
+    lignes.push(`Poteaux implantés : ${fmt2(countOtherImp)}`);
+  } else if (countPjImp === 0) {
+    lignes.push(``);
+    lignes.push(`Poteaux implantés : ${fmt2(nbImplantes)}`);
+  }
+
+  lignes.push(``);
+  lignes.push(`Poteaux armés : ${fmt2(nbArmes)}`);
+
+  if (d.debit_descendant || d.debit_montant || d.debit_ping) {
+    lignes.push(``);
+    lignes.push(`Débit Wi-Fi : ${d.debit_descendant || "-"} Mb/s (Desc.) / ${d.debit_montant || "-"} Mb/s (Mont.) / ${d.debit_ping || "-"} ms (Ping)`);
+  }
 
   // Liste GPS poteaux SBEE
   const displaySbee = sbeePoles.length > 0 ? sbeePoles : (poles.length > 0 && pjPoles.length === 0 ? poles : []);
@@ -569,6 +596,57 @@ export function generateConformiteReport(intervention) {
     });
   }
 
+  // Liste ou ligne unique GPS Petit Jean (non implantés)
+  if (countPjNonImp === 1) {
+    const p = pjNonImplantes[0];
+    const lat = p.lat ?? p.latitude;
+    const lng = p.lng ?? p.longitude;
+    lignes.push(``);
+    lignes.push(`GPS poteau Petit Jean : ${lat}, ${lng}`);
+  } else if (countPjNonImp > 1) {
+    lignes.push(``);
+    lignes.push(`GPS poteaux Petit Jean :`);
+    lignes.push(``);
+    pjNonImplantes.forEach((p, idx) => {
+      const num = p.numero || idx + 1;
+      const lat = p.lat ?? p.latitude;
+      const lng = p.lng ?? p.longitude;
+      lignes.push(`- PT${num} : ${lat}, ${lng}`);
+    });
+  }
+
+  // Liste ou ligne unique GPS Petit Jean implantés
+  if (countPjImp === 1) {
+    const p = pjImplantes[0];
+    const lat = p.lat ?? p.latitude;
+    const lng = p.lng ?? p.longitude;
+    lignes.push(``);
+    lignes.push(`GPS poteau Petit jean implanté : ${lat}, ${lng}`);
+  } else if (countPjImp > 1) {
+    lignes.push(``);
+    lignes.push(`GPS poteaux Petit Jean implantés :`);
+    lignes.push(``);
+    pjImplantes.forEach((p, idx) => {
+      const num = p.numero || idx + 1;
+      const lat = p.lat ?? p.latitude;
+      const lng = p.lng ?? p.longitude;
+      lignes.push(`- PT${num} : ${lat}, ${lng}`);
+    });
+  }
+
+  // Liste GPS autres poteaux implantés (non Petit Jean)
+  if (countOtherImp > 0) {
+    lignes.push(``);
+    lignes.push(`GPS poteaux implantés :`);
+    lignes.push(``);
+    otherImplantes.forEach((p, idx) => {
+      const num = p.numero || idx + 1;
+      const lat = p.lat ?? p.latitude;
+      const lng = p.lng ?? p.longitude;
+      lignes.push(`- PT${num} : ${lat}, ${lng}`);
+    });
+  }
+
   // Liste GPS poteaux armés
   if (poteauxArmes.length > 0) {
     lignes.push(``);
@@ -579,41 +657,6 @@ export function generateConformiteReport(intervention) {
       const lat = p.lat ?? p.latitude;
       const lng = p.lng ?? p.longitude;
       lignes.push(`- Poteau (Armé) ${num} : ${lat}, ${lng}`);
-    });
-  }
-
-  // Liste ou ligne unique GPS Petit Jean
-  if (pjPoles.length === 1) {
-    const p = pjPoles[0];
-    const lat = p.lat ?? p.latitude;
-    const lng = p.lng ?? p.longitude;
-    const isImp = isPoleImplante(p);
-    lignes.push(``);
-    lignes.push(`GPS poteau Petit Jean${isImp ? " (Implanté)" : ""} : ${lat}, ${lng}`);
-  } else if (pjPoles.length > 1) {
-    lignes.push(``);
-    lignes.push(`GPS poteaux Petit Jean :`);
-    lignes.push(``);
-    pjPoles.forEach((p, idx) => {
-      const num = p.numero || idx + 1;
-      const lat = p.lat ?? p.latitude;
-      const lng = p.lng ?? p.longitude;
-      const isImp = isPoleImplante(p);
-      lignes.push(`- PT${num}${isImp ? " (Petit Jean implanté)" : ""} : ${lat}, ${lng}`);
-    });
-  }
-
-  // Liste GPS poteaux implantés
-  if (poteauxImplantes.length > 0) {
-    lignes.push(``);
-    lignes.push(`GPS poteaux implantés :`);
-    lignes.push(``);
-    poteauxImplantes.forEach((p, idx) => {
-      const num = p.numero || idx + 1;
-      const lat = p.lat ?? p.latitude;
-      const lng = p.lng ?? p.longitude;
-      const isPj = isPetitJeanPole(p);
-      lignes.push(`- PT${num}${isPj ? " (Poteau Petit Jean implanté)" : " (Implanté)"} : ${lat}, ${lng}`);
     });
   }
 

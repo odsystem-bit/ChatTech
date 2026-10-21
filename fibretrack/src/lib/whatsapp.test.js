@@ -306,28 +306,33 @@ test("Déduplication poteaux WhatsApp - ne fusionne jamais deux poteaux distinct
   assert.ok(report.includes("*GPS PT2: 6.3801,2.6101*"));
 });
 
-test("Poteau Petit Jean implanté - clarification sans doublon ambigu", () => {
+test("Poteau Petit Jean implanté - formatage exact sans dispatching ni doublon", () => {
   const intv = {
     nom_technicien: "Rodolpho",
     date: "2026-10-21",
     nom_client: "SAGBOHAN MANZOUROU ABIODOUN",
     points_gps: [
-      { id: "p1", type: "Poteau", numero: 1, proprietaire: "SBEE", traverse: true, lat: 6.3866, lng: 2.5438 },
-      { id: "p2", type: "Poteau", numero: 2, proprietaire: "Petit Jean", traverse: true, implante: true, lat: 6.3867, lng: 2.5437 },
+      { id: "p1", type: "Poteau", numero: 1, proprietaire: "SBEE", traverse: true, lat: 6.386616666666667, lng: 2.543811111111111 },
+      { id: "p2", type: "Poteau", numero: 2, proprietaire: "Petit Jean", traverse: true, implante: true, lat: 6.386744444444445, lng: 2.5437944444444445 },
     ],
   };
 
   const global = generateGlobalReport(intv);
   assert.ok(global.includes("*Nombre de poteaux traversés : 02*"));
-  assert.ok(global.includes("*Nombre de poteaux implantés: 01 (Petit Jean)*"));
-  assert.ok(global.includes("*GPS PT2 (Implanté): 6.3867,2.5437*"));
-  assert.ok(global.includes("*GPS PT2 (Poteau Petit Jean implanté): 6.3867,2.5437*"));
+  assert.ok(global.includes("*Nombre de poteaux Petit Jean implantés: 01*"));
+  assert.ok(global.includes("*GPS poteau Petit Jean implanté*"));
+  assert.ok(global.includes("*GPS PT2: 6.386744444444445,2.5437944444444445*"));
+  assert.ok(!global.includes("*GPS poteaux implantés*"));
 
   const conformite = generateConformiteReport(intv);
-  assert.ok(conformite.includes("Poteau Petit Jean : 01 (Implanté)"));
-  assert.ok(conformite.includes("Poteaux implantés : 01 (Petit Jean)"));
-  assert.ok(conformite.includes("GPS poteau Petit Jean (Implanté) : 6.3867, 2.5437"));
-  assert.ok(conformite.includes("- PT2 (Poteau Petit Jean implanté) : 6.3867, 2.5437"));
+  assert.ok(conformite.includes("Poteaux traversés : 02"));
+  assert.ok(conformite.includes("Poteaux SBEE : 01"));
+  assert.ok(conformite.includes("Poteau Petit Jean implantés : 01"));
+  assert.ok(!conformite.includes("Poteaux implantés : 01"));
+  assert.ok(conformite.includes("GPS poteaux SBEE :"));
+  assert.ok(conformite.includes("- PT1 : 6.386616666666667, 2.543811111111111"));
+  assert.ok(conformite.includes("GPS poteau Petit jean implanté : 6.386744444444445, 2.5437944444444445"));
+  assert.ok(!conformite.includes("GPS poteaux implantés :"));
 });
 
 
