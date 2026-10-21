@@ -411,13 +411,17 @@ try {
       $extension = 'pdf';
     }
     $mediaId = bin2hex(random_bytes(16));
-    $relativeDir = 'uploads/interventions/' . $interventionId;
+    $relativeDir = ($type === 'video') ? ('uploads/interventions/' . $interventionId) : (($type === 'fiche') ? ('uploads/interventions/' . $interventionId) : ('uploads/photos/' . $interventionId));
     $absoluteDir = __DIR__ . '/' . $relativeDir;
     if (!is_dir($absoluteDir)) @mkdir($absoluteDir, 0755, true);
     @chmod(__DIR__ . '/uploads', 0755);
     @chmod(__DIR__ . '/uploads/interventions', 0755);
+    @chmod(__DIR__ . '/uploads/photos', 0755);
     @chmod($absoluteDir, 0755);
-    $relativePath = $relativeDir . '/' . $mediaId . '.' . $extension;
+
+    $safeSlot = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_POST['slot'] ?? $_POST['type'] ?? 'media')) ?: 'media';
+    $filename = ($type === 'video') ? ($mediaId . '.' . $extension) : ($safeSlot . '_' . $mediaId . '.' . $extension);
+    $relativePath = $relativeDir . '/' . $filename;
     if (!move_uploaded_file($_FILES['file']['tmp_name'], __DIR__ . '/' . $relativePath)) {
       http_response_code(500); echo json_encode(['error' => 'Impossible de stocker le média']); return;
     }
@@ -442,7 +446,7 @@ try {
     $fullUrl = 'https://fibretrack.mantota.com/api/' . $relativePath;
     $fileSize = (int)@filesize(__DIR__ . '/' . $relativePath);
 
-    // Mettre à jour immédiatement la colonne videos_terrain ou whatsapp_photos dans interventions pour zéro perte
+    // Mettre à jour immédiatement la colonne videos_terrain ou whatsapp_photos + points_gps dans interventions pour zéro perte
     if ($type === 'video') {
       try {
         $vStmt = db()->prepare('SELECT videos_terrain FROM interventions WHERE id = ? FOR UPDATE');
@@ -484,6 +488,7 @@ try {
               'ajoute_par' => $user['nom'] ?? 'Technicien',
               'is_imported' => $isImported,
               'source' => $srcType,
+              'status' => 'synced',
             ];
           }
           $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ?');
@@ -494,17 +499,26 @@ try {
       }
     } else {
       try {
-        $wStmt = db()->prepare('SELECT whatsapp_photos FROM interventions WHERE id = ? FOR UPDATE');
+        $wStmt = db()->prepare('SELECT whatsapp_photos, points_gps FROM interventions WHERE id = ? FOR UPDATE');
         $wStmt->execute([$interventionId]);
         $row = $wStmt->fetch();
         if ($row) {
           $currWa = json_decode($row['whatsapp_photos'] ?? '[]', true);
           if (!is_array($currWa)) $currWa = [];
-          $slotName = trim((string)($_POST['slot'] ?? ('media_' . $mediaId)));
-          $currWa[] = [
+          $currGps = json_decode($row['points_gps'] ?? '[]', true);
+          if (!is_array($currGps)) $currGps = [];
+
+          $slotName = trim((string)($_POST['slot'] ?? ($type === 'fiche' ? 'contrat_client' : ('media_' . $mediaId))));
+          $photoType = trim((string)($_POST['photo_type'] ?? ($type === 'fiche' ? 'contrat_client' : $slotName)));
+          $isMultiSlot = in_array($slotName, ['autre_poteau', 'additionnelle', 'contrat_client'], true)
+            || str_starts_with($slotName, 'autre_poteau_')
+            || str_starts_with($slotName, 'additionnelle_')
+            || str_starts_with($slotName, 'contrat_client_');
+
+          $newPhotoItem = [
             'id' => $mediaId,
             'slot' => $slotName,
-            'type' => $type,
+            'type' => $photoType,
             'label' => trim((string)($_POST['label'] ?? ($type === 'fiche' ? 'Contrat Client Signé' : 'Photo terrain'))),
             'url' => $fullUrl,
             'lat' => (!empty($_POST['latitude']) && is_numeric($_POST['latitude'])) ? (float)$_POST['latitude'] : null,
@@ -512,9 +526,49 @@ try {
             'precision_m' => (!empty($_POST['precision_m']) && is_numeric($_POST['precision_m'])) ? (float)$_POST['precision_m'] : null,
             'horodatage' => $capturedAt,
             'ajoute_par' => $user['nom'] ?? 'Technicien',
+            'from_gps' => str_starts_with($slotName, 'poteau_') || $slotName === 'fat',
           ];
-          $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, modifie_le = NOW() WHERE id = ?');
-          $upStmt->execute([json_encode($currWa), $interventionId]);
+
+          $foundSlot = false;
+          if (!$isMultiSlot) {
+            foreach ($currWa as &$cph) {
+              if (!empty($cph['slot']) && $cph['slot'] === $slotName) {
+                $cph = array_merge($cph, $newPhotoItem);
+                $foundSlot = true;
+                break;
+              }
+            }
+            unset($cph);
+          }
+          if (!$foundSlot) {
+            $currWa[] = $newPhotoItem;
+          }
+
+          // Réconciliation directe dans points_gps
+          $gpsChanged = false;
+          foreach ($currGps as &$gpt) {
+            if (!is_array($gpt)) continue;
+            $ptType = strtoupper(trim((string)($gpt['type'] ?? '')));
+            if ($slotName === 'fat' && $ptType === 'FAT') {
+              $gpt['photo'] = $fullUrl;
+              $gpsChanged = true;
+            } elseif (($slotName === 'ont_sn' || $slotName === 'cable_interne') && in_array($ptType, ['ABONNÉ', 'ABONNE', 'CLIENT', 'ONT'], true)) {
+              $gpt['photo'] = $fullUrl;
+              $gpsChanged = true;
+            } elseif (preg_match('/^poteau_(\d+)$/i', $slotName, $pm) && $ptType === 'POTEAU' && (int)($gpt['numero'] ?? 0) === (int)$pm[1]) {
+              $gpt['photo'] = $fullUrl;
+              $gpsChanged = true;
+            }
+          }
+          unset($gpt);
+
+          if ($gpsChanged) {
+            $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, points_gps = ?, modifie_le = NOW() WHERE id = ?');
+            $upStmt->execute([json_encode($currWa), json_encode($currGps), $interventionId]);
+          } else {
+            $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, modifie_le = NOW() WHERE id = ?');
+            $upStmt->execute([json_encode($currWa), $interventionId]);
+          }
         }
       } catch (Exception $e) {
         error_log("media_upload whatsapp_photos sync error: " . $e->getMessage());
@@ -529,7 +583,7 @@ try {
       'thumbnail_url' => $thumbUrl,
       'size' => $fileSize,
       'duration' => (float)($_POST['duration'] ?? 0),
-      'label' => trim((string)($_POST['label'] ?? 'Vidéo terrain')),
+      'label' => trim((string)($_POST['label'] ?? ($type === 'video' ? 'Vidéo terrain' : 'Photo terrain'))),
     ]);
     return;
   }
@@ -855,15 +909,17 @@ try {
       header('Cache-Control: no-cache, no-store, must-revalidate');
       header('Pragma: no-cache');
       header('Expires: 0');
-      // Relevé ultra-léger pour le live refresh multi-techniciens :
-      // compare la date de modification et les longueurs des flux médias
-      // pour détecter instantanément tout ajout de photo ou vidéo sur le terrain.
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       $stmt = db()->prepare('SELECT modifie_le AS updated_at, CHAR_LENGTH(COALESCE(whatsapp_photos, "")) as wa_len, CHAR_LENGTH(COALESCE(videos_terrain, "")) as vid_len, CHAR_LENGTH(COALESCE(points_gps, "")) as gps_len FROM interventions WHERE id = ?');
       $stmt->execute([$id]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
-      $sig = ($r['updated_at'] ?? '') . '_' . ($r['wa_len'] ?? 0) . '_' . ($r['vid_len'] ?? 0) . '_' . ($r['gps_len'] ?? 0);
+      $mStmt = db()->prepare('SELECT COUNT(*) as media_cnt, MAX(created_at) as media_max FROM intervention_media WHERE intervention_id = ?');
+      $mStmt->execute([$id]);
+      $mRow = $mStmt->fetch();
+      $mediaCnt = (int)($mRow['media_cnt'] ?? 0);
+      $mediaMax = (string)($mRow['media_max'] ?? '');
+      $sig = ($r['updated_at'] ?? '') . '_' . ($r['wa_len'] ?? 0) . '_' . ($r['vid_len'] ?? 0) . '_' . ($r['gps_len'] ?? 0) . '_' . $mediaCnt . '_' . $mediaMax;
       echo json_encode([
         'updated_at' => $r['updated_at'] ?? '',
         'signature' => $sig,
@@ -882,6 +938,65 @@ try {
       if (is_array($r['videos_terrain'])) {
         $r['videos_terrain'] = array_values(array_filter($r['videos_terrain'], fn($v) => empty($v['url']) || !str_starts_with((string)$v['url'], 'blob:')));
       }
+
+      // Réconciliation avec intervention_media
+      try {
+        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? ORDER BY captured_at ASC");
+        $mStmt->execute([$id]);
+        $medias = $mStmt->fetchAll();
+        if (!empty($medias)) {
+          $vidIds = array_map('strval', array_filter(array_column($r['videos_terrain'], 'id')));
+          $vidUrls = array_map('strval', array_filter(array_column($r['videos_terrain'], 'url')));
+          $waIds = array_map('strval', array_filter(array_column($r['whatsapp_photos'], 'id')));
+          $waUrls = array_map('strval', array_filter(array_column($r['whatsapp_photos'], 'url')));
+          foreach ($medias as $m) {
+            $mId = (string)$m['id'];
+            $mUrl = 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/');
+            if (in_array($m['type'], ['video', 'video_terrain'], true)) {
+              if (!in_array($mId, $vidIds, true) && !in_array($mUrl, $vidUrls, true)) {
+                $fullPath = __DIR__ . '/' . ltrim($m['file_path'], '/');
+                $thumbRel = preg_replace('/\.\w+$/', '_thumb.jpg', ltrim($m['file_path'], '/'));
+                $thumbAbs = __DIR__ . '/' . $thumbRel;
+                $r['videos_terrain'][] = [
+                  'id' => $mId,
+                  'url' => $mUrl,
+                  'thumbnail_url' => is_file($thumbAbs) ? ('https://fibretrack.mantota.com/api/' . $thumbRel) : '',
+                  'size' => (int)@filesize($fullPath),
+                  'duration' => 0,
+                  'label' => 'Vidéo terrain',
+                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
+                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
+                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
+                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                  'captured_at' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                  'ajoute_par' => $m['added_by'] ?? 'Technicien',
+                  'status' => 'synced',
+                ];
+                $vidIds[] = $mId;
+                $vidUrls[] = $mUrl;
+              }
+            } else {
+              if (!in_array($mId, $waIds, true) && !in_array($mUrl, $waUrls, true)) {
+                $r['whatsapp_photos'][] = [
+                  'id' => $mId,
+                  'slot' => 'media_' . $mId,
+                  'type' => $m['type'],
+                  'label' => $m['type'] === 'fiche' ? 'Contrat Client Signé' : 'Photo terrain',
+                  'url' => $mUrl,
+                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
+                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
+                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
+                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
+                  'ajoute_par' => $m['added_by'] ?? 'Technicien',
+                ];
+                $waIds[] = $mId;
+                $waUrls[] = $mUrl;
+              }
+            }
+          }
+        }
+      } catch (Exception $e) {}
+
       echo json_encode($r);
       break;
 
@@ -915,6 +1030,17 @@ try {
         foreach (scandir($photoDir) as $f) {
           if ($f !== '.' && $f !== '..' && is_file($photoDir . '/' . $f)) {
             $zip->addFile($photoDir . '/' . $f, $folderPrefix . $f);
+            $usedZipNames[strtolower($f)] = true;
+          }
+        }
+      }
+
+      // 1b. Vidéos présentes sur le serveur dans uploads/interventions/<id>
+      $videoDir = __DIR__ . '/uploads/interventions/' . $safeId;
+      if (is_dir($videoDir)) {
+        foreach (scandir($videoDir) as $f) {
+          if ($f !== '.' && $f !== '..' && is_file($videoDir . '/' . $f) && !str_ends_with($f, '_thumb.jpg')) {
+            $zip->addFile($videoDir . '/' . $f, $folderPrefix . $f);
             $usedZipNames[strtolower($f)] = true;
           }
         }
@@ -1489,6 +1615,36 @@ try {
           if ($svKey !== '') $incomingIds[] = $svKey;
           if ($svUrl !== '') $incomingUrls[] = $svUrl;
         }
+
+        // Réconcilier également avec intervention_media pour garantir qu'aucune vidéo enregistrée par media_upload ne soit omise
+        try {
+          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type = 'video'");
+          $mStmt->execute([$d['id']]);
+          $mediaRows = $mStmt->fetchAll();
+          foreach ($mediaRows as $mr) {
+            $mId = (string)$mr['id'];
+            if (isset($deletedVideosSet[$mId])) continue;
+            if (in_array($mId, $incomingIds, true)) continue;
+            $mUrl = 'https://fibretrack.mantota.com/api/' . ltrim((string)$mr['file_path'], '/');
+            if (in_array($mUrl, $incomingUrls, true)) continue;
+            $thumbPath = preg_replace('/\.\w+$/', '_thumb.jpg', (string)$mr['file_path']);
+            $thumbUrl = file_exists(__DIR__ . '/' . $thumbPath) ? ('https://fibretrack.mantota.com/api/' . $thumbPath) : '';
+            $incomingVideos[] = [
+              'id' => $mId,
+              'url' => $mUrl,
+              'thumbnail_url' => $thumbUrl,
+              'lat' => $mr['latitude'] ? (float)$mr['latitude'] : null,
+              'lng' => $mr['longitude'] ? (float)$mr['longitude'] : null,
+              'precision_m' => $mr['precision_m'] ? (float)$mr['precision_m'] : null,
+              'horodatage' => $mr['captured_at'],
+              'captured_at' => $mr['captured_at'],
+              'ajoute_par' => $mr['added_by'] ?? 'Technicien',
+              'status' => 'synced',
+            ];
+            $incomingIds[] = $mId;
+            $incomingUrls[] = $mUrl;
+          }
+        } catch (Exception $e) {}
       }
 
       // Purger les vidéos supprimées de incomingVideos
@@ -1741,8 +1897,10 @@ try {
             $patchAssignments[] = 'nb_poteaux_armes = :nb_poteaux_armes_calc';
             $patchAssignments[] = 'nb_poteaux_traverses = :nb_poteaux_traverses_calc';
           }
-          if (in_array('whatsapp_photos', $changedFields, true) || !empty($deletedWaPhotos)) $patchAssignments[] = 'whatsapp_photos = :whatsapp_photos';
-          if (in_array('videos_terrain', $changedFields, true) || isset($d['videos_terrain']) || !empty($incomingDeletedVideos)) $patchAssignments[] = 'videos_terrain = :videos_terrain';
+          $shouldPatchWa = ($changedFields !== null ? in_array('whatsapp_photos', $changedFields, true) : isset($d['whatsapp_photos'])) || !empty($deletedWaPhotos);
+          $shouldPatchVid = ($changedFields !== null ? in_array('videos_terrain', $changedFields, true) : isset($d['videos_terrain'])) || !empty($incomingDeletedVideos);
+          if ($shouldPatchWa) $patchAssignments[] = 'whatsapp_photos = :whatsapp_photos';
+          if ($shouldPatchVid) $patchAssignments[] = 'videos_terrain = :videos_terrain';
           if ($shouldDeductStock) $patchAssignments[] = 'materiel_deduit = 1';
           $patchAssignments[] = 'modifie_par = :modifie_par';
           $patchAssignments[] = 'modifie_le = :modifie_le';
@@ -1759,8 +1917,8 @@ try {
             $stmt->bindValue(':nb_poteaux_armes_calc', (int)$d['nb_poteaux_armes']);
             $stmt->bindValue(':nb_poteaux_traverses_calc', (int)$d['nb_poteaux_traverses']);
           }
-          if (in_array('whatsapp_photos', $changedFields, true) || !empty($deletedWaPhotos)) $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
-          if (in_array('videos_terrain', $changedFields, true) || isset($d['videos_terrain']) || !empty($incomingDeletedVideos)) $stmt->bindValue(':videos_terrain', json_encode($incomingVideos));
+          if ($shouldPatchWa) $stmt->bindValue(':whatsapp_photos', json_encode($incomingWa));
+          if ($shouldPatchVid) $stmt->bindValue(':videos_terrain', json_encode($incomingVideos));
           $stmt->bindValue(':modifie_par', $d['modifie_par'] ?? '');
           $stmt->bindValue(':modifie_le', $serverNow);
           $stmt->bindValue(':id', $d['id']);

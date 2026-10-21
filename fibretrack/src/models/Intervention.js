@@ -914,11 +914,18 @@ export async function getIntervention(id) {
           ).map(String)
         );
         if (Array.isArray(finalIntv.videos_terrain)) {
-          finalIntv.videos_terrain = finalIntv.videos_terrain.filter((v) => v && v.id && !deletedVideoIds.has(String(v.id)) && (!v.url || !String(v.url).startsWith("blob:")));
+          finalIntv.videos_terrain = finalIntv.videos_terrain.filter((v) => v && v.id && !deletedVideoIds.has(String(v.id)));
         }
         if (Array.isArray(local.videos_terrain) && local.videos_terrain.length > 0) {
           const remoteVideoIds = new Set((finalIntv.videos_terrain || []).map((v) => String(v?.id)).filter(Boolean));
-          const unsyncedVideos = local.videos_terrain.filter((v) => v && v.id && !remoteVideoIds.has(String(v.id)) && !deletedVideoIds.has(String(v.id)) && v.url && !String(v.url).startsWith("blob:"));
+          const remoteVideoUrls = new Set((finalIntv.videos_terrain || []).map((v) => String(v?.url || "")).filter(Boolean));
+          const unsyncedVideos = local.videos_terrain.filter((v) => {
+            if (!v || !v.id || deletedVideoIds.has(String(v.id))) return false;
+            if (remoteVideoIds.has(String(v.id))) return false;
+            if (v.url && remoteVideoUrls.has(String(v.url))) return false;
+            // Toujours préserver les vidéos locales en cours d'envoi, en attente ou même avec blob temporaire
+            return true;
+          });
           if (unsyncedVideos.length > 0) {
             finalIntv.videos_terrain = [...(finalIntv.videos_terrain || []), ...unsyncedVideos];
           }

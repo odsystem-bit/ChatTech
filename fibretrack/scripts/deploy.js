@@ -52,7 +52,7 @@ conn.on('ready', () => {
     async function uploadFile(localPath, remotePath) {
       const stat = fs.statSync(localPath);
       // Skip heavy binary assets if size didn't change
-      if (/\.(png|jpg|jpeg|svg|ico|woff2?|ttf|eot)$/i.test(localPath)) {
+      if (/\.(png|jpg|jpeg|svg|ico|woff2?|ttf|eot|pdf)$/i.test(localPath)) {
         const remSize = await getRemoteSize(remotePath);
         if (remSize === stat.size) {
           console.log(`  = Ignoré (identique): ${path.relative(distDir, localPath)}`);
@@ -64,7 +64,7 @@ conn.on('ready', () => {
         const readStream = fs.createReadStream(localPath);
         const writeStream = sftp.createWriteStream(remotePath);
         writeStream.on('close', () => {
-          console.log(`  ✓ Uploadé: ${path.relative(distDir, localPath)} (${(stat.size / 1024).toFixed(1)} KB)`);
+          console.log(`  ✓ Uploadé: ${path.relative(projectRoot, localPath)} (${(stat.size / 1024).toFixed(1)} KB)`);
           resolve();
         });
         writeStream.on('error', (e) => reject(e));
@@ -92,29 +92,33 @@ conn.on('ready', () => {
       }
     }
 
-    walkAndUpload(distDir, remoteBase)
-      .then(async () => {
-        const apiFiles = ['index.php', 'pdf.php', 'excel_hebdo.php', 'excel_hebdo_simple.php', 'excel_export.php', '.htaccess', '.user.ini'];
-        await ensureRemoteDir(`${remoteBase}/api`);
-        for (const apiFile of apiFiles) {
-          const localPath = path.join(projectRoot, 'api', apiFile);
-          if (fs.existsSync(localPath)) {
-            await uploadFile(localPath, `${remoteBase}/api/${apiFile}`);
-            console.log(`✓ api/${apiFile} mis à jour sur Hostinger !`);
-          }
+    (async () => {
+      // 1. Mettre à jour l'API backend en priorité
+      const apiFiles = ['index.php', 'pdf.php', 'excel_hebdo.php', 'excel_hebdo_simple.php', 'excel_export.php', '.htaccess', '.user.ini'];
+      await ensureRemoteDir(`${remoteBase}/api`);
+      for (const apiFile of apiFiles) {
+        const localPath = path.join(projectRoot, 'api', apiFile);
+        if (fs.existsSync(localPath)) {
+          await uploadFile(localPath, `${remoteBase}/api/${apiFile}`);
+          console.log(`✓ api/${apiFile} mis à jour sur Hostinger !`);
         }
-        console.log('✓ Tous les fichiers mis à jour avec succès sur Hostinger !');
-        // Vérification
-        conn.exec(`cat ${remoteBase}/version.json`, (err, stream) => {
-          if (err) throw err;
-          let output = '';
-          stream.on('data', (d) => { output += d.toString(); });
-          stream.on('close', () => {
-            console.log('✓ Version distante active:\n', output.trim());
-            conn.end();
-          });
+      }
+
+      // 2. Mettre à jour le frontend dist
+      await walkAndUpload(distDir, remoteBase);
+      console.log('✓ Tous les fichiers mis à jour avec succès sur Hostinger !');
+
+      // 3. Vérification de la version distante active
+      conn.exec(`cat ${remoteBase}/version.json`, (err, stream) => {
+        if (err) throw err;
+        let output = '';
+        stream.on('data', (d) => { output += d.toString(); });
+        stream.on('close', () => {
+          console.log('✓ Version distante active:\n', output.trim());
+          conn.end();
         });
-      })
+      });
+    })()
       .catch((err) => {
         console.error('Erreur upload:', err);
         conn.end();
@@ -133,6 +137,7 @@ conn.connect({
   port,
   username,
   privateKey,
-  keepaliveInterval: 5000,
-  readyTimeout: 30000,
+  keepaliveInterval: 10000,
+  keepaliveCountMax: 8,
+  readyTimeout: 60000,
 });

@@ -41,6 +41,7 @@ import { isInterventionTerminee } from "../lib/interventionFilters";
 import { calculateMaterials } from "../lib/materialsCalculation.js";
 import { downloadPhotoFile, downloadAllPhotosAsZip } from "../lib/photoDownload";
 import { findPhotoForSlot } from "../lib/slotPhotos";
+import { dataUrlToBlob } from "../lib/reportShare";
 import {
   formatFileSize,
   formatDuration,
@@ -264,6 +265,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const videoTargetReplaceRef = useRef(null);
   const [retakeTargetVideo, setRetakeTargetVideo] = useState(null);
   const activeVideoUploadsRef = useRef(new Set());
+  const pendingVideoFilesRef = useRef(new Map());
 
   const [saveStatus, setSaveStatus] = useState("");
   const [viewingPhoto, setViewingPhoto] = useState(null);
@@ -356,7 +358,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       if (!v || !v.id || deletedIds.has(String(v.id))) return false;
       if (incomingIds.has(String(v.id))) return false;
       if (v.url && incomingUrls.has(String(v.url))) return false;
-      return v.status === "uploading" || v.status === "processing" || String(v.url || "").startsWith("blob:");
+      return v.status === "uploading" || v.status === "error" || v.status === "processing" || String(v.url || "").startsWith("blob:");
     });
     return [...incoming, ...localInFlight];
   }, []);
@@ -515,9 +517,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
     const payload = {
       ...currentData,
-      whatsapp_photos: isWaPhotosDirty || !currentData.updated_at ? currentWaList : [],
-      points_gps: isGpsDirty || !currentData.updated_at ? (currentData.points_gps || []) : [],
-      videos_terrain: isVideosDirty || !currentData.updated_at ? currentVideosList : [],
+      ...(isWaPhotosDirty || !currentData.updated_at ? { whatsapp_photos: currentWaList } : {}),
+      ...(isGpsDirty || !currentData.updated_at ? { points_gps: currentData.points_gps || [] } : {}),
+      ...(isVideosDirty || !currentData.updated_at ? { videos_terrain: currentVideosList } : {}),
       changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
       deleted_points: [...deletedGpsPointIdsRef.current],
       deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
@@ -579,6 +581,101 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setSaveStatus("✓ Sauvegardé (local)");
     }
   }, [mergeIncomingPhotos, mergeIncomingVideos]);
+
+  // Téléversement direct et résilient des photos en arrière-plan (multipart/form-data)
+  // Remplace instantanément les volumineuses données base64 par une URL HTTPS sécurisée, visible par toute l'équipe
+  const uploadPhotoInBackground = useCallback(
+    async ({
+      photoId,
+      photoDataUrl,
+      slot,
+      photoType,
+      label,
+      lat,
+      lng,
+      precisionM,
+      capturedAt,
+    }) => {
+      if (!photoDataUrl || !String(photoDataUrl).startsWith("data:image")) return;
+      const currentId = dataRef.current?.id || data?.id;
+      if (!currentId) return;
+
+      try {
+        const blob = dataUrlToBlob(photoDataUrl);
+        const uploaded = await uploadInterventionMedia({
+          interventionId: currentId,
+          type: "photo",
+          file: blob,
+          slot,
+          photoType: photoType || slot,
+          label: label || slot || "Photo terrain",
+          latitude: lat,
+          longitude: lng,
+          precisionM,
+          capturedAt: capturedAt || new Date().toISOString(),
+        });
+
+        if (uploaded && uploaded.url) {
+          setWhatsappPhotos((prev) => {
+            const next = (prev || []).map((p) => {
+              if (p.id === photoId || (slot && p.slot === slot)) {
+                return { ...p, url: uploaded.url, thumbnail_url: uploaded.thumbnail_url || uploaded.url };
+              }
+              return p;
+            });
+            whatsappPhotosRef.current = next;
+            return next;
+          });
+
+          setData((prev) => {
+            let gpsUpdated = false;
+            const nextGps = (prev.points_gps || []).map((pt) => {
+              if (!pt) return pt;
+              const ptType = String(pt.type || "").trim().toUpperCase();
+              if (slot === "fat" && ptType === "FAT") {
+                gpsUpdated = true;
+                return { ...pt, photo: uploaded.url };
+              }
+              if ((slot === "ont_sn" || slot === "cable_interne") && ["ABONNÉ", "ABONNE", "CLIENT", "ONT"].includes(ptType)) {
+                gpsUpdated = true;
+                return { ...pt, photo: uploaded.url };
+              }
+              if (slot && slot.startsWith("poteau_")) {
+                const pNum = Number(slot.replace("poteau_", ""));
+                if (ptType === "POTEAU" && Number(pt.numero) === pNum) {
+                  gpsUpdated = true;
+                  return { ...pt, photo: uploaded.url };
+                }
+              }
+              return pt;
+            });
+
+            const nextWa = (prev.whatsapp_photos || []).map((p) => {
+              if (p.id === photoId || (slot && p.slot === slot)) {
+                return { ...p, url: uploaded.url, thumbnail_url: uploaded.thumbnail_url || uploaded.url };
+              }
+              return p;
+            });
+
+            const nextData = {
+              ...prev,
+              whatsapp_photos: nextWa,
+              ...(gpsUpdated ? { points_gps: nextGps } : {}),
+              _fully_loaded: true,
+            };
+            dataRef.current = nextData;
+            saveInterventionLocally(nextData);
+            return nextData;
+          });
+
+          flushServerSync().catch(() => {});
+        }
+      } catch (uploadErr) {
+        console.warn("Échec téléversement photo en arrière-plan:", uploadErr);
+      }
+    },
+    [data?.id, flushServerSync]
+  );
 
   useEffect(() => {
     if (finishingRef.current || dirtyFieldsRef.current.size === 0) return;
@@ -1045,6 +1142,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
         return nextList;
       });
       markDirty("whatsapp_photos");
+
+      uploadPhotoInBackground({
+        photoId: galleryPhoto.id,
+        photoDataUrl: pendingCapture.photo,
+        slot,
+        photoType: isPoteau ? "poteau" : slot,
+        label: galleryPhoto.label,
+        lat: pendingCapture.lat,
+        lng: pendingCapture.lng,
+        precisionM: pendingCapture.precision_m,
+        capturedAt: pendingCapture.horodatage,
+      });
 
       if (isFat) {
         runFatOcrOnPhoto(pendingCapture.photo);
@@ -1584,6 +1693,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setSaveStatus("✓ Photo enregistrée");
       setSlotActionFeedback(`✓ Photo "${slotLabel}" enregistrée et sauvegardée sur votre téléphone.`);
       flushServerSync().catch(() => {});
+
+      uploadPhotoInBackground({
+        photoId: newPhoto.id,
+        photoDataUrl: embeddedPhoto,
+        slot: slotKey,
+        photoType: slotKey,
+        label: slotLabel,
+        lat,
+        lng,
+        precisionM: precision_m,
+        capturedAt: horodatage,
+      });
 
       // Sauvegarde / téléchargement automatique immédiat sur le téléphone de l'agent
       downloadPhotoFile(newPhoto, data.nom_client).catch((dlErr) => {
@@ -2466,6 +2587,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       markDirty("points_gps", "whatsapp_photos", "nb_poteaux_traverses", "nb_poteaux_implantes", "nb_poteaux_armes");
       setSaveStatus("✓ Poteau enregistré");
       flushServerSync().catch(() => {});
+
+      uploadPhotoInBackground({
+        photoId: galleryPhoto.id,
+        photoDataUrl: embeddedPhoto,
+        slot: `poteau_${poleNum}`,
+        photoType: "poteau",
+        label: embeddedLabel,
+        lat,
+        lng,
+        precisionM: precision_m,
+        capturedAt: horodatage,
+      });
+
       const sourceLabel = posResult?.source === "exif" ? "EXIF photo (très haute précision)" : (lat != null ? `±${(precision_m || 10).toFixed(1)} m` : "sans GPS");
       setSlotActionFeedback(`✅ Photo enregistrée et sauvegardée sur votre téléphone pour le Poteau ${poleNum} (${sourceLabel})`);
 
@@ -2659,6 +2793,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       setSaveStatus("✓ Photo enregistrée");
       setWhatsappStatus("Photo additionnelle enregistrée.");
       flushServerSync().catch(() => {});
+
+      uploadPhotoInBackground({
+        photoId: newPhoto.id,
+        photoDataUrl: embeddedPhoto,
+        slot: newPhoto.slot || "additionnelle",
+        photoType: "additionnelle",
+        label: newPhoto.label || "Photo additionnelle",
+        lat,
+        lng,
+        precisionM: precision_m,
+        capturedAt: horodatage,
+      });
     } catch (err) {
       console.error("handleWaPhotoSelected error:", err);
       setWhatsappStatus(`Erreur : ${err.message}`);
@@ -2799,11 +2945,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             technicien: updatedTargetVideo.ajoute_par,
           };
 
-          let fileToUpload = file;
           let thumbUrl = "";
           let dur = 0;
-          let compSize = file.size;
-          let isStamped = false;
 
           // Extraction ultra-rapide (< 0.4s) de la miniature et de la durée
           try {
@@ -2812,33 +2955,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             dur = thumbResult?.duration || 0;
           } catch {}
 
-          // Compression lente uniquement si la vidéo dépasse 25 Mo (évite 30s de lecture temps-réel bloquante avant l'upload)
-          if (file.size > 25 * 1024 * 1024) {
-            try {
-              const compResult = await compressVideo(file, {
-                bannerInfo: isImported ? null : bannerInfo,
-                onProgress: (pct, msg) => {
-                  setVideoProgress({ pct: Math.min(80, 15 + Math.round(pct * 0.65)), msg });
-                },
-              });
-
-              if (compResult && compResult.blob && compResult.blob.size > 25 * 1024) {
-                const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
-                const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
-                fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
-                  type: compResult.blob.type || "video/mp4",
-                });
-                thumbUrl = compResult.thumbnailDataUrl || thumbUrl;
-                dur = compResult.duration || dur;
-                compSize = compResult.compressedSize || fileToUpload.size;
-                isStamped = Boolean(compResult.stamped);
-              }
-            } catch (compErr) {
-              console.warn("Échec compression vidéo reprise:", compErr);
-            }
-          }
-
-          setVideoProgress({ pct: 85, msg: `Téléversement vers le serveur…` });
+          pendingVideoFilesRef.current.set(updatedTargetVideo.id, file);
+          setVideoProgress({ pct: 15, msg: `Téléversement direct vers le serveur…` });
 
           // Suppression de l'ancienne vidéo du serveur si elle y existait
           if (replaceTarget.id && !replaceTarget.id.startsWith("vid_")) {
@@ -2849,11 +2967,11 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             }
           }
 
-          // Upload serveur immédiat
+          // Upload serveur immédiat avec suivi de progression temps réel
           const uploaded = await uploadInterventionMedia({
             interventionId: data.id,
             type: "video",
-            file: fileToUpload,
+            file,
             latitude: activeLat,
             longitude: activeLng,
             precisionM: activePrecision,
@@ -2863,14 +2981,24 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             label: updatedTargetVideo.label,
             isImported,
             source,
+            onProgress: ({ pct, loaded, total }) => {
+              setVideoProgress({
+                pct: Math.min(99, 10 + Math.round(pct * 0.89)),
+                msg: `Envoi vidéo (${formatFileSize(loaded)} / ${formatFileSize(total)})…`,
+              });
+            },
           });
+
+          if (uploaded?.url) {
+            pendingVideoFilesRef.current.delete(updatedTargetVideo.id);
+          }
 
           const finalVideo = {
             ...updatedTargetVideo,
             id: uploaded?.id || replaceTarget.id,
             url: uploaded?.url || localUrl,
             thumbnail_url: uploaded?.thumbnail_url || thumbUrl || "",
-            size: compSize,
+            size: file.size,
             duration: dur,
             lat: activeLat,
             lng: activeLng,
@@ -2994,11 +3122,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             technicien: video.ajoute_par,
           };
 
-          let fileToUpload = file;
           let thumbUrl = "";
           let dur = 0;
-          let compSize = file.size;
-          let isStamped = false;
 
           // 1. Extraction immédiate (< 0.4s) de la miniature et durée
           try {
@@ -3007,45 +3132,18 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             dur = thumbResult?.duration || 0;
           } catch {}
 
-          // 2. Compression uniquement si la vidéo dépasse 25 Mo (évite l'attente de lecture 1x de 20-30s avant upload !)
-          if (file.size > 25 * 1024 * 1024) {
-            try {
-              const compResult = await compressVideo(file, {
-                bannerInfo: isImported ? null : bannerInfo,
-                onProgress: (pct, msg) => {
-                  setVideoProgress({
-                    pct: Math.min(80, 20 + Math.round(pct * 0.6)),
-                    msg,
-                  });
-                },
-              });
-
-              if (compResult && compResult.blob && compResult.blob.size > 25 * 1024) {
-                const ext = compResult.extension || (file.name ? file.name.split(".").pop() : "mp4");
-                const baseName = (file.name || `video_${Date.now()}`).replace(/\.[^/.]+$/, "");
-                fileToUpload = new File([compResult.blob], `${baseName}.${ext}`, {
-                  type: compResult.blob.type || "video/mp4",
-                });
-                thumbUrl = compResult.thumbnailDataUrl || thumbUrl;
-                dur = compResult.duration || dur;
-                compSize = compResult.compressedSize || fileToUpload.size;
-                isStamped = Boolean(compResult.stamped);
-              }
-            } catch (compErr) {
-              console.warn("Échec compression vidéo:", compErr);
-            }
-          }
+          pendingVideoFilesRef.current.set(video.id, file);
 
           setVideoProgress({
-            pct: 80 + Math.round(((i + 0.5) / newItemsWithFiles.length) * 18),
-            msg: `Envoi serveur vidéo #${i + 1} (${formatFileSize(fileToUpload.size)})…`,
+            pct: 15,
+            msg: `Téléversement vidéo #${i + 1}/${newItemsWithFiles.length} (${formatFileSize(file.size)})…`,
           });
 
           try {
             const uploaded = await uploadInterventionMedia({
               interventionId: data.id,
               type: "video",
-              file: fileToUpload,
+              file,
               latitude: video.lat,
               longitude: video.lng,
               precisionM: video.precision_m,
@@ -3055,10 +3153,17 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               label: video.label,
               isImported,
               source,
+              onProgress: ({ pct, loaded, total }) => {
+                setVideoProgress({
+                  pct: Math.min(99, 10 + Math.round(pct * 0.89)),
+                  msg: `Envoi vidéo #${i + 1}/${newItemsWithFiles.length} (${formatFileSize(loaded)} / ${formatFileSize(total)})…`,
+                });
+              },
             });
 
             if (uploaded && uploaded.url) {
               syncedCount++;
+              pendingVideoFilesRef.current.delete(video.id);
               setVideosTerrain((prev) => {
                 const next = prev.map((v) =>
                   v.id === video.id
@@ -3073,9 +3178,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                         precision_m: activePrecision,
                         lieu: lieu || v.lieu,
                         status: "synced",
-                        size: compSize,
-                        has_banner: !isImported && isStamped,
-                        stamped: isStamped,
+                        size: file.size,
+                        has_banner: !isImported,
+                        stamped: !isImported,
                       }
                     : v
                 );
@@ -3152,6 +3257,82 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     flushServerSync().catch(() => {});
     setVideoStatus("✓ Vidéo supprimée avec succès.");
     setTimeout(() => setVideoStatus(""), 4000);
+  };
+
+  const retryVideoUpload = async (video) => {
+    if (!video) return;
+    const file = pendingVideoFilesRef.current.get(video.id);
+    if (!file) {
+      handlePromptRetakeVideo(video);
+      return;
+    }
+
+    setVideosTerrain((prev) => {
+      const next = prev.map((v) => (v.id === video.id ? { ...v, status: "uploading" } : v));
+      videosTerrainRef.current = next;
+      return next;
+    });
+
+    setVideoProcessing(true);
+    setVideoStatus(`⏳ Nouvelle tentative d'envoi de la vidéo…`);
+    setVideoProgress({ pct: 15, msg: `Reconnexion et envoi…` });
+
+    try {
+      const uploaded = await uploadInterventionMedia({
+        interventionId: data.id,
+        type: "video",
+        file,
+        latitude: video.lat,
+        longitude: video.lng,
+        precisionM: video.precision_m,
+        capturedAt: video.captured_at,
+        thumbnailBase64: video.thumbnail_url,
+        duration: video.duration,
+        label: video.label,
+        isImported: video.is_imported,
+        source: video.source,
+        onProgress: ({ pct, loaded, total }) => {
+          setVideoProgress({
+            pct: Math.min(99, 10 + Math.round(pct * 0.89)),
+            msg: `Envoi vidéo (${formatFileSize(loaded)} / ${formatFileSize(total)})…`,
+          });
+        },
+      });
+
+      if (uploaded && uploaded.url) {
+        pendingVideoFilesRef.current.delete(video.id);
+        setVideosTerrain((prev) => {
+          const next = prev.map((v) =>
+            v.id === video.id
+              ? {
+                  ...v,
+                  id: uploaded.id || v.id,
+                  url: uploaded.url,
+                  thumbnail_url: uploaded.thumbnail_url || v.thumbnail_url,
+                  status: "synced",
+                }
+              : v
+          );
+          videosTerrainRef.current = next;
+          update("videos_terrain", next);
+          saveInterventionLocally({ ...dataRef.current, videos_terrain: next, _fully_loaded: true });
+          return next;
+        });
+        setVideoStatus("✅ Vidéo synchronisée avec succès !");
+        setTimeout(() => setVideoStatus(""), 4000);
+      }
+    } catch (err) {
+      console.warn("Échec retry vidéo:", err);
+      setVideosTerrain((prev) => {
+        const next = prev.map((v) => (v.id === video.id ? { ...v, status: "error" } : v));
+        videosTerrainRef.current = next;
+        return next;
+      });
+      setVideoStatus(`⚠️ Échec de l'envoi (${err.message || "réseau"}). Vous pouvez réessayer.`);
+    } finally {
+      setVideoProcessing(false);
+      setVideoProgress({ pct: 0, msg: "" });
+    }
   };
 
   const openVideoCamera = () => {
@@ -5232,6 +5413,42 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                             ✓ Synchro
                           </span>
                         )}
+
+                        {video.status === "uploading" && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              top: 6,
+                              left: 6,
+                              background: "rgba(2, 132, 199, 0.9)",
+                              color: "#fff",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            ⏳ Envoi…
+                          </span>
+                        )}
+
+                        {video.status === "error" && (
+                          <span
+                            style={{
+                              position: "absolute",
+                              top: 6,
+                              left: 6,
+                              background: "rgba(220, 38, 38, 0.95)",
+                              color: "#fff",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 5px",
+                              borderRadius: 4,
+                            }}
+                          >
+                            ⚠️ Échec envoi
+                          </span>
+                        )}
                       </div>
 
                       {/* En-tête titre et boutons tactiles au bas de la carte */}
@@ -5250,29 +5467,56 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                           {video.label || `Vidéo #${idx + 1}`}
                         </div>
 
-                        {/* Boutons d'action : Lire, Reprendre, Supprimer */}
+                        {/* Boutons d'action : Lire/Réessayer, Reprendre, Supprimer */}
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6 }}>
-                          <button
-                            type="button"
-                            onClick={() => setActiveViewingVideo(video)}
-                            style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              gap: 4,
-                              padding: "6px 4px",
-                              fontSize: 11,
-                              fontWeight: 600,
-                              borderRadius: 6,
-                              background: "#0284c7",
-                              color: "#ffffff",
-                              border: "none",
-                              cursor: "pointer",
-                            }}
-                            title="Lire la vidéo"
-                          >
-                            ▶ Lire
-                          </button>
+                          {video.status === "error" ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                retryVideoUpload(video);
+                              }}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                padding: "6px 4px",
+                                fontSize: 11,
+                                fontWeight: 700,
+                                borderRadius: 6,
+                                background: "#dc2626",
+                                color: "#ffffff",
+                                border: "none",
+                                cursor: "pointer",
+                              }}
+                              title="Réessayer l'envoi de cette vidéo"
+                            >
+                              🔄 Réessayer
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setActiveViewingVideo(video)}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: 4,
+                                padding: "6px 4px",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                borderRadius: 6,
+                                background: "#0284c7",
+                                color: "#ffffff",
+                                border: "none",
+                                cursor: "pointer",
+                              }}
+                              title="Lire la vidéo"
+                            >
+                              ▶ Lire
+                            </button>
+                          )}
 
                           <button
                             type="button"
