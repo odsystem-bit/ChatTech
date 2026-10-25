@@ -2,8 +2,7 @@
 // Export Excel "point de matériel" automatique depuis la base de données.
 // Reproduit le format du fichier d'inventaire (feuille POINT GENERAL) :
 // une ligne par client avec le matériel utilisé, + stock initial/reçu/restant.
-// Accès réservé admin (vérifié côté app Android avant d'afficher le bouton;
-// protégé ici par un code d'accès simple transmis en paramètre).
+// Accès réservé admin (protégé par code 9999 ou compte valide).
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/_env.php';
@@ -20,7 +19,6 @@ define('DB_USER', getenv('DB_USER') ?: 'u795734321_fibretrack');
 define('DB_PASS', getenv('DB_PASS') ?: '');
 define('DB_CHARSET', getenv('DB_CHARSET') ?: 'utf8mb4');
 
-// Même correspondance que dans index.php (STOCK_EXCEL_MAP)
 define('COL_MAP', [
   'ont'            => 'E',  'pto'            => 'F',  'jarretiere'     => 'G',
   'piton'          => 'H',  'cheville'       => 'I',  'connecteur'     => 'J',
@@ -30,6 +28,7 @@ define('COL_MAP', [
   'crochets'       => 'T',  'pince'          => 'U',  'susp'           => 'V',
   'traverse_13t'   => 'W',  'traverse_15t'   => 'X',
 ]);
+
 define('HEADERS', [
   'E'=>'ONT','F'=>'PTO','G'=>'JAR','H'=>'PIT','I'=>'CHE','J'=>'CON','K'=>'CLO',
   'L'=>'1FO','M'=>'CPC 50','N'=>'CPC 100','O'=>'CPC 150','P'=>'CPC 200',
@@ -37,16 +36,18 @@ define('HEADERS', [
   'V'=>'SUS','W'=>'CT 13','X'=>'CT 15',
 ]);
 
-function db() {
-  static $pdo = null;
-  if ($pdo === null) {
-    $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
-    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
-      PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-      PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
+if (!function_exists('db')) {
+  function db() {
+    static $pdo = null;
+    if ($pdo === null) {
+      $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
+      $pdo = new PDO($dsn, DB_USER, DB_PASS, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+      ]);
+    }
+    return $pdo;
   }
-  return $pdo;
 }
 
 header('Access-Control-Allow-Origin: *');
@@ -54,7 +55,6 @@ header('Access-Control-Allow-Origin: *');
 $action = $_GET['action'] ?? '';
 $code = $_GET['code'] ?? '';
 
-// Protection : code admin (9999) ou code technicien enregistré valide
 $isAllowed = ($code === '9999');
 if (!$isAllowed && preg_match('/^\d{4}$/', (string)$code)) {
   $stmtAcc = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
@@ -77,17 +77,57 @@ if ($action !== 'export_point_materiel') {
   exit;
 }
 
+function determineCpcKeyExport(array $intervention, array $materials): ?string {
+    foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $k) {
+        if (!empty($materials[$k]) && (int)$materials[$k] > 0) return $k;
+    }
+    foreach (['cpc50', 'cpc100', 'cpc150', 'cpc200', 'cpc250', 'cpc300', 'cpc350'] as $k) {
+        if (!empty($materials[$k]) && (int)$materials[$k] > 0) return str_replace('cpc', 'cpc_', $k);
+    }
+    $linear = 0;
+    if (isset($intervention['lineaire_m']) && is_numeric($intervention['lineaire_m']) && (float)$intervention['lineaire_m'] > 0) {
+        $linear = (float)$intervention['lineaire_m'];
+    }
+    if ($linear <= 0 && isset($intervention['arrivee_m'], $intervention['depart_m']) 
+        && is_numeric($intervention['arrivee_m']) && is_numeric($intervention['depart_m'])) {
+        $linear = abs((float)$intervention['arrivee_m'] - (float)$intervention['depart_m']);
+    }
+    if ($linear <= 0 && !empty($intervention['arrivee_m']) && is_numeric($intervention['arrivee_m']) && (float)$intervention['arrivee_m'] > 0) {
+        $linear = (float)$intervention['arrivee_m'];
+    }
+    if ($linear <= 0 && !empty($intervention['depart_m']) && is_numeric($intervention['depart_m']) && (float)$intervention['depart_m'] > 0) {
+        $linear = (float)$intervention['depart_m'];
+    }
+    if ($linear <= 0 && !empty($intervention['type_cable'])) {
+        if (preg_match('/(\d+)/', (string)$intervention['type_cable'], $m)) {
+            $linear = (float)$m[1];
+        }
+    }
+    if ($linear <= 0 && !empty($materials['lineaire']) && is_numeric($materials['lineaire'])) {
+        $linear = (float)$materials['lineaire'];
+    }
+    if ($linear <= 0) return null;
+
+    if ($linear <= 50) return 'cpc_50';
+    if ($linear <= 100) return 'cpc_100';
+    if ($linear <= 150) return 'cpc_150';
+    if ($linear <= 200) return 'cpc_200';
+    if ($linear <= 250) return 'cpc_250';
+    if ($linear <= 300) return 'cpc_300';
+    return 'cpc_350';
+}
+
 try {
   $pdo = db();
 
-  // Stock actuel (= stock restant) pour la ligne récap
+  // Stock actuel
   $stockRows = $pdo->query('SELECT designation, quantite FROM stock')->fetchAll();
   $stockActuel = [];
   foreach ($stockRows as $r) { $stockActuel[$r['designation']] = (int)$r['quantite']; }
 
-  // Total reçu / sorti par désignation (pour reconstituer le point complet)
+  // Total reçu / sorti
   $movRows = $pdo->query("SELECT designation,
-      SUM(CASE WHEN type='entree' THEN quantite ELSE 0 END) as entree,
+      SUM(CASE WHEN type IN ('entree', 'ajustement') THEN quantite ELSE 0 END) as entree,
       SUM(CASE WHEN type='sortie' THEN quantite ELSE 0 END) as sortie
     FROM stock_movements GROUP BY designation")->fetchAll();
   $totEntree = []; $totSortie = [];
@@ -96,10 +136,13 @@ try {
     $totSortie[$r['designation']] = (int)$r['sortie'];
   }
 
-  // Toutes les interventions (triées par date)
+  // Interventions
   $stmt = $pdo->query("SELECT id, nom_client, telephone_ligne, adresse_zone, nom_equipe,
-      nom_technicien, date, statut, materiel_pose, motif_non_traite
-    FROM interventions ORDER BY date");
+      nom_technicien, date, statut, materiel_pose, motif_non_traite,
+      lineaire_m, arrivee_m, depart_m, type_cable
+    FROM interventions 
+    WHERE statut = 'termine' AND (motif_non_traite IS NULL OR motif_non_traite = '')
+    ORDER BY date ASC");
   $interventions = $stmt->fetchAll();
 
   $spreadsheet = new Spreadsheet();
@@ -111,17 +154,16 @@ try {
 
   $headerRow = 4;
   $sheet->setCellValue('A' . $headerRow, 'N°');
-  $sheet->setCellValue('B' . $headerRow, 'CLIENT');
+  $sheet->setCellValue('B' . $headerRow, 'CLIENTS');
   $sheet->setCellValue('C' . $headerRow, 'LIGNE');
   $sheet->setCellValue('D' . $headerRow, 'DATE');
-  $sheet->setCellValue('E' . $headerRow, 'ZONE');
-  $sheet->setCellValue('F' . $headerRow, 'EQUIPE/TECH');
-  $sheet->setCellValue('G' . $headerRow, 'STATUT');
   foreach (HEADERS as $col => $label) {
     $sheet->setCellValue($col . $headerRow, $label);
   }
-  $lastMatCol = 'X';
-  $lastCol = 'X';
+  // Infos supplémentaires après les matériels
+  $sheet->setCellValue('Y' . $headerRow, 'ZONE');
+  $sheet->setCellValue('Z' . $headerRow, 'EQUIPE/TECH');
+  $lastCol = 'Z';
 
   // Style en-tête
   $headerRange = 'A' . $headerRow . ':' . $lastCol . $headerRow;
@@ -132,42 +174,45 @@ try {
     ->setBorderStyle(Border::BORDER_THIN);
 
   $row = $headerRow + 1;
+  $startRow = $row;
   $num = 1;
-  $colSums = [];
-  foreach (COL_MAP as $col) { $colSums[$col] = 0; }
 
   foreach ($interventions as $iv) {
-    $mp = json_decode($iv['materiel_pose'] ?? '{}', true) ?? [];
+    $mp = json_decode($iv['materiel_pose'] ?? '{}', true) ?: [];
 
-    $statutNorm = strtolower(trim((string)($iv['statut'] ?? '')));
-    $hasMotif = !empty(trim((string)($iv['motif_non_traite'] ?? '')));
-    $isNonTraite = in_array($statutNorm, ['non_traite', 'non_traitee', 'annule', 'annulee', 'inacheve', 'inachevee'], true) || ($hasMotif && $statutNorm !== 'termine');
-    $isTermine = !$isNonTraite && ($statutNorm === 'termine');
+    // Cheville = Piton
+    $piton = (int)($mp['piton'] ?? 0);
+    $cheville = (int)($mp['cheville'] ?? 0);
+    if ($cheville <= 0 && $piton > 0) {
+      $cheville = $piton;
+      $mp['cheville'] = $cheville;
+    }
 
-    if (empty($mp) && !$isTermine) continue;
-
-    $statutLabel = $isTermine ? 'Terminé' : ($isNonTraite ? 'Non traité' : ($statutNorm === 'en_attente' ? 'En attente' : 'En cours'));
+    // Attribution CPC
+    $cpcKey = determineCpcKeyExport($iv, $mp);
+    foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $ck) {
+      unset($mp[$ck]);
+    }
+    if ($cpcKey !== null) {
+      $mp[$cpcKey] = 1;
+    }
 
     $sheet->setCellValue('A' . $row, $num);
     $sheet->setCellValue('B' . $row, trim($iv['nom_client'] ?? ''));
-    $sheet->setCellValue('C' . $row, $iv['telephone_ligne'] ?? '');
-    $sheet->setCellValue('D' . $row, $iv['date'] ? date('d/m/y', strtotime($iv['date'])) : '');
-    $sheet->setCellValue('E' . $row, trim($iv['adresse_zone'] ?? ''));
-    $sheet->setCellValue('F' . $row, $iv['nom_technicien'] ?: ($iv['nom_equipe'] ?? ''));
-    $sheet->setCellValue('G' . $row, $statutLabel);
+    $sheet->setCellValue('C' . $row, trim($iv['telephone_ligne'] ?? ''));
+    $sheet->setCellValue('D' . $row, $iv['date'] ? date('d/m/Y', strtotime($iv['date'])) : '');
 
-    // Ne comptabiliser et n'afficher le matériel que si l'intervention est réellement terminée
-    if ($isTermine && !empty($mp)) {
-      foreach ($mp as $key => $qty) {
-        $qty = (int)$qty;
-        if ($qty <= 0) continue;
-        $col = COL_MAP[$key] ?? null;
-        if ($col === null) continue;
-        $existing = (int)($sheet->getCell($col . $row)->getValue() ?: 0);
-        $sheet->setCellValue($col . $row, $existing + $qty);
-        $colSums[$col] += $qty;
+    foreach (COL_MAP as $key => $col) {
+      $qty = (int)($mp[$key] ?? 0);
+      if ($qty > 0) {
+        $sheet->setCellValue($col . $row, $qty);
+      } else {
+        $sheet->setCellValue($col . $row, null);
       }
     }
+
+    $sheet->setCellValue('Y' . $row, trim($iv['adresse_zone'] ?? ''));
+    $sheet->setCellValue('Z' . $row, $iv['nom_technicien'] ?: ($iv['nom_equipe'] ?? ''));
 
     $sheet->getStyle('A' . $row . ':' . $lastCol . $row)->getBorders()->getAllBorders()
       ->setBorderStyle(Border::BORDER_THIN);
@@ -175,11 +220,14 @@ try {
     $num++;
   }
 
-  $totalRow = $row + 1;
+  $lastClientRow = max($startRow, $row - 1);
+  $totalRow = $row;
+
+  // Ligne QUANTITÉ UTILISÉE avec formules SUM
   $sheet->setCellValue('B' . $totalRow, 'TOTAL UTILISÉ');
   $sheet->getStyle('B' . $totalRow)->getFont()->setBold(true);
   foreach (COL_MAP as $key => $col) {
-    $sheet->setCellValue($col . $totalRow, $colSums[$col]);
+    $sheet->setCellValue($col . $totalRow, "=SUM({$col}{$startRow}:{$col}{$lastClientRow})");
     $sheet->getStyle($col . $totalRow)->getFont()->setBold(true);
   }
 
@@ -203,17 +251,16 @@ try {
     }
   }
 
-  // Largeur des colonnes
-  $sheet->getColumnDimension('A')->setWidth(5);
+  // Largeurs
+  $sheet->getColumnDimension('A')->setWidth(6);
   $sheet->getColumnDimension('B')->setWidth(28);
   $sheet->getColumnDimension('C')->setWidth(14);
-  $sheet->getColumnDimension('D')->setWidth(10);
-  $sheet->getColumnDimension('E')->setWidth(16);
-  $sheet->getColumnDimension('F')->setWidth(16);
-  $sheet->getColumnDimension('G')->setWidth(10);
-  foreach (array_keys(HEADERS) as $col) { $sheet->getColumnDimension($col)->setWidth(8); }
+  $sheet->getColumnDimension('D')->setWidth(12);
+  foreach (array_keys(HEADERS) as $col) { $sheet->getColumnDimension($col)->setWidth(9); }
+  $sheet->getColumnDimension('Y')->setWidth(20);
+  $sheet->getColumnDimension('Z')->setWidth(16);
 
-  // ===== Feuille MOUVEMENTS DETAILLES =====
+  // Feuille 2 : MOUVEMENTS
   $sheet2 = $spreadsheet->createSheet();
   $sheet2->setTitle('MOUVEMENTS');
   $sheet2->setCellValue('A1', 'Date');

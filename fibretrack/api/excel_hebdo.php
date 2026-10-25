@@ -1,7 +1,7 @@
 <?php
 // Export Excel hebdomadaire multi-feuilles (GS BTP)
-// Génère un fichier Excel avec les 5 feuilles basées sur les interventions de la semaine courante
-// Endpoint: ?action=export_hebdo&code=ADMIN_CODE
+// Conforme au canevas officiel GS BTP 121026.xlsx / GS BTP 090926.xlsx
+// Endpoint: ?action=export_hebdo&code=ADMIN_CODE&week_start=YYYY-MM-DD
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/_env.php';
@@ -12,39 +12,12 @@ define('DB_USER', getenv('DB_USER') ?: 'u795734321_fibretrack');
 define('DB_PASS', getenv('DB_PASS') ?: '');
 define('DB_CHARSET', getenv('DB_CHARSET') ?: 'utf8mb4');
 
-function db() {
-  static $pdo = null;
-  if ($pdo === null) {
-    $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
-    $pdo = new PDO($dsn, DB_USER, DB_PASS, [
-      PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-      PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
-  }
-  return $pdo;
-}
-
-use PhpOffice\PhpSpreadsheet\IOFactory;
-use PhpOffice\PhpSpreadsheet\Spreadsheet;
-use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Style\Border;
-
-$materialColumns = [
-    'ont' => 'E', 'pto' => 'F', 'jarretiere' => 'G', 'piton' => 'H',
-    'cheville' => 'I', 'connecteur' => 'J', 'closer' => 'K', 'fibre_1fo' => 'L',
-    'cpc_50' => 'M', 'cpc_100' => 'N', 'cpc_150' => 'O', 'cpc_200' => 'P',
-    'cpc_250' => 'Q', 'cpc_300' => 'R', 'cpc_350' => 'S', 'crochets' => 'T',
-    'pince' => 'U', 'susp' => 'V', 'traverse_13t' => 'W', 'traverse_15t' => 'X',
-];
-
 if (!function_exists('db')) {
     function db() {
         static $pdo = null;
         if ($pdo === null) {
-            $dsn = 'mysql:host=' . (getenv('DB_HOST') ?: 'localhost')
-                . ';dbname=' . (getenv('DB_NAME') ?: 'u795734321_fibre')
-                . ';charset=' . (getenv('DB_CHARSET') ?: 'utf8mb4');
-            $pdo = new PDO($dsn, getenv('DB_USER') ?: 'u795734321_fibretrack', getenv('DB_PASS') ?: '', [
+            $dsn = 'mysql:host=' . DB_HOST . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET;
+            $pdo = new PDO($dsn, DB_USER, DB_PASS, [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             ]);
@@ -53,13 +26,38 @@ if (!function_exists('db')) {
     }
 }
 
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+
+$materialColumns = [
+    'ont'          => 'E',
+    'pto'          => 'F',
+    'jarretiere'   => 'G',
+    'piton'        => 'H',
+    'cheville'     => 'I',
+    'connecteur'   => 'J',
+    'closer'       => 'K',
+    'fibre_1fo'    => 'L',
+    'cpc_50'       => 'M',
+    'cpc_100'      => 'N',
+    'cpc_150'      => 'O',
+    'cpc_200'      => 'P',
+    'cpc_250'      => 'Q',
+    'cpc_300'      => 'R',
+    'cpc_350'      => 'S',
+    'crochets'     => 'T',
+    'pince'        => 'U',
+    'susp'         => 'V',
+    'traverse_13t' => 'W',
+    'traverse_15t' => 'X',
+];
+
 header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 header('Access-Control-Allow-Origin: *');
 
-// Récupérer les paramètres depuis $_GET ou depuis l'URL
 $params = $_GET;
 if (empty($params)) {
-    // Parser l'URL si les paramètres ne sont pas dans $_GET
     $url = $_SERVER['REQUEST_URI'] ?? '';
     if (strpos($url, '?') !== false) {
         parse_str(parse_url($url, PHP_URL_QUERY), $params);
@@ -89,10 +87,80 @@ if (!in_array($action, ['export_hebdo', 'export_mois', 'export_periode', 'export
 requireExcelAdmin($code);
 
 function trouverTemplate(): ?string {
-    foreach ([__DIR__ . '/GS BTP 090926.xlsx', dirname(__DIR__) . '/GS BTP 090926.xlsx'] as $candidate) {
-        if (file_exists($candidate)) return $candidate;
+    $candidates = [
+        __DIR__ . '/GS BTP 121026.xlsx',
+        __DIR__ . '/GS BTP 090926.xlsx',
+        dirname(__DIR__) . '/GS BTP 121026.xlsx',
+        dirname(__DIR__) . '/GS BTP 090926.xlsx',
+    ];
+    foreach ($candidates as $candidate) {
+        if (file_exists($candidate) && filesize($candidate) > 1000) {
+            return $candidate;
+        }
     }
     return null;
+}
+
+/**
+ * Détermine la clé de colonne CPC (cpc_50, cpc_100, ..., cpc_350)
+ * à partir des données de l'intervention ou du matériel posé.
+ */
+function determineCpcKey(array $intervention, array $materials): ?string {
+    // 1. Clé explicite déjà dans $materials
+    foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $k) {
+        if (!empty($materials[$k]) && (int)$materials[$k] > 0) {
+            return $k;
+        }
+    }
+    foreach (['cpc50', 'cpc100', 'cpc150', 'cpc200', 'cpc250', 'cpc300', 'cpc350'] as $k) {
+        if (!empty($materials[$k]) && (int)$materials[$k] > 0) {
+            return str_replace('cpc', 'cpc_', $k);
+        }
+    }
+
+    // 2. Longueur de linéaire en mètres depuis interventions
+    $linear = 0;
+    if (isset($intervention['lineaire_m']) && is_numeric($intervention['lineaire_m']) && (float)$intervention['lineaire_m'] > 0) {
+        $linear = (float)$intervention['lineaire_m'];
+    }
+    if ($linear <= 0 && isset($intervention['arrivee_m'], $intervention['depart_m']) 
+        && is_numeric($intervention['arrivee_m']) && is_numeric($intervention['depart_m'])) {
+        $linear = abs((float)$intervention['arrivee_m'] - (float)$intervention['depart_m']);
+    }
+    if ($linear <= 0 && !empty($intervention['arrivee_m']) && is_numeric($intervention['arrivee_m']) && (float)$intervention['arrivee_m'] > 0) {
+        $linear = (float)$intervention['arrivee_m'];
+    }
+    if ($linear <= 0 && !empty($intervention['depart_m']) && is_numeric($intervention['depart_m']) && (float)$intervention['depart_m'] > 0) {
+        $linear = (float)$intervention['depart_m'];
+    }
+
+    // 3. Détection dans la chaîne type_cable (ex: "Cpc 50", "CPC 150", "cpc 100")
+    if ($linear <= 0 && !empty($intervention['type_cable'])) {
+        if (preg_match('/(\d+)/', (string)$intervention['type_cable'], $m)) {
+            $linear = (float)$m[1];
+        }
+    }
+
+    // 4. Détection dans $materials si linéaire numérique présent
+    if ($linear <= 0 && !empty($materials['lineaire']) && is_numeric($materials['lineaire'])) {
+        $linear = (float)$materials['lineaire'];
+    }
+    if ($linear <= 0 && !empty($materials['lineaire_m']) && is_numeric($materials['lineaire_m'])) {
+        $linear = (float)$materials['lineaire_m'];
+    }
+
+    if ($linear <= 0) {
+        return null;
+    }
+
+    // Attribution au touret correspondant (50, 100, 150, 200, 250, 300, 350)
+    if ($linear <= 50) return 'cpc_50';
+    if ($linear <= 100) return 'cpc_100';
+    if ($linear <= 150) return 'cpc_150';
+    if ($linear <= 200) return 'cpc_200';
+    if ($linear <= 250) return 'cpc_250';
+    if ($linear <= 300) return 'cpc_300';
+    return 'cpc_350';
 }
 
 /**
@@ -104,7 +172,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
 
     $templateFile = trouverTemplate();
     if ($templateFile === null) {
-        throw new Exception('Modèle Excel introuvable (GS BTP 090926.xlsx)');
+        throw new Exception('Modèle Excel introuvable (GS BTP 121026.xlsx ou GS BTP 090926.xlsx)');
     }
     $spreadsheet = IOFactory::load($templateFile);
 
@@ -112,18 +180,23 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     $weekEnd = date('Y-m-d', strtotime('-1 day', strtotime($finExclusive)));
     $weekEndExclusive = $finExclusive;
     
-    // Récupérer les interventions terminées de la semaine (les non traitées ne consomment pas de matériel)
+    // Récupérer les interventions terminées de la semaine
+    // Les interventions non traitées / annulées ne doivent pas consommer de matériel
     $stmt = db()->prepare("
         SELECT id, date, statut, nom_technicien, nom_equipe, nom_client,
           adresse_zone, telephone_ligne, materiel_pose, points_gps,
-          nb_poteaux_implantes, nb_poteaux_traverses, nb_poteaux_armes
+          nb_poteaux_implantes, nb_poteaux_traverses, nb_poteaux_armes,
+          lineaire_m, arrivee_m, depart_m, type_cable
         FROM interventions
-        WHERE date >= ? AND date < ? AND statut = 'termine'
+        WHERE date >= ? AND date < ? 
+          AND statut = 'termine'
+          AND (motif_non_traite IS NULL OR motif_non_traite = '')
         ORDER BY date ASC
     ");
     $stmt->execute([$weekStart, $weekEndExclusive]);
     $interventions = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // Mouvements de stock sur la période
     $movementStmt = db()->prepare('SELECT date_mouvement, type, designation, quantite, nom_client, nom_technicien, motif
         FROM stock_movements WHERE date_mouvement >= ? AND date_mouvement < ? ORDER BY date_mouvement ASC');
     $movementStmt->execute([$weekStart, $weekEndExclusive]);
@@ -154,6 +227,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         $stockRemaining[$key] = $stockInitial[$key] + $weekAdd - $weekOut;
     }
 
+    // Référence papier éventuelle
     $reference = null;
     $refFile = __DIR__ . '/config/stock_reference.php';
     if (file_exists($refFile)) {
@@ -172,72 +246,157 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     // === FEUILLE 1: POINT GENERAL ===
     $sheetPoint = $spreadsheet->getSheetByName('POINT GENERAL');
     if ($sheetPoint) {
-        // Date de réception (début de semaine)
-        $sheetPoint->setCellValue('B1', date('d/m/y', strtotime($weekStart)));
-        // Date de retour (fin de semaine)
-        $sheetPoint->setCellValue('B3', date('d/m/y', strtotime($weekEnd)));
-        // Équipe (BTP)
-        $sheetPoint->setCellValue('B5', 'BTP');
-        
-        // Nombre d'interventions de la semaine
-        $sheetPoint->setCellValue('B7', count($interventions));
-        $sheetPoint->setCellValue('B3', date('d/m/y', strtotime($weekEnd)));
+        // En-têtes conformes au canevas
+        $sheetPoint->setCellValue('A1', 'DATE DE RECEPTION : ' . date('d/m/Y', strtotime($weekStart)));
+        $sheetPoint->setCellValue('A3', 'DATE DE RETOUR : ' . date('d/m/Y', strtotime($weekEnd)));
+        $sheetPoint->setCellValue('A5', 'EQUIPE : BTP');
+        $sheetPoint->setCellValue('A7', 'STOCK INITIAL');
+        $sheetPoint->setCellValue('A8', 'STOCK RECU');
+        $sheetPoint->setCellValue('A9', 'STOCK RESTANT');
+
+        // Ligne 7 : STOCK INITIAL (valeurs réelles ou conservation si modèle)
+        // Ligne 8 : STOCK RECU
         foreach ($materialColumns as $key => $column) {
-            $sheetPoint->setCellValue($column . '7', $stockInitial[$key]);
-            $sheetPoint->setCellValue($column . '8', $stockReceived[$key]);
-            $sheetPoint->setCellValue($column . '9', $stockRemaining[$key]);
+            // Si référence ou mouvements calculés, inscrire le stock initial et reçu
+            $initVal = $stockInitial[$key] ?? 0;
+            $recuVal = $stockReceived[$key] ?? 0;
+            // Ne pas écraser par 0 si le canevas d'origine contient déjà les stocks de cette semaine
+            $existingInit = $sheetPoint->getCell($column . '7')->getValue();
+            if ($initVal === 0 && is_numeric($existingInit) && (int)$existingInit > 0) {
+                $initVal = (int)$existingInit;
+            }
+            $existingRecu = $sheetPoint->getCell($column . '8')->getValue();
+            if ($recuVal === 0 && is_numeric($existingRecu) && (int)$existingRecu > 0) {
+                $recuVal = (int)$existingRecu;
+            }
+
+            $sheetPoint->setCellValue($column . '7', $initVal);
+            $sheetPoint->setCellValue($column . '8', $recuVal);
         }
 
-        $row = 11;
-        $totals = array_fill_keys(array_keys($materialColumns), 0);
-        foreach ($interventions as $intervention) {
-            $materials = json_decode($intervention['materiel_pose'] ?? '{}', true) ?: [];
-            $sheetPoint->setCellValue('A' . $row, $row - 10);
-            $sheetPoint->setCellValue('B' . $row, trim($intervention['nom_client'] ?? ''));
-            $sheetPoint->setCellValue('C' . $row, $intervention['telephone_ligne'] ?? '');
-            $sheetPoint->setCellValue('D' . $row, date('d/m/y', strtotime($intervention['date'])));
-            foreach ($materialColumns as $key => $column) {
-                $quantity = max(0, (int)($materials[$key] ?? 0));
-                $sheetPoint->setCellValue($column . $row, $quantity);
-                $totals[$key] += $quantity;
-            }
-            $row++;
+        $maxTemplateClients = 41; // Le canevas standard comporte 41 lignes clients (11 à 51)
+        $clientCount = count($interventions);
+        $extraRows = max(0, $clientCount - $maxTemplateClients);
+        if ($extraRows > 0) {
+            $sheetPoint->insertNewRowBefore(52, $extraRows);
         }
-        $totalRow = max(52, $row);
-        $sheetPoint->setCellValue('A' . $totalRow, 'TOTAL');
-        foreach ($materialColumns as $key => $column) $sheetPoint->setCellValue($column . $totalRow, $totals[$key]);
-        if ($reference !== null) {
-            $sheetPoint->setCellValue('A' . ($totalRow + 1), 'STOCK FINAL');
-            foreach ($materialColumns as $key => $column) {
-                $sheetPoint->setCellValue($column . ($totalRow + 1), max(0, $stockRemaining[$key] - $totals[$key]));
+        $lastClientRow = 10 + max($maxTemplateClients, $clientCount);
+        $totalRow = $lastClientRow + 1;
+
+        // Remplissage des lignes clients
+        for ($idx = 0; $idx < max($maxTemplateClients, $clientCount); $idx++) {
+            $r = 11 + $idx;
+
+            if ($idx < $clientCount) {
+                $intervention = $interventions[$idx];
+                $materials = json_decode($intervention['materiel_pose'] ?? '{}', true) ?: [];
+
+                // Règle 1 : Chevilles équivaut aux pitons (1 piton = 1 cheville)
+                $piton = (int)($materials['piton'] ?? 0);
+                $cheville = (int)($materials['cheville'] ?? 0);
+                if ($cheville <= 0 && $piton > 0) {
+                    $cheville = $piton;
+                    $materials['cheville'] = $cheville;
+                }
+
+                // Règle 2 : Attribution précise du linéaire CPC dans la bonne colonne (CPC 50, 100, ..., 350)
+                $cpcKey = determineCpcKey($intervention, $materials);
+                // Vider les clés CPC brutes du JSON pour ne pas dupliquer
+                foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $ck) {
+                    unset($materials[$ck]);
+                }
+                if ($cpcKey !== null) {
+                    $materials[$cpcKey] = 1; // 1 linéaire utilisé pour ce client
+                }
+
+                $sheetPoint->setCellValue('A' . $r, $idx + 1);
+                $sheetPoint->setCellValue('B' . $r, trim($intervention['nom_client'] ?? ''));
+                $sheetPoint->setCellValue('C' . $r, trim($intervention['telephone_ligne'] ?? ''));
+                $sheetPoint->setCellValue('D' . $r, date('d/m/Y', strtotime($intervention['date'])));
+
+                // Règle 3 : Remplissage des matériels
+                // Si non utilisé, laisser la case STRICTEMENT VIDE (null) et JAMAIS '0' ou '000' !
+                foreach ($materialColumns as $key => $column) {
+                    $quantity = (int)($materials[$key] ?? 0);
+                    if ($quantity > 0) {
+                        $sheetPoint->setCellValue($column . $r, $quantity);
+                    } else {
+                        $sheetPoint->setCellValue($column . $r, null);
+                    }
+                }
+            } else {
+                // Ligne vierge du canevas : vider toutes les cases
+                $sheetPoint->setCellValue('A' . $r, null);
+                $sheetPoint->setCellValue('B' . $r, null);
+                $sheetPoint->setCellValue('C' . $r, null);
+                $sheetPoint->setCellValue('D' . $r, null);
+                foreach ($materialColumns as $key => $column) {
+                    $sheetPoint->setCellValue($column . $r, null);
+                }
             }
+        }
+
+        // Règle 4 : PRÉSERVER STRICTEMENT LES FORMULES DU CANEVAS SANS LES CASSER
+        // Ligne QUANTITÉ UTILISÉE : =SUM(E11:E51)
+        $sheetPoint->setCellValue('A' . $totalRow, 'QUANTITE UTILISEE');
+        foreach ($materialColumns as $key => $column) {
+            $sheetPoint->setCellValue($column . $totalRow, "=SUM({$column}11:{$column}{$lastClientRow})");
+        }
+
+        // Ligne 9 STOCK RESTANT : =E7+E8-E52 (recalcul automatique si modification)
+        $sheetPoint->setCellValue('A9', 'STOCK RESTANT');
+        foreach ($materialColumns as $key => $column) {
+            $sheetPoint->setCellValue($column . '9', "={$column}7+{$column}8-{$column}{$totalRow}");
+        }
+
+        // Nettoyage de toute ligne parasite en-dessous de QUANTITE UTILISEE
+        $cleanRow = $totalRow + 1;
+        $sheetPoint->setCellValue('A' . $cleanRow, null);
+        foreach ($materialColumns as $key => $column) {
+            $sheetPoint->setCellValue($column . $cleanRow, null);
         }
     }
     
     // === FEUILLE 2: MATERIELS RECEPTIONNES ===
+    // Respecte scrupuleusement la grille pré-formatée du canevas
     $sheetMateriels = $spreadsheet->getSheetByName('MATERIELS RECEPTIONNES');
     if ($sheetMateriels) {
-        // Date de réception
-        $sheetMateriels->setCellValue('B1', date('d/m/y', strtotime($weekStart)));
+        $sheetMateriels->setCellValue('A1', 'DATE DE RECEPTION : ' . date('d/m/Y', strtotime($weekStart)));
         
-        $row = 4;
-        foreach ($weekMovements as $movement) {
-            if (!in_array($movement['type'], ['entree', 'ajustement'], true)) continue;
-            $sheetMateriels->setCellValue('A' . $row, date('d/m/Y', strtotime($movement['date_mouvement'])));
-            $sheetMateriels->setCellValue('B' . $row, strtoupper($movement['designation']));
-            $sheetMateriels->setCellValue('C' . $row, (int)$movement['quantite']);
-            $sheetMateriels->setCellValue('D' . $row, $movement['nom_client'] ?? '');
-            $sheetMateriels->setCellValue('E' . $row, $movement['nom_technicien'] ?? '');
-            $row++;
+        $sheet2RowMap = [
+            'ont'          => 4,
+            'pto'          => 5,
+            'jarretiere'   => 6,
+            'piton'        => 7,
+            'cheville'     => 8,
+            'connecteur'   => 9,
+            'closer'       => 10,
+            'fibre_1fo'    => 11,
+            'cpc_50'       => 12,
+            'cpc_100'      => 13,
+            'cpc_150'      => 14,
+            'cpc_200'      => 15,
+            'cpc_250'      => 16,
+            'cpc_300'      => 17,
+            'cpc_350'      => 18,
+            'crochets'     => 19,
+            'pince'        => 20,
+            'susp'         => 21,
+            'traverse_13t' => 22,
+            'traverse_15t' => 23,
+        ];
+
+        foreach ($sheet2RowMap as $key => $rIdx) {
+            $recu = (int)($stockReceived[$key] ?? 0);
+            $sheetMateriels->setCellValue('B' . $rIdx, $recu > 0 ? $recu : 0);
+            $sheetMateriels->setCellValue('E' . $rIdx, 0);
         }
-        $sheetMateriels->setCellValue('A' . $row, 'TOTAL RECU');
-        $sheetMateriels->setCellValue('C' . $row, array_sum($stockReceived));
     }
     
     // === FEUILLE 3: POTEAUX IMPLANTES ===
     $sheetPoteauxImp = $spreadsheet->getSheetByName('POTEAUX IMPLANTES');
     if ($sheetPoteauxImp) {
-        $row = 2; // Commencer à la ligne 2 (après l'en-tête)
+        $row = 2; // Après l'en-tête ligne 1
         
         foreach ($interventions as $int) {
             $matchingGps = [];
@@ -267,11 +426,21 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
                     $lat = $point['lat'] ?? null;
                     $lng = $point['lng'] ?? null;
                     if ($lat !== null && $lng !== null && $lat !== '' && $lng !== '') {
-                        $gpsColumn = PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
+                        $gpsColumn = Coordinate::stringFromColumnIndex($gpsIndex++);
                         $sheetPoteauxImp->setCellValue($gpsColumn . $row, $lat . ',' . $lng);
                     }
                 }
                 $row++;
+            }
+        }
+
+        // Nettoyer les lignes restantes éventuelles du template
+        for ($cl = $row; $cl <= max(50, $row + 10); $cl++) {
+            $existingVal = $sheetPoteauxImp->getCell('A' . $cl)->getValue();
+            if ($existingVal !== null && $existingVal !== '') {
+                for ($colIdx = 1; $colIdx <= 15; $colIdx++) {
+                    $sheetPoteauxImp->setCellValue(Coordinate::stringFromColumnIndex($colIdx) . $cl, null);
+                }
             }
         }
     }
@@ -279,7 +448,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     // === FEUILLE 4: POTEAUX ARMES ===
     $sheetPoteauxArm = $spreadsheet->getSheetByName('POTEAUX ARMES');
     if ($sheetPoteauxArm) {
-        $row = 2; // Commencer à la ligne 2
+        $row = 2; // Après l'en-tête ligne 1
         
         foreach ($interventions as $int) {
             $matchingGps = [];
@@ -309,11 +478,21 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
                     $lat = $point['lat'] ?? null;
                     $lng = $point['lng'] ?? null;
                     if ($lat !== null && $lng !== null && $lat !== '' && $lng !== '') {
-                        $gpsColumn = PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($gpsIndex++);
+                        $gpsColumn = Coordinate::stringFromColumnIndex($gpsIndex++);
                         $sheetPoteauxArm->setCellValue($gpsColumn . $row, $lat . ',' . $lng);
                     }
                 }
                 $row++;
+            }
+        }
+
+        // Nettoyer les lignes restantes éventuelles du template
+        for ($cl = $row; $cl <= max(50, $row + 10); $cl++) {
+            $existingVal = $sheetPoteauxArm->getCell('A' . $cl)->getValue();
+            if ($existingVal !== null && $existingVal !== '') {
+                for ($colIdx = 1; $colIdx <= 20; $colIdx++) {
+                    $sheetPoteauxArm->setCellValue(Coordinate::stringFromColumnIndex($colIdx) . $cl, null);
+                }
             }
         }
     }
@@ -321,11 +500,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     // === FEUILLE 5: MATERIELS DEFECTUEUX ===
     $sheetDefectueux = $spreadsheet->getSheetByName('MATERIELS DEFECTUEUX');
     if ($sheetDefectueux) {
-        $row = 2; // Commencer à la ligne 2
-        
-        // Pour l'instant, il n'y a pas de champ "matériel défectueux" dans le formulaire
-        // On peut ajouter ce champ plus tard si nécessaire
-        // Pour l'instant, la feuille reste vide
+        // Préserver l'en-tête de la feuille
     }
     
     return $spreadsheet;
@@ -333,13 +508,11 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
 
 try {
     if (trouverTemplate() === null && $action === 'export_hebdo') {
-        // Fallback historique sans modèle : comportement inchangé.
         require __DIR__ . '/excel_hebdo_simple.php';
         exit;
     }
 
     if ($action === 'export_hebdo') {
-        // Semaine lundi-dimanche
         $requestedDate = $params['week_start'] ?? date('Y-m-d');
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedDate) || strtotime($requestedDate) === false) {
             throw new Exception('Date de semaine invalide');
@@ -355,7 +528,6 @@ try {
     }
 
     if ($action === 'export_mois') {
-        // Clôture mensuelle : même classeur GS BTP, plage = mois choisi.
         $mois = $params['mois'] ?? date('Y-m');
         if (!preg_match('/^\d{4}-\d{2}$/', $mois) || strtotime($mois . '-01') === false) {
             throw new Exception('Mois invalide (format AAAA-MM)');
@@ -371,7 +543,6 @@ try {
     }
 
     if ($action === 'export_periode') {
-        // Point sur une plage libre : debut et fin inclus (AAAA-MM-JJ).
         $d1 = $params['debut'] ?? '';
         $d2 = $params['fin'] ?? '';
         foreach ([$d1, $d2] as $d) {
@@ -390,8 +561,7 @@ try {
         exit;
     }
 
-    // export_historique : tout le dossier depuis la 1re fiche, un classeur
-    // par mois dans un ZIP (clôture mensuelle en une seule récupération).
+    // export_historique : un classeur par mois dans un ZIP
     $premiere = db()->query('SELECT MIN(date) FROM interventions')->fetchColumn();
     if (!$premiere) {
         http_response_code(404);
