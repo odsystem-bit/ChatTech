@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { parseTourneeListing } from "../lib/tourneeParser.js";
+import TourneeMapView from "./TourneeMapView.jsx";
 import {
   isInterventionTerminee,
   isInterventionNonTraitee,
@@ -27,6 +28,7 @@ import {
   IconPlus,
   IconTrash,
   IconAlertTriangle,
+  IconMap,
 } from "./Icons.jsx";
 
 /**
@@ -57,6 +59,9 @@ export default function TourneeDuJourView({
   const [importText, setImportText] = useState("");
   const [assignTechnicien, setAssignTechnicien] = useState(currentUser || "");
   const [importing, setImporting] = useState(false);
+
+  // Vue cartographique interactive & optimisation de tournée
+  const [mapViewOpen, setMapViewOpen] = useState(false);
 
   // Modale de confirmation avant de lancer / déverrouiller un dossier
   const [launchConfirmDossier, setLaunchConfirmDossier] = useState(null);
@@ -205,6 +210,20 @@ export default function TourneeDuJourView({
     }
   }, [selectedDate]);
 
+  if (mapViewOpen) {
+    return (
+      <div className="tournee-container">
+        <TourneeMapView
+          dossiers={allDayDossiers}
+          selectedDate={selectedDate}
+          onClose={() => setMapViewOpen(false)}
+          onSaveIntervention={onSaveIntervention}
+          onOpenIntervention={onOpenIntervention}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="tournee-container">
       {/* ===== EN-TÊTE PRINCIPAL DE LA TOURNÉE ===== */}
@@ -233,6 +252,16 @@ export default function TourneeDuJourView({
           </div>
 
           <div className="tournee-header-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn-tournee-map"
+              onClick={() => setMapViewOpen(true)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 7 }}
+              title="Cartographie interactive et optimisation de l'itinéraire"
+            >
+              <IconMap size={16} />
+              <span>Carte & Optimiser ({allDayDossiers.length})</span>
+            </button>
             {onAddNewIntervention && (
               <button
                 type="button"
@@ -517,6 +546,19 @@ export default function TourneeDuJourView({
                   >
                     <IconUnlock size={15} />
                     <span>Démarrer l&apos;intervention</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-action-map"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setMapViewOpen(true);
+                    }}
+                    title="Voir l'emplacement et le trajet sur la carte"
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}
+                  >
+                    <IconMap size={14} />
+                    <span>Carte</span>
                   </button>
                   <button
                     type="button"

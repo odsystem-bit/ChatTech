@@ -4516,6 +4516,27 @@
   background: #1d4ed8;
 }
 
+.btn-tournee-map {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 15px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+  transition: all 0.15s ease;
+}
+
+.btn-tournee-map:active {
+  transform: scale(0.97);
+  background: #047857;
+}
+
 .tournee-date-picker-inline {
   padding: 8px 12px;
   border-radius: 10px;
@@ -4858,6 +4879,28 @@
 
 .btn-action-secondary:active {
   background: #f1f5f9;
+  transform: scale(0.97);
+}
+
+.btn-action-map {
+  flex: 0.8;
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.btn-action-map:active {
+  background: #dcfce7;
   transform: scale(0.97);
 }
 
