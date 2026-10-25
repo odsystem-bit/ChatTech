@@ -23,6 +23,7 @@ import {
 import InstallPwaButton from "./components/InstallPwaButton";
 import InterventionCard from "./components/InterventionCard";
 import TourneeDuJourView from "./components/TourneeDuJourView";
+import CentralReportsView from "./components/CentralReportsView";
 import { filterAndOrganizeInterventions, isInterventionTerminee } from "./lib/interventionFilters";
 import {
   IconTruck,
@@ -32,6 +33,8 @@ import {
   IconFileText,
   IconPlus,
   IconCheckCircle,
+  IconCalendar,
+  IconXCircle,
 } from "./components/Icons";
 
 export default function App() {
@@ -56,8 +59,10 @@ export default function App() {
       return "tournee";
     }
   });
+  const [historySubFilter, setHistorySubFilter] = useState("terminees"); // 'terminees' | 'non_traitees' | 'all'
+  const [periodFilter, setPeriodFilter] = useState("all"); // 'today' | 'week' | 'month' | 'all'
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchTabFilter, setSearchTabFilter] = useState("all"); // 'all' | 'en_cours' | 'terminees'
+  const [searchTabFilter, setSearchTabFilter] = useState("all"); // 'all' | 'en_cours' | 'terminees' | 'non_traitees'
   const [technicienFilter, setTechnicienFilter] = useState("all");
   const [sortBy, setSortBy] = useState("date_desc");
   const [page, setPage] = useState(1);
@@ -144,7 +149,13 @@ export default function App() {
 
   const goToHome = useCallback((targetTab = null) => {
     refreshInterventions();
-    if (targetTab === "terminees" || targetTab === "en_cours" || targetTab === "tournee") {
+    if (
+      targetTab === "terminees" ||
+      targetTab === "non_traitees" ||
+      targetTab === "en_cours" ||
+      targetTab === "tournee" ||
+      targetTab === "rapport"
+    ) {
       setActiveTab(targetTab);
     }
     setScreen("home");
@@ -182,25 +193,41 @@ export default function App() {
     const name = (newDossierName || "").trim();
     setNewDossierModalOpen(false);
     setNewDossierName("");
-    await startNewIntervention(name);
+    await startNewIntervention(name, { tournee: true });
   }
 
-  async function startNewIntervention(initialNom = "") {
+  async function startNewIntervention(initialNom = "", options = {}) {
     if (creatingNew) return;
     setCreatingNew(true);
     try {
+      const isTournee = options.tournee === true;
+      const todayStr = new Date().toISOString().slice(0, 10);
       const intervention = createEmptyIntervention(user?.nom || "", initialNom);
+      if (isTournee) {
+        intervention.statut = "en_attente";
+        intervention.tournee_du_jour = todayStr;
+        intervention.tournee_verrouille = true;
+      }
       intervention._fully_loaded = true;
-      // 1. Sauvegarde locale instantanée (0 ms) & ouverture immédiate
+      // 1. Sauvegarde locale instantanée (0 ms) & mise à jour d'état immédiate
       saveInterventionLocally(intervention);
-      setActiveIntervention(intervention);
-      navigateTo("form");
+      setInterventions((prev) => [intervention, ...prev.filter((i) => i.id !== intervention.id)]);
+
+      if (isTournee) {
+        setActiveTab("tournee");
+      } else {
+        setActiveIntervention(intervention);
+        navigateTo("form");
+      }
 
       // 2. Synchronisation serveur en arrière-plan sans bloquer l'écran
       saveIntervention(intervention)
         .then((saved) => {
           if (saved) {
-            setActiveIntervention((prev) => (prev?.id === saved.id ? { ...prev, updated_at: saved.updated_at } : prev));
+            setInterventions((prev) => prev.map((i) => (i.id === saved.id ? { ...i, ...saved } : i)));
+            if (!isTournee) {
+              setActiveIntervention((prev) => (prev?.id === saved.id ? { ...prev, updated_at: saved.updated_at } : prev));
+            }
           }
         })
         .catch((e) => console.warn("Background new intervention sync:", e));
@@ -211,24 +238,84 @@ export default function App() {
     }
   }
 
+  async function openInterventionReport(target) {
+    const id = typeof target === "object" && target !== null ? target.id : target;
+    if (!id || openingId === id) return;
+
+    const targetObj = typeof target === "object" && target !== null ? target : null;
+    const stored = getStoredIntervention(id);
+    const initial = stored || (targetObj ? ensureInterventionDefaults(targetObj) : null);
+    if (initial) {
+      setActiveIntervention(initial);
+      navigateTo("report");
+      getIntervention(id)
+        .then((fresh) => {
+          if (!fresh) return;
+          const full = { ...fresh, _fully_loaded: true };
+          saveInterventionLocally(full);
+          setActiveIntervention((prev) => (prev?.id === fresh.id ? { ...prev, ...full } : prev));
+        })
+        .catch(() => {});
+      return;
+    }
+
+    setOpeningId(id);
+    try {
+      const fresh = await getIntervention(id);
+      if (fresh) {
+        const full = { ...fresh, _fully_loaded: true };
+        saveInterventionLocally(full);
+        setActiveIntervention(full);
+        navigateTo("report");
+      }
+    } catch (err) {
+      console.error("openInterventionReport error:", err);
+    } finally {
+      setOpeningId(null);
+    }
+  }
+
+  async function handleReactivateIntervention(intv) {
+    if (!intv?.id) return;
+    const updated = {
+      ...intv,
+      statut: "en_cours",
+      motif_non_traite: "",
+      modifie_le: new Date().toISOString(),
+      modifie_par: user?.nom || "",
+      _fully_loaded: true,
+    };
+    setInterventions((prev) => prev.map((i) => (i.id === updated.id ? { ...i, ...updated } : i)));
+    saveInterventionLocally(updated);
+    saveIntervention(updated).catch((e) => console.warn("Reactivate sync error:", e));
+    openIntervention(updated);
+  }
+
   async function openIntervention(target) {
     const id = typeof target === "object" && target !== null ? target.id : target;
     if (!id || openingId === id) return;
 
     // 1. Si nous avons l'intervention en cache local ou passée en direct : ouverture instantanée 0 ms garantie
     const targetObj = typeof target === "object" && target !== null ? target : null;
-    const localFull = getStoredIntervention(id) || (targetObj ? ensureInterventionDefaults(targetObj) : null);
+    const storedFull = getStoredIntervention(id);
+    const localFull = storedFull || (targetObj ? ensureInterventionDefaults(targetObj) : null);
     if (localFull) {
-      localFull._fully_loaded = true;
-      saveInterventionLocally(localFull);
+      if (storedFull || targetObj?._fully_loaded) {
+        localFull._fully_loaded = true;
+        saveInterventionLocally(localFull);
+      } else {
+        localFull._fully_loaded = false;
+      }
       setActiveIntervention(localFull);
       navigateTo(isInterventionTerminee(localFull) ? "report" : "form");
 
-      // Synchronisation transparente en arrière-plan sans bloquer ni écraser
+      // Synchronisation transparente en arrière-plan pour récupérer les photos, vidéos et champs complets des coéquipiers
       getIntervention(id)
         .then((fresh) => {
           if (!fresh) return;
-          setActiveIntervention((prev) => (prev?.id === fresh.id ? { ...prev, ...fresh, _fully_loaded: true } : prev));
+          const fullFresh = { ...fresh, _fully_loaded: true };
+          saveInterventionLocally(fullFresh);
+          setActiveIntervention((prev) => (prev?.id === fresh.id ? { ...prev, ...fullFresh } : prev));
         })
         .catch(() => {});
       return;
@@ -252,7 +339,7 @@ export default function App() {
       const listItem = interventions.find((i) => i.id === id);
       if (listItem) {
         const initial = ensureInterventionDefaults(listItem);
-        initial._fully_loaded = true;
+        initial._fully_loaded = false;
         saveInterventionLocally(initial);
         setActiveIntervention(initial);
         navigateTo(isInterventionTerminee(initial) ? "report" : "form");
@@ -277,6 +364,7 @@ export default function App() {
 
     // 2. Nettoyage local immédiat (0 ms)
     try {
+      localStorage.removeItem("fibretrack_intv_" + id);
       localStorage.removeItem("chaptech_intv_" + id);
     } catch {}
 
@@ -330,9 +418,16 @@ export default function App() {
     setPage(1);
   }
 
+  function handlePeriodFilterChange(p) {
+    setPeriodFilter(p);
+    setPage(1);
+  }
+
   function handleCloseForm(targetTab = null) {
     if (targetTab === "terminees" || targetTab === "termine") {
       goToHome("terminees");
+    } else if (targetTab === "non_traitees" || targetTab === "non_traite") {
+      goToHome("non_traitees");
     } else {
       goToHome();
     }
@@ -347,6 +442,8 @@ export default function App() {
   // Filtrage, recherche, tri et pagination des interventions pour l'accueil
   const filteredData = filterAndOrganizeInterventions(interventions, {
     activeTab,
+    historySubFilter,
+    periodFilter,
     searchQuery,
     searchTabFilter,
     technicienFilter,
@@ -370,6 +467,7 @@ export default function App() {
         intervention={activeIntervention}
         onClose={handleCloseForm}
         onFinish={handleFinish}
+        onOpenReport={openInterventionReport}
         currentUser={user.nom}
       />
     );
@@ -381,7 +479,7 @@ export default function App() {
         key={activeIntervention.id}
         intervention={activeIntervention}
         allInterventions={interventions}
-        onClose={() => goToHome("terminees")}
+        onClose={() => goToHome(activeTab)}
         onEdit={(intv) => {
           setActiveIntervention(intv);
           navigateTo("form");
@@ -544,7 +642,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* ===== CATÉGORIES PRINCIPALES (TOURNÉE DU JOUR, EN COURS, TERMINÉES) OU RÉSULTATS DE RECHERCHE ===== */}
+        {/* ===== CATÉGORIES PRINCIPALES (TOURNÉE DU JOUR, EN COURS, TERMINÉES, RAPPORT) OU RÉSULTATS DE RECHERCHE ===== */}
         {!filteredData.hasSearch ? (
           <nav className="home-category-tabs" aria-label="Catégories d'interventions">
             <button
@@ -585,6 +683,30 @@ export default function App() {
               </span>
               <span className="tab-counter tab-counter-done">{filteredData.termineesCount}</span>
             </button>
+            <button
+              type="button"
+              className={`home-tab-btn home-tab-danger ${activeTab === "non_traitees" ? "is-active" : ""}`}
+              onClick={() => handleTabChange("non_traitees")}
+              aria-selected={activeTab === "non_traitees"}
+            >
+              <span className="tab-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <IconXCircle size={15} />
+                <span>Non traitées</span>
+              </span>
+              <span className="tab-counter tab-counter-danger">{filteredData.nonTraiteesCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`home-tab-btn ${activeTab === "rapport" ? "is-active" : ""}`}
+              onClick={() => handleTabChange("rapport")}
+              aria-selected={activeTab === "rapport"}
+            >
+              <span className="tab-label" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <IconFileText size={15} />
+                <span>Rapport</span>
+              </span>
+              <span className="tab-counter tab-counter-rapport">{filteredData.rapportCount}</span>
+            </button>
           </nav>
         ) : (
           <div className="home-search-summary">
@@ -597,7 +719,7 @@ export default function App() {
                 className={`search-pill ${searchTabFilter === "all" ? "is-active" : ""}`}
                 onClick={() => handleSearchTabChange("all")}
               >
-                Tous ({filteredData.searchEnCoursCount + filteredData.searchTermineesCount})
+                Tous ({filteredData.totalItems})
               </button>
               <button
                 type="button"
@@ -615,6 +737,13 @@ export default function App() {
               </button>
               <button
                 type="button"
+                className={`search-pill ${searchTabFilter === "non_traitees" ? "is-active" : ""}`}
+                onClick={() => handleSearchTabChange("non_traitees")}
+              >
+                Non traitées ({filteredData.searchNonTraiteesCount || 0})
+              </button>
+              <button
+                type="button"
                 className="search-pill-clear"
                 onClick={handleClearSearch}
               >
@@ -624,13 +753,14 @@ export default function App() {
           </div>
         )}
 
-        {/* ===== CONTENU PRINCIPAL : TOURNÉE DU JOUR OU LISTE CLASSIQUE ===== */}
+        {/* ===== CONTENU PRINCIPAL : TOURNÉE DU JOUR, RAPPORT OU LISTE CLASSIQUE ===== */}
         {!filteredData.hasSearch && activeTab === "tournee" ? (
           <TourneeDuJourView
             interventions={interventions}
             currentUser={user?.nom || ""}
             techniciens={filteredData.techniciens}
             onOpenIntervention={openIntervention}
+            onAddNewIntervention={() => setNewDossierModalOpen(true)}
             onSaveIntervention={(updated) => {
               if (!updated?.id) return;
               // 1. Mise à jour d'état instantanée 0 ms (pour que la carte passe en cours / non traité immédiatement)
@@ -651,8 +781,91 @@ export default function App() {
             }}
             onRefresh={() => refreshInterventions(true)}
           />
+        ) : !filteredData.hasSearch && activeTab === "rapport" ? (
+          <CentralReportsView
+            interventions={interventions}
+            techniciens={filteredData.techniciens}
+            onOpenIntervention={openIntervention}
+            onOpenReport={openInterventionReport}
+            currentUser={user?.nom || ""}
+          />
         ) : (
           <>
+            {/* Filtre de période quand l'onglet Terminées est actif */}
+            {activeTab === "terminees" && !filteredData.hasSearch && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  margin: "8px 0 14px",
+                  flexWrap: "wrap",
+                  alignItems: "center",
+                  background: "#f8fafc",
+                  padding: "8px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#475569", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <IconCalendar size={14} color="#3b82f6" /> Période :
+                </span>
+                <button
+                  type="button"
+                  className={`search-pill ${periodFilter === "today" ? "is-active" : ""}`}
+                  onClick={() => handlePeriodFilterChange("today")}
+                  style={periodFilter === "today" ? { background: "#16a34a", borderColor: "#16a34a", color: "#fff" } : {}}
+                >
+                  Aujourd'hui ({filteredData.termineesTodayCount})
+                </button>
+                <button
+                  type="button"
+                  className={`search-pill ${periodFilter === "week" ? "is-active" : ""}`}
+                  onClick={() => handlePeriodFilterChange("week")}
+                  style={periodFilter === "week" ? { background: "#16a34a", borderColor: "#16a34a", color: "#fff" } : {}}
+                >
+                  Cette semaine ({filteredData.termineesWeekCount})
+                </button>
+                <button
+                  type="button"
+                  className={`search-pill ${periodFilter === "month" ? "is-active" : ""}`}
+                  onClick={() => handlePeriodFilterChange("month")}
+                  style={periodFilter === "month" ? { background: "#16a34a", borderColor: "#16a34a", color: "#fff" } : {}}
+                >
+                  Ce mois ({filteredData.termineesMonthCount})
+                </button>
+                <button
+                  type="button"
+                  className={`search-pill ${periodFilter === "all" ? "is-active" : ""}`}
+                  onClick={() => handlePeriodFilterChange("all")}
+                  style={periodFilter === "all" ? { background: "#16a34a", borderColor: "#16a34a", color: "#fff" } : {}}
+                >
+                  Toutes ({filteredData.termineesCount})
+                </button>
+              </div>
+            )}
+
+            {/* Bannière explicative quand l'onglet Non traitées est actif */}
+            {activeTab === "non_traitees" && !filteredData.hasSearch && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  margin: "8px 0 14px",
+                  alignItems: "center",
+                  background: "#fff7ed",
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #fed7aa",
+                  fontSize: 13,
+                  color: "#9a3412",
+                }}
+              >
+                <IconXCircle size={18} color="#ea580c" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, lineHeight: 1.45 }}>
+                  <strong>Dossiers non traités / inachevés :</strong> ces interventions n'ont pas abouti (client absent, tuyau SBEE bouché, non éligible…). <strong>Aucun matériel n'est déduit du stock.</strong> Cliquez sur <em>Reprendre</em> pour reprendre le raccordement.
+                </div>
+              </div>
+            )}
             {/* ===== BARRE D'OUTILS : TRI & FILTRE TECHNICIEN ===== */}
             <div className="home-filter-toolbar">
           <div className="filter-group">
@@ -746,17 +959,36 @@ export default function App() {
                   <span>Créer une intervention</span>
                 </button>
               </>
+            ) : activeTab === "non_traitees" ? (
+              <>
+                <div style={{ display: "flex", justifyContent: "center", marginBottom: 10, color: "#ea580c" }}>
+                  <IconXCircle size={38} />
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
+                  Aucun dossier non traité
+                </div>
+                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  Toutes les interventions ont été menées à terme avec succès ou sont en cours.
+                </div>
+              </>
             ) : (
               <>
                 <div style={{ display: "flex", justifyContent: "center", marginBottom: 10, color: "var(--text-muted)" }}>
                   <IconFileText size={38} />
                 </div>
                 <div style={{ fontWeight: 700, fontSize: 16, color: "var(--text)", marginBottom: 4 }}>
-                  Aucune intervention terminée
+                  Aucune intervention terminée {periodFilter !== "all" ? "pour cette période" : ""}
                 </div>
-                <div style={{ fontSize: 13, color: "var(--text-muted)" }}>
-                  Les interventions clôturées apparaîtront automatiquement ici.
+                <div style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: periodFilter !== "all" ? 12 : 0 }}>
+                  {periodFilter !== "all"
+                    ? "Aucune intervention terminée ne correspond à la période sélectionnée."
+                    : "Les interventions clôturées avec succès apparaîtront automatiquement ici."}
                 </div>
+                {periodFilter !== "all" && (
+                  <button type="button" className="btn-secondary" onClick={() => handlePeriodFilterChange("all")}>
+                    Afficher toutes les terminées ({filteredData.termineesCount})
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -768,6 +1000,8 @@ export default function App() {
                 intervention={intv}
                 onOpen={openIntervention}
                 onDelete={handleDeleteIntervention}
+                onOpenReport={openInterventionReport}
+                onReactivate={handleReactivateIntervention}
                 isOpening={openingId === intv.id}
               />
             ))}
@@ -806,7 +1040,7 @@ export default function App() {
         {/* Modal Création Nouveau Dossier */}
         {newDossierModalOpen && (
           <div className="modal-overlay" style={{ zIndex: 9999 }}>
-            <div className="modal-card" style={{ maxWidth: 460, width: "90%", padding: 24, borderRadius: 16 }}>
+            <div className="modal-card" style={{ maxWidth: 480, width: "92%", padding: 24, borderRadius: 16 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                 <div style={{ background: "#e0f2fe", color: "#0284c7", width: 42, height: 42, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <IconPlus size={22} />
@@ -842,7 +1076,7 @@ export default function App() {
                   </span>
                 </div>
 
-                <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
                   <button
                     type="button"
                     className="btn-secondary"
@@ -851,11 +1085,34 @@ export default function App() {
                     Annuler
                   </button>
                   <button
-                    type="submit"
+                    type="button"
                     className="btn-primary"
                     disabled={creatingNew}
+                    onClick={() => {
+                      const name = (newDossierName || "").trim();
+                      setNewDossierModalOpen(false);
+                      setNewDossierName("");
+                      startNewIntervention(name, { tournee: true });
+                    }}
+                    style={{ background: "#0284c7", borderColor: "#0284c7" }}
+                    title="Ajouter à la feuille de route Tournée du jour"
                   >
-                    {creatingNew ? "Création…" : "Créer le dossier"}
+                    {creatingNew ? "Création…" : "📅 Tournée du jour"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    disabled={creatingNew}
+                    onClick={() => {
+                      const name = (newDossierName || "").trim();
+                      setNewDossierModalOpen(false);
+                      setNewDossierName("");
+                      startNewIntervention(name, { tournee: false });
+                    }}
+                    style={{ background: "#16a34a", borderColor: "#16a34a" }}
+                    title="Démarrer directement l'intervention dans 'En cours'"
+                  >
+                    {creatingNew ? "Création…" : "⚡ Démarrer (En cours)"}
                   </button>
                 </div>
               </form>

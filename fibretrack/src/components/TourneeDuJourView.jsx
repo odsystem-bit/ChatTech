@@ -1,6 +1,11 @@
 import { useState, useMemo } from "react";
 import { parseTourneeListing } from "../lib/tourneeParser.js";
-import { isInterventionTerminee } from "../lib/interventionFilters.js";
+import {
+  isInterventionTerminee,
+  isInterventionNonTraitee,
+  isInterventionSupprimee,
+  isInterventionATraiterTournee,
+} from "../lib/interventionFilters.js";
 import {
   IconTruck,
   IconLock,
@@ -25,7 +30,8 @@ import {
 } from "./Icons.jsx";
 
 /**
- * Vue dédiée à la "Tournée du Jour" avec système de Cadenas professionnel et confirmation de lancement.
+ * Vue dédiée à la "Tournée du Jour" : feuille de route quotidienne contenant exclusivement
+ * les interventions restant à effectuer.
  */
 export default function TourneeDuJourView({
   interventions = [],
@@ -35,6 +41,8 @@ export default function TourneeDuJourView({
   onSaveIntervention,
   onDeleteIntervention,
   onCreateTourneeBatch,
+  onAddNewIntervention,
+  onSwitchTab,
   onRefresh,
 }) {
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -58,53 +66,56 @@ export default function TourneeDuJourView({
 
   // Modale de déclaration non traité
   const [cancelModalDossier, setCancelModalDossier] = useState(null);
-  const [cancelReason, setCancelReason] = useState("Client injoignable");
+  const [cancelReason, setCancelReason] = useState("Client injoignable (ne répond pas aux appels)");
   const [cancelCustomReason, setCancelCustomReason] = useState("");
 
-  // Filtrer les dossiers de la tournée pour la date sélectionnée
+  // Tous les dossiers planifiés pour la date sélectionnée (hors supprimés) pour les compteurs de suivi
+  const allDayDossiers = useMemo(() => {
+    return (interventions || []).filter((intv) => {
+      if (isInterventionSupprimee(intv)) return false;
+      if (intv.tournee_du_jour) {
+        return String(intv.tournee_du_jour).slice(0, 10) === selectedDate;
+      }
+      const intvDate = String(intv.date || "").slice(0, 10);
+      return intvDate === selectedDate;
+    });
+  }, [interventions, selectedDate]);
+
+  // Feuille de route : UNIQUEMENT les interventions restant à effectuer (non démarrées, non terminées, non annulées, non supprimées)
   const tourneeDossiers = useMemo(() => {
-    return (interventions || [])
-      .filter((intv) => {
-        if (!intv || intv.supprime_le || String(intv.statut || "").toLowerCase() === "supprime") return false;
-        if (intv.tournee_du_jour) {
-          return intv.tournee_du_jour === selectedDate;
-        }
-        // Fallback sur la date de création si le dossier a été créé ce jour-là
-        const intvDate = (intv.date || "").slice(0, 10);
-        return intvDate === selectedDate;
-      })
+    return allDayDossiers
+      .filter((intv) => isInterventionATraiterTournee(intv, selectedDate))
       .sort((a, b) => {
         const oA = Number(a.tournee_ordre || 9999);
         const oB = Number(b.tournee_ordre || 9999);
         if (oA !== oB) return oA - oB;
         return (a.nom_client || "").localeCompare(b.nom_client || "");
       });
-  }, [interventions, selectedDate]);
+  }, [allDayDossiers, selectedDate]);
 
-  // Statistiques de la tournée
+  // Statistiques globales de la journée
   const stats = useMemo(() => {
-    const total = tourneeDossiers.length;
+    const total = allDayDossiers.length;
     let traites = 0;
     let enCours = 0;
     let verrouilles = 0;
     let nonTraites = 0;
 
-    tourneeDossiers.forEach((d) => {
-      const s = String(d.statut || "").toLowerCase();
-      if (s === "non_traite" || s === "annule") {
+    allDayDossiers.forEach((d) => {
+      if (isInterventionNonTraitee(d)) {
         nonTraites++;
       } else if (isInterventionTerminee(d)) {
         traites++;
-      } else if (d.tournee_verrouille || s === "en_attente") {
+      } else if (isInterventionATraiterTournee(d, selectedDate)) {
         verrouilles++;
       } else {
         enCours++;
       }
     });
 
-    const percent = total > 0 ? Math.round((traites / total) * 100) : 0;
+    const percent = total > 0 ? Math.round(((traites + nonTraites) / total) * 100) : 0;
     return { total, traites, enCours, verrouilles, nonTraites, percent };
-  }, [tourneeDossiers]);
+  }, [allDayDossiers, selectedDate]);
 
   // Déverrouillage effectif d'un dossier et passage en cours
   function handleUnlockDossier(dossier, e) {
@@ -114,6 +125,7 @@ export default function TourneeDuJourView({
       tournee_verrouille: false,
       statut: "en_cours",
       modifie_le: new Date().toISOString(),
+      changed_fields: ["tournee_verrouille", "statut", "modifie_le"],
     };
     setLaunchConfirmDossier(null);
     if (onSaveIntervention) {
@@ -124,7 +136,7 @@ export default function TourneeDuJourView({
     }
   }
 
-  // Marquer un dossier comme non traité (annulé pour la journée)
+  // Marquer un dossier comme non traité (quitte la tournée et reste conservé dans l'historique)
   function handleConfirmNonTraite() {
     if (!cancelModalDossier) return;
     const finalReason = cancelReason === "Autre motif" ? cancelCustomReason.trim() : cancelReason;
@@ -134,24 +146,10 @@ export default function TourneeDuJourView({
       motif_non_traite: finalReason || "Client non joint / reporté",
       tournee_verrouille: false,
       modifie_le: new Date().toISOString(),
+      changed_fields: ["statut", "motif_non_traite", "tournee_verrouille", "modifie_le"],
     };
     setCancelModalDossier(null);
     setCancelCustomReason("");
-    if (onSaveIntervention) {
-      onSaveIntervention(updated);
-    }
-  }
-
-  // Réactiver un dossier non traité
-  function handleReactivateDossier(dossier, e) {
-    if (e && e.stopPropagation) e.stopPropagation();
-    const updated = {
-      ...dossier,
-      statut: "en_cours",
-      tournee_verrouille: false,
-      motif_non_traite: "",
-      modifie_le: new Date().toISOString(),
-    };
     if (onSaveIntervention) {
       onSaveIntervention(updated);
     }
@@ -217,7 +215,7 @@ export default function TourneeDuJourView({
               <IconTruck size={24} color="var(--primary, #2563eb)" />
             </span>
             <div>
-              <h2 className="tournee-title">Tournée du Jour</h2>
+              <h2 className="tournee-title">Tournée du Jour — Feuille de route</h2>
               <div className="tournee-date-badge">
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                   <IconCalendar size={14} />
@@ -234,7 +232,18 @@ export default function TourneeDuJourView({
             </div>
           </div>
 
-          <div className="tournee-header-actions">
+          <div className="tournee-header-actions" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {onAddNewIntervention && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => onAddNewIntervention(selectedDate)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 6, fontWeight: 700 }}
+              >
+                <IconPlus size={16} />
+                <span>Ajouter une intervention</span>
+              </button>
+            )}
             <button
               type="button"
               className="btn-tournee-import"
@@ -249,43 +258,56 @@ export default function TourneeDuJourView({
 
         {/* ===== BARRE DES COMPTEURS SYNTHÉTIQUES ===== */}
         <div className="tournee-metrics-grid">
-          <div className="tournee-metric-chip total" title="Nombre total de dossiers reçus pour la journée">
-            <span className="metric-label">Reçus (Total)</span>
-            <span className="metric-val">{String(stats.total).padStart(2, "0")}</span>
-          </div>
-          <div className="tournee-metric-chip progress" title="Dossiers déverrouillés en cours d'intervention">
-            <span className="metric-label" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-              <IconZap size={13} />
-              <span>En cours</span>
-            </span>
-            <span className="metric-val">{String(stats.enCours).padStart(2, "0")}</span>
-          </div>
-          <div className="tournee-metric-chip locked" title="Dossiers verrouillés en attente">
+          <div className="tournee-metric-chip locked" title="Interventions restant à effectuer dans la feuille de route">
             <span className="metric-label" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
               <IconLock size={13} />
-              <span>En attente</span>
+              <span>À effectuer</span>
             </span>
             <span className="metric-val">{String(stats.verrouilles).padStart(2, "0")}</span>
           </div>
-          <div className="tournee-metric-chip done" title="Dossiers terminés avec succès">
+          <div
+            className="tournee-metric-chip progress"
+            title="Cliquez pour voir les interventions en cours"
+            onClick={() => onSwitchTab && onSwitchTab("en_cours")}
+            style={{ cursor: onSwitchTab ? "pointer" : "default" }}
+          >
+            <span className="metric-label" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+              <IconZap size={13} />
+              <span>En cours ↗</span>
+            </span>
+            <span className="metric-val">{String(stats.enCours).padStart(2, "0")}</span>
+          </div>
+          <div
+            className="tournee-metric-chip done"
+            title="Cliquez pour voir les interventions terminées"
+            onClick={() => onSwitchTab && onSwitchTab("terminees", "terminees")}
+            style={{ cursor: onSwitchTab ? "pointer" : "default" }}
+          >
             <span className="metric-label" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
               <IconCheckCircle size={13} />
-              <span>Traités</span>
+              <span>Terminées ↗</span>
             </span>
             <span className="metric-val">{String(stats.traites).padStart(2, "0")}</span>
           </div>
-          {stats.nonTraites > 0 && (
-            <div className="tournee-metric-chip canceled" title="Dossiers annulés ou non traités aujourd'hui">
-              <span className="metric-label" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
-                <IconXCircle size={13} />
-                <span>Non traités</span>
-              </span>
-              <span className="metric-val">{String(stats.nonTraites).padStart(2, "0")}</span>
-            </div>
-          )}
+          <div
+            className="tournee-metric-chip canceled"
+            title="Consulter les interventions non traitées"
+            onClick={() => onSwitchTab && onSwitchTab("non_traitees")}
+            style={{ cursor: onSwitchTab ? "pointer" : "default" }}
+          >
+            <span className="metric-label" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>
+              <IconXCircle size={13} />
+              <span>Non traitées ↗</span>
+            </span>
+            <span className="metric-val">{String(stats.nonTraites).padStart(2, "0")}</span>
+          </div>
+          <div className="tournee-metric-chip total" title="Nombre total de dossiers prévus pour cette journée">
+            <span className="metric-label">Total journée</span>
+            <span className="metric-val">{String(stats.total).padStart(2, "0")}</span>
+          </div>
         </div>
 
-        {/* Jauge de progression */}
+        {/* Jauge de progression de la feuille de route */}
         {stats.total > 0 && (
           <div className="tournee-progress-wrap">
             <div className="tournee-progress-bar">
@@ -295,67 +317,127 @@ export default function TourneeDuJourView({
               />
             </div>
             <div className="tournee-progress-legend">
-              <span>{stats.traites} sur {stats.total} dossiers traités ({stats.percent}%)</span>
+              <span>
+                {stats.verrouilles === 0
+                  ? "Feuille de route terminée (0 intervention en attente)"
+                  : `${stats.verrouilles} intervention${stats.verrouilles > 1 ? "s" : ""} restant à effectuer`}
+              </span>
               <span className="legend-highlight">
-                {stats.traites === stats.total ? "Tournée 100% finalisée" : `${stats.total - stats.traites} restant(s)`}
+                {stats.traites} terminée(s) • {stats.enCours} en cours{stats.nonTraites > 0 ? ` • ${stats.nonTraites} non traitée(s)` : ""}
               </span>
             </div>
           </div>
         )}
       </div>
 
-      {/* ===== LISTE DES DOSSIERS DE LA TOURNÉE ===== */}
+      {/* ===== LISTE DES INTERVENTIONS À EFFECTUER (FEUILLE DE ROUTE EXCLUSIVE) ===== */}
       {tourneeDossiers.length === 0 ? (
         <div className="tournee-empty-card">
-          <div className="empty-icon" style={{ display: "inline-flex", justifyContent: "center", alignItems: "center", color: "var(--primary)" }}>
-            <IconTruck size={48} />
+          <div className="empty-icon" style={{ display: "inline-flex", justifyContent: "center", alignItems: "center", color: stats.total > 0 ? "#16a34a" : "var(--primary)" }}>
+            {stats.total > 0 ? <IconCheckCircle size={48} /> : <IconTruck size={48} />}
           </div>
-          <h3>Aucun dossier planifié pour cette journée</h3>
-          <p>
-            Vous n&apos;avez pas encore importé la liste des raccordements confiés pour le{" "}
-            <strong>{formattedDateFR}</strong>.
-          </p>
-          <button
-            type="button"
-            className="btn-primary btn-large"
-            onClick={() => setImportModalOpen(true)}
-            style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 8 }}
-          >
-            <IconClipboardList size={18} />
-            <span>Coller le listing du jour (Import Express)</span>
-          </button>
+          {stats.total > 0 ? (
+            <>
+              <h3>Feuille de route du jour vide — Toutes les interventions ont été prises en charge</h3>
+              <p style={{ maxWidth: 540, margin: "8px auto 14px" }}>
+                Aucune intervention ne reste en attente pour le <strong>{formattedDateFR}</strong>. Les dossiers démarrés sont dans{" "}
+                <strong>En cours ({stats.enCours})</strong>, les dossiers achevés dans <strong>Terminées ({stats.traites})</strong>
+                {stats.nonTraites > 0 ? `, et les dossiers reportés dans l'historique Non traitées (${stats.nonTraites})` : ""}.
+                Vous pouvez préparer une nouvelle tournée ou ajouter de nouvelles interventions.
+              </p>
+              <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 10 }}>
+                {stats.enCours > 0 && onSwitchTab && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => onSwitchTab("en_cours")}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <IconZap size={16} />
+                    <span>Voir En cours ({stats.enCours})</span>
+                  </button>
+                )}
+                {stats.traites > 0 && onSwitchTab && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => onSwitchTab("terminees", "terminees")}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <IconCheckCircle size={16} />
+                    <span>Voir Terminées ({stats.traites})</span>
+                  </button>
+                )}
+                {stats.nonTraites > 0 && onSwitchTab && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => onSwitchTab("non_traitees")}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <IconXCircle size={16} />
+                    <span>Voir Non traitées ({stats.nonTraites})</span>
+                  </button>
+                )}
+                {onSwitchTab && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => onSwitchTab("rapport")}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+                  >
+                    <IconFileText size={16} />
+                    <span>Ouvrir l&apos;onglet Rapport</span>
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <h3>Aucune intervention à effectuer pour cette journée</h3>
+              <p>
+                La feuille de route du <strong>{formattedDateFR}</strong> est prête à recevoir les interventions de la journée.
+              </p>
+            </>
+          )}
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", marginTop: 14 }}>
+            {onAddNewIntervention && (
+              <button
+                type="button"
+                className="btn-secondary btn-large"
+                onClick={() => onAddNewIntervention(selectedDate)}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                <IconPlus size={18} />
+                <span>Créer une intervention</span>
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn-primary btn-large"
+              onClick={() => setImportModalOpen(true)}
+              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            >
+              <IconClipboardList size={18} />
+              <span>Coller le listing du jour (Import Express)</span>
+            </button>
+          </div>
         </div>
       ) : (
         <div className="tournee-dossiers-list">
           {tourneeDossiers.map((dossier, idx) => {
-            const isDone = isInterventionTerminee(dossier);
-            const isCanceled = dossier.statut === "non_traite" || dossier.statut === "annule";
-            const isLocked = Boolean(dossier.tournee_verrouille || dossier.statut === "en_attente") && !isDone && !isCanceled;
-            const isInProgress = !isLocked && !isDone && !isCanceled;
             const ordreNum = dossier.tournee_ordre || idx + 1;
 
             const handleCardClick = () => {
-              if (isLocked) {
-                setLaunchConfirmDossier(dossier);
-              } else if (isInProgress || isDone) {
-                if (onOpenIntervention) onOpenIntervention(dossier);
-              }
+              setLaunchConfirmDossier(dossier);
             };
 
             return (
               <div
                 key={dossier.id}
-                className={`tournee-card ${
-                  isDone
-                    ? "status-done"
-                    : isCanceled
-                    ? "status-canceled"
-                    : isLocked
-                    ? "status-locked"
-                    : "status-active"
-                }`}
+                className="tournee-card status-locked"
                 onClick={handleCardClick}
-                style={{ cursor: isCanceled ? "default" : "pointer" }}
+                style={{ cursor: "pointer" }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
@@ -373,30 +455,10 @@ export default function TourneeDuJourView({
                   </div>
 
                   <div className="tournee-card-status-badge">
-                    {isDone && (
-                      <span className="badge badge-done" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <IconCheckCircle size={13} />
-                        <span>Traité</span>
-                      </span>
-                    )}
-                    {isCanceled && (
-                      <span className="badge badge-danger" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <IconXCircle size={13} />
-                        <span>Non traité {dossier.motif_non_traite ? `(${dossier.motif_non_traite})` : ""}</span>
-                      </span>
-                    )}
-                    {isLocked && (
-                      <span className="badge badge-locked" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <IconLock size={13} />
-                        <span>Verrouillé</span>
-                      </span>
-                    )}
-                    {isInProgress && (
-                      <span className="badge badge-progress" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                        <IconZap size={13} />
-                        <span>EN COURS</span>
-                      </span>
-                    )}
+                    <span className="badge badge-locked" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      <IconLock size={13} />
+                      <span>À effectuer</span>
+                    </span>
                   </div>
                 </div>
 
@@ -447,75 +509,24 @@ export default function TourneeDuJourView({
 
                 {/* Actions de la carte */}
                 <div className="tournee-card-actions" onClick={(e) => e.stopPropagation()}>
-                  {isInProgress && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn-action-primary"
-                        onClick={() => onOpenIntervention && onOpenIntervention(dossier)}
-                        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                      >
-                        <IconPlay size={15} />
-                        <span>Ouvrir l&apos;intervention</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-action-danger"
-                        onClick={() => setCancelModalDossier(dossier)}
-                        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                      >
-                        <IconXCircle size={15} />
-                        <span>Non traité</span>
-                      </button>
-                    </>
-                  )}
-
-                  {isLocked && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn-action-unlock"
-                        onClick={() => setLaunchConfirmDossier(dossier)}
-                        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                      >
-                        <IconUnlock size={15} />
-                        <span>Lancer cette intervention</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-action-danger"
-                        onClick={() => setCancelModalDossier(dossier)}
-                        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                      >
-                        <IconXCircle size={15} />
-                        <span>Non traité</span>
-                      </button>
-                    </>
-                  )}
-
-                  {isDone && (
-                    <button
-                      type="button"
-                      className="btn-action-secondary"
-                      onClick={() => onOpenIntervention && onOpenIntervention(dossier)}
-                      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                    >
-                      <IconFileText size={15} />
-                      <span>Consulter le rapport</span>
-                    </button>
-                  )}
-
-                  {isCanceled && (
-                    <button
-                      type="button"
-                      className="btn-action-reactivate"
-                      onClick={(e) => handleReactivateDossier(dossier, e)}
-                      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                    >
-                      <IconRefresh size={15} />
-                      <span>Réactiver pour aujourd&apos;hui</span>
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    className="btn-action-unlock"
+                    onClick={() => setLaunchConfirmDossier(dossier)}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                  >
+                    <IconUnlock size={15} />
+                    <span>Démarrer l&apos;intervention</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-action-danger"
+                    onClick={() => setCancelModalDossier(dossier)}
+                    style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                  >
+                    <IconXCircle size={15} />
+                    <span>Non traité</span>
+                  </button>
 
                   {/* Bouton de suppression définitive sur chaque carte */}
                   <button

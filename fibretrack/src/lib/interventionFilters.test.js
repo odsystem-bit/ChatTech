@@ -280,3 +280,180 @@ test("Tournée du jour : 5 dossiers importés verrouillés donnent 0 en cours", 
   assert.equal(resApresLancement.items[0].id, "d1");
 });
 
+test("Scénario 1 & 2 : création dans Tournée du jour, puis passage automatique dans En cours lors du démarrage", () => {
+  const today = "2026-10-20";
+  const intv = {
+    id: "test-flow-1",
+    nom_client: "Koffi Tournee",
+    statut: "en_attente",
+    tournee_du_jour: today,
+    tournee_verrouille: true,
+  };
+
+  // 1. Apparaît dans Tournée du jour
+  const resTournee = filterAndOrganizeInterventions([intv], { activeTab: "tournee", targetDate: today });
+  assert.equal(resTournee.tourneeTodayCount, 1);
+  assert.equal(resTournee.enCoursCount, 0);
+  assert.equal(resTournee.termineesCount, 0);
+
+  // 2. Démarrage : passe en statut en_cours
+  intv.statut = "en_cours";
+  intv.tournee_verrouille = false;
+
+  // L'intervention quitte automatiquement Tournée du jour et passe dans En cours
+  const resApresDemarrage = filterAndOrganizeInterventions([intv], { activeTab: "tournee", targetDate: today });
+  assert.equal(resApresDemarrage.tourneeTodayCount, 0, "Doit quitter la feuille de route Tournée du jour");
+  assert.equal(resApresDemarrage.enCoursCount, 1, "Doit être comptée dans En cours");
+
+  const resOngletEnCours = filterAndOrganizeInterventions([intv], { activeTab: "en_cours" });
+  assert.equal(resOngletEnCours.items.length, 1);
+  assert.equal(resOngletEnCours.items[0].id, "test-flow-1");
+});
+
+test("Scénario 5 : intervention terminée quitte En cours et passe dans Terminées sans perte de données", () => {
+  const intv = {
+    id: "test-flow-2",
+    nom_client: "Mme Mensah",
+    statut: "termine",
+    date_cloture: "2026-10-20T16:00:00Z",
+    nom_technicien: "Stanislas",
+    whatsapp_photos: [{ id: "p1", slot: "fat", url: "https://example.com/p1.jpg" }],
+    videos_terrain: [{ id: "v1", url: "https://example.com/v1.mp4" }],
+  };
+
+  const resEnCours = filterAndOrganizeInterventions([intv], { activeTab: "en_cours" });
+  assert.equal(resEnCours.enCoursCount, 0);
+  assert.equal(resEnCours.items.length, 0);
+
+  const resTerminees = filterAndOrganizeInterventions([intv], { activeTab: "terminees" });
+  assert.equal(resTerminees.termineesCount, 1);
+  assert.equal(resTerminees.items.length, 1);
+  assert.equal(resTerminees.items[0].whatsapp_photos.length, 1);
+  assert.equal(resTerminees.items[0].videos_terrain.length, 1);
+});
+
+test("Scénario 6 : intervention déclarée non traitée quitte Tournée du jour avec statut et motif conservés", () => {
+  const today = "2026-10-20";
+  const intvNonTraitee = {
+    id: "test-nt-1",
+    nom_client: "Client Absent",
+    statut: "non_traite",
+    motif_non_traite: "Client injoignable après 3 appels",
+    tournee_du_jour: today,
+    tournee_verrouille: false,
+    date: "2026-10-20 09:00:00",
+  };
+
+  // Quitte la feuille de route du jour
+  const resTournee = filterAndOrganizeInterventions([intvNonTraitee], { activeTab: "tournee", targetDate: today });
+  assert.equal(resTournee.tourneeTodayCount, 0, "Doit quitter la feuille de route Tournée du jour");
+
+  // N'apparaît pas dans En cours
+  const resEnCours = filterAndOrganizeInterventions([intvNonTraitee], { activeTab: "en_cours" });
+  assert.equal(resEnCours.enCoursCount, 0);
+  assert.equal(resEnCours.items.length, 0);
+
+  // Conservée dans l'historique sous le filtre non_traitees
+  const resHistoryNT = filterAndOrganizeInterventions([intvNonTraitee], { activeTab: "terminees", historySubFilter: "non_traitees" });
+  assert.equal(resHistoryNT.nonTraiteesCount, 1);
+  assert.equal(resHistoryNT.items.length, 1);
+  assert.equal(resHistoryNT.items[0].motif_non_traite, "Client injoignable après 3 appels");
+});
+
+test("Scénario 7 : intervention supprimée ne s'affiche plus dans Tournée du jour", () => {
+  const today = "2026-10-20";
+  const intvSupprimee = {
+    id: "test-del-2",
+    nom_client: "Dossier Annulé",
+    statut: "supprime",
+    supprime_le: "2026-10-20T11:00:00Z",
+    tournee_du_jour: today,
+  };
+
+  const resTournee = filterAndOrganizeInterventions([intvSupprimee], { activeTab: "tournee", targetDate: today });
+  assert.equal(resTournee.tourneeTodayCount, 0);
+  assert.equal(resTournee.items.length, 0);
+});
+
+test("Scénario 8 : fin de journée lorsque toutes les interventions sont traitées (Tournée vide, 0 perte de données)", () => {
+  const today = "2026-10-20";
+  const dossiersJournee = [
+    { id: "j1", nom_client: "Client Terminé 1", statut: "termine", tournee_du_jour: today },
+    { id: "j2", nom_client: "Client Terminé 2", statut: "termine", tournee_du_jour: today },
+    { id: "j3", nom_client: "Client Non Traité", statut: "non_traite", motif_non_traite: "Port saturé", tournee_du_jour: today },
+  ];
+
+  // La tournée du jour est vide
+  const resTournee = filterAndOrganizeInterventions(dossiersJournee, { activeTab: "tournee", targetDate: today });
+  assert.equal(resTournee.tourneeTodayCount, 0, "La tournée du jour doit être vide en fin de journée");
+  assert.equal(resTournee.items.length, 0);
+
+  // Toutes les données restent conservées
+  assert.equal(resTournee.termineesCount, 2);
+  assert.equal(resTournee.nonTraiteesCount, 1);
+  assert.equal(resTournee.rapportCount, 3, "Toutes les interventions sont accessibles dans l'onglet Rapport");
+});
+
+test("Scénario 9 : Onglet Rapport centralise toutes les interventions avec leurs données", () => {
+  const dossiers = [
+    { id: "rep-1", nom_client: "ALPHA FIBRE", mobile: "97112233", statut: "termine", msan: "SEM-PL01", fat_ref: "FAT-10" },
+    { id: "rep-2", nom_client: "BETA CONSULTING", mobile: "96445566", statut: "en_cours", msan: "SEM-PL02", fat_ref: "FAT-20" },
+  ];
+
+  const resRapport = filterAndOrganizeInterventions(dossiers, { activeTab: "rapport" });
+  assert.equal(resRapport.rapportCount, 2);
+  assert.equal(resRapport.items.length, 2);
+
+  // Recherche par MSAN/FAT
+  const resSearch = filterAndOrganizeInterventions(dossiers, { activeTab: "rapport", searchQuery: "SEM-PL02" });
+  assert.equal(resSearch.items.length, 1);
+  assert.equal(resSearch.items[0].id, "rep-2");
+});
+
+test("Scénario 10 : Onglet dédié Non traitées et séparation absolue de Terminées", () => {
+  const mixed = [
+    { id: "t1", nom_client: "Réussi 1", statut: "termine" },
+    { id: "t2", nom_client: "Réussi 2", statut: "termine" },
+    { id: "nt1", nom_client: "Échec 1", statut: "non_traite", motif_non_traite: "Client absent" },
+    { id: "nt2", nom_client: "Échec 2", statut: "non_traite", motif_non_traite: "Tuyau bouché" },
+  ];
+
+  // Onglet Terminées : STRICTEMENT QUE les 2 réussies
+  const resTerm = filterAndOrganizeInterventions(mixed, { activeTab: "terminees" });
+  assert.equal(resTerm.termineesCount, 2);
+  assert.equal(resTerm.items.length, 2);
+  assert.ok(resTerm.items.every((i) => i.statut === "termine"));
+
+  // Onglet Non traitées : STRICTEMENT QUE les 2 non traitées
+  const resNT = filterAndOrganizeInterventions(mixed, { activeTab: "non_traitees" });
+  assert.equal(resNT.nonTraiteesCount, 2);
+  assert.equal(resNT.items.length, 2);
+  assert.ok(resNT.items.every((i) => i.statut === "non_traite"));
+  assert.equal(resNT.items[0].motif_non_traite, "Client absent");
+});
+
+test("Scénario 11 : Filtre temporel dans Terminées (Aujourd'hui, Cette semaine, Ce mois, Toutes)", () => {
+  const now = new Date();
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} 10:00:00`;
+  
+  // Date de 2 mois plus tôt
+  const pastDate = new Date(now.getFullYear(), now.getMonth() - 2, 5, 10, 0, 0);
+  const pastStr = `${pastDate.getFullYear()}-${String(pastDate.getMonth() + 1).padStart(2, "0")}-${String(pastDate.getDate()).padStart(2, "0")} 10:00:00`;
+
+  const pool = [
+    { id: "today-1", nom_client: "Client Jour", statut: "termine", date: todayStr },
+    { id: "past-1", nom_client: "Client Passé", statut: "termine", date: pastStr },
+  ];
+
+  const resAll = filterAndOrganizeInterventions(pool, { activeTab: "terminees", periodFilter: "all" });
+  assert.equal(resAll.items.length, 2);
+  assert.equal(resAll.termineesTodayCount, 1);
+  assert.equal(resAll.termineesCount, 2);
+
+  const resToday = filterAndOrganizeInterventions(pool, { activeTab: "terminees", periodFilter: "today" });
+  assert.equal(resToday.items.length, 1);
+  assert.equal(resToday.items[0].id, "today-1");
+});
+
+
+

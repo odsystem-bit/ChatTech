@@ -6,14 +6,136 @@ const DEFAULT_CONFIG = {
   apiUrl: "https://fibretrack.mantota.com/api/index.php",
   apiCode: "9999",
   autoSync: true,
+  autoPilotEnabled: true,
   widgetVisible: true,
   lastSyncTime: null,
 };
 
+// Cache LRU en mémoire pour les médias (évite les re-téléchargements et l'épuisement RAM/CPU)
+const MEDIA_CACHE_MAX_ITEMS = 40;
+const mediaDataUrlCache = new Map();
+const inFlightMediaFetches = new Map();
+let lastSavedInterventionFingerprint = "";
+
+function computeInterventionFingerprint(item) {
+  if (!item || typeof item !== "object" || !item.id) return "";
+  const wa = Array.isArray(item.whatsapp_photos)
+    ? item.whatsapp_photos.map((p) => `${p?.id || ""}:${p?.slot || ""}:${(p?.url || "").slice(-32)}`).join("|")
+    : String(item.whatsapp_photos || "");
+  const gps = Array.isArray(item.points_gps)
+    ? item.points_gps.map((p) => `${p?.id || ""}:${p?.type || ""}:${p?.numero || ""}:${p?.lat || ""}:${p?.lng || ""}:${(p?.photo || "").slice(-24)}`).join("|")
+    : String(item.points_gps || "");
+  const mat = item.materiel_pose && typeof item.materiel_pose === "object"
+    ? JSON.stringify(item.materiel_pose)
+    : String(item.materiel_pose || "");
+  return [
+    String(item.id),
+    String(item.updated_at || item.modifie_le || ""),
+    String(item.statut || ""),
+    String(item.nom_client || item.nom_dossier || ""),
+    String(item.fat_ref || ""),
+    String(item.port || ""),
+    String(item.ont_sn || item.sn || ""),
+    String(item.depart_m ?? ""),
+    String(item.arrivee_m ?? ""),
+    String(item.puissance_fat_dbm ?? ""),
+    String(item.puissance_pto_dbm ?? ""),
+    wa,
+    gps,
+    mat,
+  ].join("::");
+}
+
+function mergeLightWithExistingIntervention(incoming, existing) {
+  if (!incoming || !existing || String(incoming.id) !== String(existing.id)) {
+    return incoming;
+  }
+  const merged = { ...existing, ...incoming };
+
+  const incWa = Array.isArray(incoming.whatsapp_photos) ? incoming.whatsapp_photos : null;
+  const exWa = Array.isArray(existing.whatsapp_photos) ? existing.whatsapp_photos : null;
+  if (exWa && exWa.length > 0) {
+    if (!incWa || incWa.length === 0) {
+      merged.whatsapp_photos = exWa;
+    } else {
+      const exById = new Map(exWa.filter((p) => p && p.id).map((p) => [String(p.id), p]));
+      merged.whatsapp_photos = incWa.map((p) => {
+        if (!p) return p;
+        if (!p.url && p.id && exById.has(String(p.id))) {
+          return { ...exById.get(String(p.id)), ...p, url: exById.get(String(p.id)).url };
+        }
+        return p;
+      });
+    }
+  }
+
+  const incGps = Array.isArray(incoming.points_gps) ? incoming.points_gps : null;
+  const exGps = Array.isArray(existing.points_gps) ? existing.points_gps : null;
+  if (exGps && exGps.length > 0) {
+    if (!incGps || incGps.length === 0) {
+      merged.points_gps = exGps;
+    } else {
+      const exByKey = new Map(
+        exGps
+          .filter(Boolean)
+          .map((pt) => [String(pt.id || `${pt.type || ""}_${pt.numero || ""}`), pt])
+      );
+      merged.points_gps = incGps.map((pt) => {
+        if (!pt) return pt;
+        const k = String(pt.id || `${pt.type || ""}_${pt.numero || ""}`);
+        if (!pt.photo && exByKey.has(k) && exByKey.get(k).photo) {
+          return { ...exByKey.get(k), ...pt, photo: exByKey.get(k).photo };
+        }
+        return pt;
+      });
+    }
+  }
+
+  return merged;
+}
+
+async function saveActiveInterventionIfChanged(item, options = {}) {
+  if (!item || !item.id) return { changed: false, item: null };
+  const stored = await chrome.storage.local.get(["activeIntervention"]);
+  const existing = stored.activeIntervention || null;
+  const merged = options.allowOverwritePhotos ? item : mergeLightWithExistingIntervention(item, existing);
+  const newFp = computeInterventionFingerprint(merged);
+  const oldFp = existing ? computeInterventionFingerprint(existing) : "";
+
+  if (newFp && (newFp === oldFp || newFp === lastSavedInterventionFingerprint)) {
+    lastSavedInterventionFingerprint = newFp;
+    return { changed: false, item: merged };
+  }
+
+  lastSavedInterventionFingerprint = newFp;
+  await chrome.storage.local.set({ activeIntervention: merged });
+  if (options.broadcast) {
+    broadcastActiveIntervention(merged, options.excludeTabId ?? null);
+  }
+  return { changed: true, item: merged };
+}
+
 // Initialisation des réglages à l'installation
 chrome.runtime.onInstalled.addListener(async () => {
-  const existing = await chrome.storage.local.get(["apiUrl", "apiCode", "widgetVisible"]);
-  const initial = { ...DEFAULT_CONFIG, ...existing };
+  const existing = await chrome.storage.local.get([
+    "apiUrl",
+    "apiCode",
+    "widgetVisible",
+    "autoPilotEnabled",
+    "chaptech_autopilot_enabled",
+  ]);
+  const resolvedAutoPilot =
+    existing.chaptech_autopilot_enabled !== undefined
+      ? Boolean(existing.chaptech_autopilot_enabled)
+      : existing.autoPilotEnabled !== undefined
+        ? Boolean(existing.autoPilotEnabled)
+        : DEFAULT_CONFIG.autoPilotEnabled;
+  const initial = {
+    ...DEFAULT_CONFIG,
+    ...existing,
+    autoPilotEnabled: resolvedAutoPilot,
+    chaptech_autopilot_enabled: resolvedAutoPilot,
+  };
   await chrome.storage.local.set(initial);
   console.log("[CelPros Background] Extension installée / mise à jour. Configuration initiale:", initial);
 });
@@ -24,14 +146,23 @@ async function getConfig() {
     "apiUrl",
     "apiCode",
     "autoSync",
+    "autoPilotEnabled",
+    "chaptech_autopilot_enabled",
     "widgetVisible",
     "lastSyncTime",
     "activeIntervention",
   ]);
+  const autoPilotEnabled =
+    stored.chaptech_autopilot_enabled !== undefined
+      ? Boolean(stored.chaptech_autopilot_enabled)
+      : stored.autoPilotEnabled !== undefined
+        ? Boolean(stored.autoPilotEnabled)
+        : DEFAULT_CONFIG.autoPilotEnabled;
   return {
     apiUrl: stored.apiUrl || DEFAULT_CONFIG.apiUrl,
     apiCode: stored.apiCode || DEFAULT_CONFIG.apiCode,
     autoSync: stored.autoSync ?? DEFAULT_CONFIG.autoSync,
+    autoPilotEnabled,
     widgetVisible: stored.widgetVisible ?? DEFAULT_CONFIG.widgetVisible,
     lastSyncTime: stored.lastSyncTime || null,
     activeIntervention: stored.activeIntervention || null,
@@ -41,6 +172,7 @@ async function getConfig() {
 // Construction des en-têtes d'authentification sans cache
 function getAuthHeaders(apiCode) {
   const headers = {
+    "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "Pragma": "no-cache",
@@ -52,14 +184,18 @@ function getAuthHeaders(apiCode) {
   return headers;
 }
 
-// Construction des URLs d'action API avec cache-busting strict (_t=timestamp)
-function formatApiActionUrl(baseUrl, action) {
+// Construction des URLs d'action API avec cache-busting strict (_t=timestamp) et user_code
+function formatApiActionUrl(baseUrl, action, apiCode = null) {
   let clean = (baseUrl || DEFAULT_CONFIG.apiUrl).trim().replace(/\/+$/, "");
   if (!clean.includes(".php") && !clean.includes("?")) {
     clean = `${clean}/index.php`;
   }
   const sep = clean.includes("?") ? "&" : "?";
-  return `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
+  let url = `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
+  if (apiCode) {
+    url += `&user_code=${encodeURIComponent(String(apiCode).trim())}`;
+  }
+  return url;
 }
 
 // Diffusion sécurisée de l'intervention active vers tous les onglets CelPros/FAT/Démo
@@ -99,7 +235,7 @@ async function testConnection(customConfig = null) {
   const apiCode = (config.apiCode || DEFAULT_CONFIG.apiCode).trim();
 
   try {
-    const url = formatApiActionUrl(apiUrl, "interventions_list_light");
+    const url = formatApiActionUrl(apiUrl, "interventions_list_light", apiCode);
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
@@ -134,7 +270,7 @@ async function testConnection(customConfig = null) {
 // Récupération de la liste des interventions (light) avec tri et fallback cache
 async function fetchInterventionsList(forceFresh = false) {
   const config = await getConfig();
-  const url = formatApiActionUrl(config.apiUrl, "interventions_list_light");
+  const url = formatApiActionUrl(config.apiUrl, "interventions_list_light", config.apiCode);
 
   try {
     const res = await fetch(url, {
@@ -211,10 +347,10 @@ async function fetchInterventionsList(forceFresh = false) {
 }
 
 // Récupération complète des détails d'une intervention avec cache-busting
-async function fetchInterventionDetails(id, forceFresh = false) {
+async function fetchInterventionDetails(id, forceFresh = false, options = {}) {
   if (!id) throw new Error("ID d'intervention manquant");
   const config = await getConfig();
-  const url = formatApiActionUrl(config.apiUrl, "intervention_get");
+  const url = formatApiActionUrl(config.apiUrl, "intervention_get", config.apiCode);
 
   try {
     const res = await fetch(url, {
@@ -235,10 +371,15 @@ async function fetchInterventionDetails(id, forceFresh = false) {
 
     const item = await res.json();
     if (!item || !item.id) throw new Error("Fiche introuvable");
-    try {
-      await chrome.storage.local.set({ activeIntervention: item });
-    } catch (storErr) {
-      console.warn("[CelPros Background] Erreur sauvegarde activeIntervention dans storage:", storErr);
+    if (options.saveToStorage !== false) {
+      try {
+        await saveActiveInterventionIfChanged(item, {
+          allowOverwritePhotos: true,
+          broadcast: Boolean(options.broadcast),
+        });
+      } catch (storErr) {
+        console.warn("[CelPros Background] Erreur sauvegarde activeIntervention dans storage:", storErr);
+      }
     }
     return item;
   } catch (err) {
@@ -285,40 +426,125 @@ function isInterventionOutdated(lastKnown, serverUpdatedAt) {
   return sStr !== lStr;
 }
 
-// Téléchargement sécurisé d'un média (photo) en tâche de fond pour contourner CORS & CSP
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  const CHUNK_SIZE = 0x8000; // 32KB chunks — évite le blocage CPU O(N²) et le dépassement de pile
+  const chunks = [];
+  for (let i = 0; i < len; i += CHUNK_SIZE) {
+    chunks.push(String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK_SIZE)));
+  }
+  const binary = chunks.join("");
+  return typeof btoa !== "undefined" ? btoa(binary) : Buffer.from(binary, "binary").toString("base64");
+}
+
+function setCachedMediaDataUrl(key, dataUrl) {
+  if (!key || !dataUrl) return;
+  if (mediaDataUrlCache.has(key)) {
+    mediaDataUrlCache.delete(key);
+  } else if (mediaDataUrlCache.size >= MEDIA_CACHE_MAX_ITEMS) {
+    const oldestKey = mediaDataUrlCache.keys().next().value;
+    if (oldestKey !== undefined) mediaDataUrlCache.delete(oldestKey);
+  }
+  mediaDataUrlCache.set(key, dataUrl);
+}
+
+// Téléchargement sécurisé d'un média (photo) en tâche de fond pour contourner CORS, CSP et erreurs HTTP 403
 async function fetchMediaAsDataUrl(mediaUrl) {
   if (!mediaUrl || typeof mediaUrl !== "string") {
     throw new Error("URL de média invalide");
   }
-  let url = mediaUrl.trim();
-  if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    const config = await getConfig();
-    const base = config.apiUrl ? config.apiUrl.replace(/\/index\.php.*$/, "") : "https://fibretrack.mantota.com/api";
-    url = `${base.replace(/\/+$/, "")}/${url.replace(/^\/+/, "")}`;
+  const trimmed = mediaUrl.trim();
+  if (trimmed.startsWith("data:")) {
+    return trimmed;
+  }
+  if (mediaDataUrlCache.has(trimmed)) {
+    return mediaDataUrlCache.get(trimmed);
+  }
+  if (inFlightMediaFetches.has(trimmed)) {
+    return inFlightMediaFetches.get(trimmed);
   }
 
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`Échec HTTP ${res.status} lors de la récupération du média`);
+  const fetchPromise = (async () => {
+    const config = await getConfig();
+    let url = trimmed;
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      const base = config.apiUrl ? config.apiUrl.replace(/\/index\.php.*$/, "") : "https://fibretrack.mantota.com/api";
+      url = `${base.replace(/\/+$/, "")}/${url.replace(/^\/+/, "")}`;
+    }
+
+    let res = null;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        cache: "force-cache",
+        headers: {
+          "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+          ...(config.apiCode ? { "X-User-Code": String(config.apiCode).trim() } : {}),
+        },
+      });
+    } catch (directErr) {
+      res = null;
+    }
+
+    // Fallback via proxy API authentifié si le serveur statique retourne 403/404 ou bloque l'origine de l'extension
+    if (!res || !res.ok) {
+      let relPath = trimmed;
+      try {
+        if (relPath.startsWith("http://") || relPath.startsWith("https://")) {
+          relPath = new URL(relPath).pathname;
+        }
+      } catch (e) {
+        // Conserver relPath tel quel
+      }
+      relPath = relPath.replace(/^\/+/, "").replace(/^api\//, "");
+      const proxyUrl = `${formatApiActionUrl(config.apiUrl, "photo_get", config.apiCode)}&format=json&path=${encodeURIComponent(relPath)}`;
+      const proxyRes = await fetch(proxyUrl, {
+        method: "GET",
+        cache: "no-store",
+        headers: getAuthHeaders(config.apiCode),
+      });
+      if (proxyRes.ok) {
+        const contentType = proxyRes.headers.get("content-type") || "";
+        if (contentType.includes("application/json")) {
+          const json = await proxyRes.json();
+          if (json && json.dataUrl && String(json.dataUrl).startsWith("data:")) {
+            setCachedMediaDataUrl(trimmed, json.dataUrl);
+            return json.dataUrl;
+          }
+        } else {
+          res = proxyRes;
+        }
+      }
+    }
+
+    if (!res || !res.ok) {
+      const status = res ? res.status : "NetworkError";
+      throw new Error(`Échec HTTP ${status} lors de la récupération du média`);
+    }
+
+    const blob = await res.blob();
+    const buffer = await blob.arrayBuffer();
+    const base64 = arrayBufferToBase64(buffer);
+    const mimeType = blob.type && blob.type.startsWith("image/") ? blob.type : "image/jpeg";
+    const dataUrl = `data:${mimeType};base64,${base64}`;
+    setCachedMediaDataUrl(trimmed, dataUrl);
+    return dataUrl;
+  })();
+
+  inFlightMediaFetches.set(trimmed, fetchPromise);
+  try {
+    return await fetchPromise;
+  } finally {
+    inFlightMediaFetches.delete(trimmed);
   }
-  const blob = await res.blob();
-  const buffer = await blob.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const len = bytes.byteLength;
-  for (let i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  const base64 = typeof btoa !== "undefined" ? btoa(binary) : Buffer.from(binary, "binary").toString("base64");
-  const mimeType = blob.type || "image/jpeg";
-  return `data:${mimeType};base64,${base64}`;
 }
 
 // Vérification légère de mise à jour d'intervention en cours (Live update)
 async function checkForUpdates(id, lastKnownUpdatedAt = null) {
   if (!id) throw new Error("ID manquant pour vérification");
   const config = await getConfig();
-  const url = formatApiActionUrl(config.apiUrl, "intervention_updated_at");
+  const url = formatApiActionUrl(config.apiUrl, "intervention_updated_at", config.apiCode);
 
   const res = await fetch(url, {
     method: "POST",
@@ -342,9 +568,7 @@ async function checkForUpdates(id, lastKnownUpdatedAt = null) {
   let freshItem = null;
 
   if (hasChanged) {
-    freshItem = await fetchInterventionDetails(id, true);
-    await chrome.storage.local.set({ activeIntervention: freshItem });
-    broadcastActiveIntervention(freshItem);
+    freshItem = await fetchInterventionDetails(id, true, { saveToStorage: true, broadcast: false });
     fetchInterventionsList(true).catch(() => {});
   }
 
@@ -357,7 +581,8 @@ async function checkForUpdates(id, lastKnownUpdatedAt = null) {
 
 // Routeur de messages inter-processus (Content Script <-> Popup <-> Background)
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  const { action, payload } = request || {};
+  const action = request?.action || request?.type;
+  const payload = request?.payload !== undefined ? request.payload : request?.data;
 
   switch (action) {
     case "GET_CONFIG":
@@ -366,12 +591,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
 
-    case "SAVE_CONFIG":
+    case "SAVE_CONFIG": {
+      const nextPayload = { ...(payload || {}) };
+      if (nextPayload.autoPilotEnabled !== undefined) {
+        nextPayload.chaptech_autopilot_enabled = Boolean(nextPayload.autoPilotEnabled);
+      } else if (nextPayload.chaptech_autopilot_enabled !== undefined) {
+        nextPayload.autoPilotEnabled = Boolean(nextPayload.chaptech_autopilot_enabled);
+      }
       chrome.storage.local
-        .set(payload || {})
+        .set(nextPayload)
         .then(() => sendResponse({ ok: true }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
+    }
+
+    case "SET_AUTOPILOT_STATE": {
+      const enabled = Boolean(payload?.enabled ?? payload);
+      chrome.storage.local
+        .set({ autoPilotEnabled: enabled, chaptech_autopilot_enabled: enabled })
+        .then(() => sendResponse({ ok: true, autoPilotEnabled: enabled }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
 
     case "TEST_CONNECTION":
       testConnection(payload)
@@ -386,7 +627,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "FETCH_INTERVENTION_DETAILS":
-      fetchInterventionDetails(payload?.id, Boolean(payload?.forceFresh))
+      fetchInterventionDetails(payload?.id, Boolean(payload?.forceFresh), {
+        saveToStorage: payload?.saveToStorage !== false,
+        broadcast: false,
+      })
         .then((item) => sendResponse({ ok: true, data: item }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
@@ -398,6 +642,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "CHECK_FOR_UPDATES":
+    case "intervention_updated_at":
       checkForUpdates(payload?.id, payload?.lastUpdatedAt)
         .then((result) => sendResponse({ ok: true, data: result }))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
@@ -409,11 +654,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "SET_ACTIVE_INTERVENTION":
-      chrome.storage.local
-        .set({ activeIntervention: payload })
-        .then(() => {
-          broadcastActiveIntervention(payload, sender?.tab?.id);
-          sendResponse({ ok: true });
+      saveActiveInterventionIfChanged(payload, {
+        allowOverwritePhotos: false,
+        broadcast: false,
+        excludeTabId: sender?.tab?.id,
+      })
+        .then((res) => {
+          sendResponse({ ok: true, changed: res.changed });
         })
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
@@ -426,12 +673,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case "FIBRETRACK_UPDATE_BROADCAST":
+    case "FIBRETRACK_INTERVENTION_SYNC":
+    case "SYNC_ACTIVE_INTERVENTION":
       if (payload && payload.id) {
-        chrome.storage.local.set({ activeIntervention: payload }).then(() => {
-          broadcastActiveIntervention(payload, sender?.tab?.id);
-          sendResponse({ ok: true });
-        }).catch((err) => sendResponse({ ok: false, error: err.message }));
-        fetchInterventionsList(true).catch(() => {});
+        saveActiveInterventionIfChanged(payload, {
+          allowOverwritePhotos: false,
+          broadcast: false,
+          excludeTabId: sender?.tab?.id,
+        })
+          .then((res) => {
+            sendResponse({ ok: true, changed: res.changed });
+          })
+          .catch((err) => sendResponse({ ok: false, error: err.message }));
         return true;
       }
       sendResponse({ ok: false, error: "Payload d'intervention invalide" });
@@ -455,7 +708,7 @@ if (typeof chrome !== "undefined" && chrome.alarms) {
     if (alarm.name === "CELPROS_SYNC_ALARM") {
       try {
         const config = await getConfig();
-        if (config.autoSync && config.activeIntervention && config.activeIntervention.id) {
+        if (config.autoSync && config.autoPilotEnabled && config.activeIntervention && config.activeIntervention.id) {
           const current = config.activeIntervention;
           await checkForUpdates(current.id, current.updated_at || current.modifie_le);
         }

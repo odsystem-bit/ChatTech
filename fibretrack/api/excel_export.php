@@ -54,11 +54,19 @@ header('Access-Control-Allow-Origin: *');
 $action = $_GET['action'] ?? '';
 $code = $_GET['code'] ?? '';
 
-// Protection simple : même code admin que l'app (9999)
-if ($code !== '9999') {
+// Protection : code admin (9999) ou code technicien enregistré valide
+$isAllowed = ($code === '9999');
+if (!$isAllowed && preg_match('/^\d{4}$/', (string)$code)) {
+  $stmtAcc = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
+  $stmtAcc->execute([$code]);
+  if ($stmtAcc->fetch()) {
+    $isAllowed = true;
+  }
+}
+if (!$isAllowed) {
   http_response_code(403);
   header('Content-Type: application/json');
-  echo json_encode(['error' => 'Accès refusé - code admin requis']);
+  echo json_encode(['error' => 'Accès refusé - code valide requis']);
   exit;
 }
 
@@ -90,7 +98,7 @@ try {
 
   // Toutes les interventions (triées par date)
   $stmt = $pdo->query("SELECT id, nom_client, telephone_ligne, adresse_zone, nom_equipe,
-      nom_technicien, date, statut, materiel_pose
+      nom_technicien, date, statut, materiel_pose, motif_non_traite
     FROM interventions ORDER BY date");
   $interventions = $stmt->fetchAll();
 
@@ -130,7 +138,15 @@ try {
 
   foreach ($interventions as $iv) {
     $mp = json_decode($iv['materiel_pose'] ?? '{}', true) ?? [];
-    if (empty($mp)) continue; // ignorer les fiches sans matériel enregistré
+
+    $statutNorm = strtolower(trim((string)($iv['statut'] ?? '')));
+    $hasMotif = !empty(trim((string)($iv['motif_non_traite'] ?? '')));
+    $isNonTraite = in_array($statutNorm, ['non_traite', 'non_traitee', 'annule', 'annulee', 'inacheve', 'inachevee'], true) || ($hasMotif && $statutNorm !== 'termine');
+    $isTermine = !$isNonTraite && ($statutNorm === 'termine');
+
+    if (empty($mp) && !$isTermine) continue;
+
+    $statutLabel = $isTermine ? 'Terminé' : ($isNonTraite ? 'Non traité' : ($statutNorm === 'en_attente' ? 'En attente' : 'En cours'));
 
     $sheet->setCellValue('A' . $row, $num);
     $sheet->setCellValue('B' . $row, trim($iv['nom_client'] ?? ''));
@@ -138,16 +154,19 @@ try {
     $sheet->setCellValue('D' . $row, $iv['date'] ? date('d/m/y', strtotime($iv['date'])) : '');
     $sheet->setCellValue('E' . $row, trim($iv['adresse_zone'] ?? ''));
     $sheet->setCellValue('F' . $row, $iv['nom_technicien'] ?: ($iv['nom_equipe'] ?? ''));
-    $sheet->setCellValue('G' . $row, $iv['statut'] === 'termine' ? 'Terminé' : 'En cours');
+    $sheet->setCellValue('G' . $row, $statutLabel);
 
-    foreach ($mp as $key => $qty) {
-      $qty = (int)$qty;
-      if ($qty <= 0) continue;
-      $col = COL_MAP[$key] ?? null;
-      if ($col === null) continue; // désignation custom non standard : ignorée dans le tableau
-      $existing = (int)($sheet->getCell($col . $row)->getValue() ?: 0);
-      $sheet->setCellValue($col . $row, $existing + $qty);
-      $colSums[$col] += $qty;
+    // Ne comptabiliser et n'afficher le matériel que si l'intervention est réellement terminée
+    if ($isTermine && !empty($mp)) {
+      foreach ($mp as $key => $qty) {
+        $qty = (int)$qty;
+        if ($qty <= 0) continue;
+        $col = COL_MAP[$key] ?? null;
+        if ($col === null) continue;
+        $existing = (int)($sheet->getCell($col . $row)->getValue() ?: 0);
+        $sheet->setCellValue($col . $row, $existing + $qty);
+        $colSums[$col] += $qty;
+      }
     }
 
     $sheet->getStyle('A' . $row . ':' . $lastCol . $row)->getBorders()->getAllBorders()

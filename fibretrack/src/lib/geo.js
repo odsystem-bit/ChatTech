@@ -371,43 +371,137 @@ export const PRECISION_WARNING_THRESHOLD_M = 10;
  * @param {number} [quality=0.78]
  * @returns {Promise<string>}
  */
-export function compressDataUrl(dataUrl, maxDimension = 1280, quality = 0.78) {
-  return new Promise((resolve) => {
-    if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image")) {
-      return resolve(dataUrl);
+function dataUrlToBlobLocal(dataUrl) {
+  const [head, b64] = String(dataUrl).split(",");
+  const mime = (head.match(/data:([^;]+)/) || [])[1] || "image/jpeg";
+  const bin = atob(b64 || "");
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/**
+ * Charge une image décodable par canvas. Deux stratégies :
+ * 1) createImageBitmap (décodage hors thread principal, plus fiable sur grosses captures d'écran) ;
+ * 2) élément Image + decode() explicite (garantit que le décodage est terminé avant dessin).
+ */
+async function loadDrawable(dataUrl, preferBitmap) {
+  if (preferBitmap && typeof createImageBitmap === "function") {
+    try {
+      const bmp = await createImageBitmap(dataUrlToBlobLocal(dataUrl));
+      return {
+        src: bmp,
+        width: bmp.width,
+        height: bmp.height,
+        close: () => { try { bmp.close && bmp.close(); } catch {} },
+      };
+    } catch {
+      // repli sur Image
     }
-    if (typeof Image === "undefined" || typeof document === "undefined") {
-      return resolve(dataUrl);
-    }
-    const img = new Image();
-    img.onload = () => {
-      let { width, height } = img;
-      if (width <= maxDimension && height <= maxDimension && dataUrl.length < 250000) {
-        return resolve(dataUrl);
-      }
-      if (width > maxDimension || height > maxDimension) {
-        if (width > height) {
-          height = Math.round((height * maxDimension) / width);
-          width = maxDimension;
-        } else {
-          width = Math.round((width * maxDimension) / height);
-          height = maxDimension;
-        }
-      }
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      } catch {
-        resolve(dataUrl);
-      }
-    };
-    img.onerror = () => resolve(dataUrl);
+  }
+  const img = new Image();
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
     img.src = dataUrl;
   });
+  if (typeof img.decode === "function") {
+    try { await img.decode(); } catch {}
+  }
+  return { src: img, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height, close: () => {} };
+}
+
+/**
+ * Détecte un canvas vide (entièrement transparent ou noir) : signe d'un dessin raté,
+ * qui donnerait un JPEG totalement noir une fois exporté.
+ */
+function canvasLooksBlank(canvas) {
+  try {
+    const size = 24;
+    const probe = document.createElement("canvas");
+    probe.width = size;
+    probe.height = size;
+    const pctx = probe.getContext("2d", { willReadFrequently: true });
+    pctx.drawImage(canvas, 0, 0, size, size);
+    const px = pctx.getImageData(0, 0, size, size).data;
+    let maxLum = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const lum = (px[i] + px[i + 1] + px[i + 2]) / 3;
+      if (lum > maxLum) maxLum = lum;
+    }
+    // Si la luminance max est inférieure à 4 sur l'ensemble de la sonde, l'image est un rectangle totalement noir
+    return maxLum < 4;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Redimensionne une image data URL en JPEG de façon fiable.
+ * Tente plusieurs stratégies (bitmap, Image, taille réduite) et vérifie que le résultat
+ * n'est pas noir/vide. Retourne null si toutes échouent (l'appelant garde l'original).
+ * @param {string} dataUrl
+ * @param {number} maxDimension
+ * @param {number} quality
+ * @param {(ctx: CanvasRenderingContext2D, width: number, height: number) => void} [overlay] dessiné après la photo
+ * @returns {Promise<string|null>}
+ */
+async function renderJpegSafely(dataUrl, maxDimension, quality, overlay) {
+  if (typeof Image === "undefined" || typeof document === "undefined") return null;
+  const attempts = [
+    { bitmap: true, max: maxDimension },
+    { bitmap: false, max: maxDimension },
+    { bitmap: true, max: Math.min(1024, maxDimension) },
+    { bitmap: false, max: Math.min(800, maxDimension) },
+  ];
+  for (const attempt of attempts) {
+    let drawable = null;
+    try {
+      drawable = await loadDrawable(dataUrl, attempt.bitmap);
+      let width = drawable.width;
+      let height = drawable.height;
+      if (!width || !height) continue;
+      if (width > attempt.max || height > attempt.max) {
+        if (width > height) {
+          height = Math.round((height * attempt.max) / width);
+          width = attempt.max;
+        } else {
+          width = Math.round((width * attempt.max) / height);
+          height = attempt.max;
+        }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      // Fond blanc obligatoire en premier : sans lui, la transparence (PNG screenshots) devient noire en JPEG
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(drawable.src, 0, 0, width, height);
+      if (canvasLooksBlank(canvas)) continue;
+      if (overlay) overlay(ctx, width, height);
+      return canvas.toDataURL("image/jpeg", quality);
+    } catch {
+      // essai suivant
+    } finally {
+      if (drawable) drawable.close();
+    }
+  }
+  return null;
+}
+
+export async function compressDataUrl(dataUrl, maxDimension = 1280, quality = 0.78) {
+  if (!dataUrl || typeof dataUrl !== "string" || !dataUrl.startsWith("data:image")) {
+    return dataUrl;
+  }
+  if (typeof Image === "undefined" || typeof document === "undefined") {
+    return dataUrl;
+  }
+  if (dataUrl.length < 250000) {
+    return dataUrl;
+  }
+  const rendered = await renderJpegSafely(dataUrl, maxDimension, quality);
+  return rendered || dataUrl;
 }
 
 /**
@@ -436,23 +530,104 @@ export function readFileAsDataUrl(file, maxDimension = 1280, quality = 0.78) {
 }
 
 
+const reverseGeocodeCache = new Map();
+let nominatimBlockedUntil = 0;
+let lastNominatimCallAt = 0;
+
+function getGeocodeCacheKey(lat, lng) {
+  return `${Number(lat).toFixed(4)},${Number(lng).toFixed(4)}`;
+}
+
+async function fetchBigDataCloudReverse(lat, lng) {
+  try {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+    const res = await fetch(
+      `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lng)}&localityLanguage=fr`,
+      {
+        headers: { Accept: "application/json" },
+        ...(controller ? { signal: controller.signal } : {}),
+      }
+    );
+    if (timer) clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const locality = data.locality || data.city || "";
+    const city = data.city || data.principalSubdivision || "";
+    const zone = locality && city && locality.toLowerCase() !== city.toLowerCase()
+      ? `${locality}, ${city}`
+      : (locality || city || "");
+    const display = [data.locality, data.city, data.principalSubdivision, data.countryName]
+      .filter(Boolean)
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .join(", ");
+    return {
+      display_name: display || zone,
+      address: {
+        suburb: data.locality || "",
+        city: data.city || data.principalSubdivision || "",
+      },
+      zone,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function fetchReverseGeocodePayload(lat, lng) {
+  if (lat == null || lng == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lng))) {
+    return null;
+  }
+  const key = getGeocodeCacheKey(lat, lng);
+  if (reverseGeocodeCache.has(key)) {
+    return reverseGeocodeCache.get(key);
+  }
+
+  const now = Date.now();
+  if (now >= nominatimBlockedUntil && now - lastNominatimCallAt >= 1100) {
+    lastNominatimCallAt = now;
+    try {
+      const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&zoom=18&addressdetails=1`,
+        {
+          headers: { Accept: "application/json" },
+          ...(controller ? { signal: controller.signal } : {}),
+        }
+      );
+      if (timer) clearTimeout(timer);
+      if (res.status === 403 || res.status === 429) {
+        nominatimBlockedUntil = Date.now() + 10 * 60 * 1000;
+      } else if (res.ok) {
+        const json = await res.json();
+        reverseGeocodeCache.set(key, json);
+        return json;
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  const fallback = await fetchBigDataCloudReverse(lat, lng);
+  if (fallback) {
+    reverseGeocodeCache.set(key, fallback);
+    return fallback;
+  }
+  return null;
+}
+
 /**
  * Géocodage inversé (lat/lng → adresse lisible), façon "GPS Map Camera".
- * Utilise l'API publique Nominatim (OpenStreetMap). Best-effort : renvoie
- * une chaîne vide en cas d'échec (offline, quota, etc.) sans bloquer la saisie.
+ * Utilise un cache mémoire + Nominatim avec repli automatique BigDataCloud pour éviter les erreurs HTTP 403.
  * @param {number} lat
  * @param {number} lng
  * @returns {Promise<string>}
  */
 export async function reverseGeocode(lat, lng) {
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-      { headers: { Accept: "application/json" } }
-    );
-    if (!res.ok) return "";
-    const json = await res.json();
-    return json.display_name ?? "";
+    const json = await fetchReverseGeocodePayload(lat, lng);
+    return json?.display_name ?? "";
   } catch {
     return "";
   }
@@ -502,25 +677,15 @@ export function formatAddressZone(json) {
 
 /**
  * Géocodage inversé ciblé pour le champ "Adresse / Zone".
- * Convertit instantanément des coordonnées GPS en Quartier, Ville.
+ * Convertit instantanément des coordonnées GPS en Quartier, Ville sans HTTP 403.
  * @param {number} lat
  * @param {number} lng
  * @returns {Promise<string>}
  */
 export async function reverseGeocodeZone(lat, lng) {
   try {
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 6000) : null;
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-      {
-        headers: { Accept: "application/json" },
-        ...(controller ? { signal: controller.signal } : {}),
-      }
-    );
-    if (timer) clearTimeout(timer);
-    if (!res.ok) return "";
-    const json = await res.json();
+    const json = await fetchReverseGeocodePayload(lat, lng);
+    if (!json) return "";
     return formatAddressZone(json);
   } catch (err) {
     console.warn("reverseGeocodeZone error:", err);
@@ -535,62 +700,42 @@ export async function reverseGeocodeZone(lat, lng) {
  * @param {{type:string, lieu?:string, lat:number, lng:number, precision_m:number, horodatage:string}} info
  * @returns {Promise<string>} data URL de la photo incrustée (JPEG)
  */
-export function embedGpsOnPhoto(photoDataUrl, info, maxDimension = 1280) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => {
-      let width = img.width;
-      let height = img.height;
-      if (width > maxDimension || height > maxDimension) {
-        if (width > height) {
-          height = Math.round((height * maxDimension) / width);
-          width = maxDimension;
-        } else {
-          width = Math.round((width * maxDimension) / height);
-          height = maxDimension;
-        }
-      }
+export async function embedGpsOnPhoto(photoDataUrl, info, maxDimension = 1280) {
+  const overlay = (ctx, width, height) => {
+    if (info?.noBanner) return;
+    const dateStr = new Date(info.horodatage || Date.now()).toLocaleString();
+    const hasGps = typeof info.lat === "number" && typeof info.lng === "number";
+    const lines = [
+      `${info.type}`,
+      info.lieu ? `Lieu: ${info.lieu}` : null,
+      hasGps ? `Lat: ${Number(info.lat).toFixed(6)}  Lng: ${Number(info.lng).toFixed(6)}` : null,
+      hasGps ? `Précision: ±${Number(info.precision_m || 10).toFixed(1)} m - ${dateStr}` : `Horodatage: ${dateStr}`,
+      !hasGps && info.warning ? `⚠️ ${info.warning}` : null,
+    ].filter(Boolean);
 
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, width, height);
+    const fontSize = Math.max(14, Math.round(width * 0.024));
+    const lineGap = fontSize * 1.35;
+    const pad = fontSize * 0.6;
+    const bandHeight = pad * 2 + lineGap * lines.length;
 
-      if (!info?.noBanner) {
-        const dateStr = new Date(info.horodatage || Date.now()).toLocaleString();
-        const hasGps = typeof info.lat === "number" && typeof info.lng === "number";
-        const lines = [
-          `${info.type}`,
-          info.lieu ? `Lieu: ${info.lieu}` : null,
-          hasGps ? `Lat: ${Number(info.lat).toFixed(6)}  Lng: ${Number(info.lng).toFixed(6)}` : null,
-          hasGps ? `Précision: ±${Number(info.precision_m || 10).toFixed(1)} m - ${dateStr}` : `Horodatage: ${dateStr}`,
-          !hasGps && info.warning ? `⚠️ ${info.warning}` : null,
-        ].filter(Boolean);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    ctx.fillRect(0, height - bandHeight, width, bandHeight);
 
-        const fontSize = Math.max(14, Math.round(width * 0.024));
-        const lineGap = fontSize * 1.35;
-        const pad = fontSize * 0.6;
-        const bandHeight = pad * 2 + lineGap * lines.length;
+    ctx.fillStyle = "#ffffff";
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textBaseline = "top";
 
-        ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-        ctx.fillRect(0, height - bandHeight, width, bandHeight);
+    let y = height - bandHeight + pad;
+    for (const line of lines) {
+      ctx.fillText(line, pad, y);
+      y += lineGap;
+    }
+  };
 
-        ctx.fillStyle = "#ffffff";
-        ctx.font = `bold ${fontSize}px sans-serif`;
-        ctx.textBaseline = "top";
-
-        let y = height - bandHeight + pad;
-        for (const line of lines) {
-          ctx.fillText(line, pad, y);
-          y += lineGap;
-        }
-      }
-
-      resolve(canvas.toDataURL("image/jpeg", 0.78));
-    };
-    img.onerror = reject;
-    img.src = photoDataUrl;
-  });
+  const rendered = await renderJpegSafely(photoDataUrl, maxDimension, 0.78, overlay);
+  if (rendered) return rendered;
+  // Aucun rendu fiable possible : conserver la photo d'origine plutôt qu'une image noire
+  console.warn("embedGpsOnPhoto: rendu canvas vide, photo d'origine conservée sans bandeau");
+  return photoDataUrl;
 }
 

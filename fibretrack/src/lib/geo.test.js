@@ -199,3 +199,45 @@ test("acquireBestPosition - returns safe fallback object when completely offline
   assert.equal(res.lng, null);
   assert.ok(res.warning);
 });
+
+test("reverseGeocode & reverseGeocodeZone - falls back to BigDataCloud on Nominatim HTTP 403 and caches result", async () => {
+  const { reverseGeocode, reverseGeocodeZone } = await import("./geo.js");
+  const origFetch = globalThis.fetch;
+  const calledUrls = [];
+
+  globalThis.fetch = async (url) => {
+    calledUrls.push(String(url));
+    if (String(url).includes("nominatim.openstreetmap.org")) {
+      return { ok: false, status: 403 };
+    }
+    if (String(url).includes("api.bigdatacloud.net")) {
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            locality: "Fidjrossè",
+            city: "Cotonou",
+            principalSubdivision: "Littoral",
+            countryName: "Bénin",
+          };
+        },
+      };
+    }
+    return { ok: false, status: 404 };
+  };
+
+  try {
+    const zone1 = await reverseGeocodeZone(6.3551, 2.3842);
+    assert.equal(zone1, "Fidjrossè, Cotonou");
+    const callsAfterFirst = calledUrls.length;
+    assert.ok(callsAfterFirst >= 1);
+
+    // Second call at same rounded coordinates must be served from cache (0 additional network calls)
+    const fullAddr = await reverseGeocode(6.35511, 2.38421);
+    assert.ok(fullAddr.includes("Fidjrossè"));
+    assert.equal(calledUrls.length, callsAfterFirst);
+  } finally {
+    globalThis.fetch = origFetch;
+  }
+});

@@ -248,16 +248,22 @@ test('FieldMapping - Empty intervention extracts NO fake/invented values', () =>
   assert.equal(defs.test_appel_sortant.valueExtractor(emptyIntervention), null);
   assert.equal(defs.test_appel_entrant.valueExtractor(emptyIntervention), null);
 
-  // No fake conformities
-  assert.equal(defs.travaux_conformes.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.service_teste.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.service_fonctionne.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.etiquetage.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.nettoyage.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.depose.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.colliers_serres.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.fat_normalise.valueExtractor(emptyIntervention), null);
-  assert.equal(defs.tutorat.valueExtractor(emptyIntervention), null);
+  // Conformités obligatoires par défaut à true (exigence métier CelPros Step 4 & 5), sauf false explicite
+  assert.equal(defs.travaux_conformes.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.service_teste.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.service_fonctionne.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.etiquetage.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.nettoyage.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.depose.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.colliers_serres.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.fat_normalise.valueExtractor(emptyIntervention), true);
+  assert.equal(defs.tutorat.valueExtractor(emptyIntervention), true);
+
+  // Si explicitement false ou 0, doit respecter la désactivation
+  assert.equal(defs.travaux_conformes.valueExtractor({ travaux_conformes: false }), false);
+  assert.equal(defs.travaux_conformes.valueExtractor({ travaux_conformes: 0 }), false);
+  assert.equal(defs.etiquetage.valueExtractor({ etiquetage: false }), false);
+
   assert.equal(defs.confirme_signature_rapport.valueExtractor(emptyIntervention), null);
   assert.equal(defs.qualite.valueExtractor(emptyIntervention), '');
   assert.equal(defs.delais.valueExtractor(emptyIntervention), '');

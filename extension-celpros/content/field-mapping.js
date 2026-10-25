@@ -28,10 +28,45 @@
       .trim();
   }
 
+  // Helper pour désérialiser en toute sécurité des tableaux JSON ou natifs
+  function safeGetArray(val) {
+    if (Array.isArray(val)) return val;
+    if (typeof val === "string") {
+      try {
+        const parsed = JSON.parse(val);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return [];
+  }
+
+  // Helper pour désérialiser en toute sécurité des objets JSON ou natifs
+  function safeGetObject(val) {
+    if (val && typeof val === "object" && !Array.isArray(val)) return val;
+    if (typeof val === "string") {
+      try {
+        const parsed = JSON.parse(val);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+    return {};
+  }
+
+  // Normalise complètement un objet intervention (désérialisation JSON sécurisée)
+  function normalizeInterventionData(data) {
+    if (!data || typeof data !== "object") return data;
+    return {
+      ...data,
+      whatsapp_photos: safeGetArray(data.whatsapp_photos),
+      points_gps: safeGetArray(data.points_gps),
+      poteaux: safeGetArray(data.poteaux),
+      materiel_pose: safeGetObject(data.materiel_pose),
+    };
+  }
+
   // Helper pour extraire une quantité de matériel posé depuis data.materiel_pose
   function getMaterielQuantity(data, ...keys) {
-    const mp = data?.materiel_pose;
-    if (!mp || typeof mp !== "object") return "";
+    const mp = safeGetObject(data?.materiel_pose);
     for (const k of keys) {
       if (mp[k] !== undefined && mp[k] !== null && mp[k] !== "") {
         const n = Number(mp[k]);
@@ -51,14 +86,14 @@
 
   // Helper pour compter les poteaux SBEE réels
   function countSbeePoles(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const list = safeGetArray(data?.points_gps);
     const sbee = list.filter((p) => {
       if (!p || !normalizeText(p.type).includes("poteau")) return false;
       const desc = normalizeText(`${p.type_poteau || ""} ${p.proprietaire || ""} ${p.sous_type || ""} ${p.nom || ""} ${p.description || ""}`);
       return desc.includes("sbee");
     }).length;
     if (sbee > 0) return String(sbee);
-    const mp = data?.materiel_pose || {};
+    const mp = safeGetObject(data?.materiel_pose);
     const count = Number(mp.poteau_sbee_non_arme || 0) + Number(mp.poteau_sbee_arme || 0) + Number(mp.poteau_sbee || 0);
     if (count > 0) return String(count);
     return "";
@@ -66,14 +101,14 @@
 
   // Helper pour compter les poteaux Petit Jean réels
   function countPetitJeanPoles(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const list = safeGetArray(data?.points_gps);
     const pj = list.filter((p) => {
       if (!p || !normalizeText(p.type).includes("poteau")) return false;
       const desc = normalizeText(`${p.type_poteau || ""} ${p.proprietaire || ""} ${p.sous_type || ""} ${p.nom || ""} ${p.description || ""}`);
       return desc.includes("petit") || desc.includes("jean") || desc.includes("pj");
     }).length;
     if (pj > 0) return String(pj);
-    const mp = data?.materiel_pose || {};
+    const mp = safeGetObject(data?.materiel_pose);
     const count = Number(mp.poteau_petit_jean || mp.poteau_pj || mp.petit_jean || 0);
     if (count > 0) return String(count);
     return "";
@@ -81,7 +116,7 @@
 
   // Extraction du point GPS FAT
   function extractFatGpsPoint(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const list = safeGetArray(data?.points_gps);
     const fat = list.find((p) => p && normalizeText(p.type).includes("fat"));
     if (fat) {
       const rawLat = fat.lat ?? fat.latitude;
@@ -99,7 +134,7 @@
       if (!isNaN(lat) && !isNaN(lng)) return { type: "FAT", lat, lng };
     }
     // Fallback 2: whatsapp_photos[slot=fat]
-    const waPhotos = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    const waPhotos = safeGetArray(data?.whatsapp_photos);
     const fatWa = waPhotos.find((p) => p && (p.slot === "fat" || p.type === "fat") && p.lat != null && p.lng != null);
     if (fatWa) {
       const lat = typeof fatWa.lat === "string" ? parseFloat(String(fatWa.lat).replace(",", ".")) : Number(fatWa.lat);
@@ -111,7 +146,7 @@
 
   // Extraction du point GPS de référence (Abonné en priorité, sinon le dernier point relevé)
   function extractTargetGpsPoint(data) {
-    const list = Array.isArray(data?.points_gps) ? data.points_gps : [];
+    const list = safeGetArray(data?.points_gps);
     const abonne = list.find((p) => {
       if (!p || !p.type) return false;
       const t = normalizeText(p.type);
@@ -134,7 +169,7 @@
       if (!isNaN(lat) && !isNaN(lng)) return { type: "Abonné", lat, lng };
     }
     // Fallback 2: whatsapp_photos[slot=ont_sn / cable_interne / mesure_pto]
-    const waPhotos = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    const waPhotos = safeGetArray(data?.whatsapp_photos);
     const abonneWa = waPhotos.find((p) => p && (p.slot === "ont_sn" || p.slot === "cable_interne" || p.slot === "mesure_pto") && p.lat != null && p.lng != null);
     if (abonneWa) {
       const lat = typeof abonneWa.lat === "string" ? parseFloat(String(abonneWa.lat).replace(",", ".")) : Number(abonneWa.lat);
@@ -192,7 +227,7 @@
   }
 
   function getEligibleWhatsappPhotos(data) {
-    const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    const wa = safeGetArray(data?.whatsapp_photos);
     return wa.filter((p) => !isExcludedFromCelpros(p));
   }
 
@@ -364,7 +399,7 @@
         const wa = getEligibleWhatsappPhotos(data);
         const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "fat" || p.type === "fat"));
         if (direct) return { src: getPhotoSource(direct), name: "fat.jpg", slot: "fat" };
-        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const pts = safeGetArray(data?.points_gps);
         const fatPt = pts.find((p) => p && normalizeText(p.type) === "fat" && getPhotoSource(p.photo));
         if (fatPt) return { src: getPhotoSource(fatPt.photo), name: "fat_raccordement.jpg", slot: "fat" };
         const legacy = wa.find((p) => {
@@ -599,7 +634,7 @@
         const wa = getEligibleWhatsappPhotos(data);
         const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "ont_sn" || p.type === "ont_sn"));
         if (direct) return { src: getPhotoSource(direct), name: "ont_sn.jpg", slot: "ont_sn" };
-        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const pts = safeGetArray(data?.points_gps);
         const abonne = pts.find((p) => p && (normalizeText(p.type).includes("abonne") || normalizeText(p.type).includes("ont")) && getPhotoSource(p.photo));
         if (abonne) return { src: getPhotoSource(abonne.photo), name: "ont_sn.jpg", slot: "ont_sn" };
         const legacy = wa.find((p) => getPhotoSource(p) && (p.name || p.nom || p.label) && /^(ont|box|sn[-_ ]*ont|etiquette[-_ ]*ont|photo[-_ ]*numero[-_ ]*de[-_ ]*serie|numero[-_ ]*de[-_ ]*serie)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(String(p.name || p.nom || p.label).trim()));
@@ -1371,31 +1406,27 @@
 
     lineaire_m: {
       key: "lineaire_m",
-      step: 4,
+      step: 2,
       ftSource: "lineaire_m",
       celprosTarget: "Linéaire total (m)",
       onAbsent: "leave_empty_and_warn",
-      negativeKeywords: ["depart","arrivee"],
+      negativeKeywords: ["depart", "arrivee"],
       label: "Linéaire (m)",
       category: "Câblage",
       type: "number",
       attrPatterns: [
-        /^field_lineairem$/i,
-        /^field_lineaire$/i,
-        /^lineaire_m$/i,
-        /^lineairem$/i,
-        /^lineaire$/i,
-        /^lineaire_?total/i,
-        /^lineaire_?deploye/i,
-        /^metrage_?lineaire/i,
-        /^metrage_?total/i,
-        /^longueurlineaire$/i,
-        /^longueurcable$/i,
-        /^distance$/i,
+        /^lineaire/i,
+        /^field_lineaire/i,
+        /^metrage/i,
+        /^longueur_?cable/i,
+        /^longueur_?lineaire/i,
+        /^longueurcable/i,
+        /^distance/i,
       ],
       labelKeywords: [
         "lineaire fibre optique",
         "lineaire fibre",
+        "lineaire fo",
         "lineaire m",
         "lineaire",
         "lineaire total deploye",
@@ -1418,6 +1449,15 @@
           const arr = parseFloat(String(data.arrivee_m).replace(",", ".")) || 0;
           const diff = Math.abs(arr - dep);
           if (diff > 0) return String(diff);
+        }
+        // Repli depuis materiel_pose (ex: cpc_100, cpc_150, cpc, cable_drop, drop)
+        const mp = safeGetObject(data?.materiel_pose);
+        for (const [k, v] of Object.entries(mp)) {
+          const nk = normalizeText(k);
+          if (nk.startsWith("cpc") || nk.startsWith("drop") || nk.includes("cable") || nk.includes("lineaire")) {
+            const n = parseFloat(String(v).replace(",", "."));
+            if (!isNaN(n) && n > 0) return String(n);
+          }
         }
         return "";
       },
@@ -1756,9 +1796,11 @@
         /^field_sn$/i,
         /^field_ontsn$/i,
         /^field_ont_sn$/i,
+        /^field_ont$/i,
         /^field_serialnumber$/i,
         /^field_serial_number$/i,
         /^sn$/i,
+        /^ont$/i,
         /^ont_sn$/i,
         /^ontsn$/i,
         /^serialnumber$/i,
@@ -1773,6 +1815,7 @@
         /^sn_ont$/i,
       ],
       labelKeywords: [
+        "ont",
         "sn ont",
         "ont sn",
         "ont / sn",
@@ -1785,6 +1828,10 @@
         "s/n",
       ],
       valueExtractor: (data) => {
+        // Privilégier le vrai numéro de série (chaîne alphanumérique d'au moins 6 caractères ou non-numérique pure)
+        const candidates = [data?.sn, data?.ont_sn].filter(Boolean).map((s) => String(s).trim());
+        const validSn = candidates.find((c) => c.length >= 6 || !/^\d+$/.test(c));
+        if (validSn) return validSn;
         if (data?.sn && String(data.sn).trim()) return String(data.sn).trim();
         if (data?.ont_sn && String(data.ont_sn).trim()) return String(data.ont_sn).trim();
         return "";
@@ -1866,7 +1913,11 @@
         "installation conforme",
         "travaux conformes aux regles",
       ],
-      valueExtractor: (data) => (data?.travaux_conformes ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.travaux_conformes;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     emplacement_valide: {
@@ -1889,7 +1940,11 @@
         "emplacement valide",
         "emplacement valide par le client",
       ],
-      valueExtractor: (data) => (data?.emplacement_valide ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.emplacement_valide;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     travail_propre: {
@@ -1915,7 +1970,11 @@
         "proprete des lieux",
         "nettoyage effectue",
       ],
-      valueExtractor: (data) => (data?.travail_propre ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.travail_propre;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     service_teste: {
@@ -1941,7 +2000,11 @@
         "test navigation",
         "test debit",
       ],
-      valueExtractor: (data) => (data?.service_teste ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.service_teste;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     service_fonctionne: {
@@ -1968,7 +2031,11 @@
         "internet fonctionne",
         "connexion ok",
       ],
-      valueExtractor: (data) => (data?.service_fonctionne ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.service_fonctionne;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     explications_donnees: {
@@ -1992,7 +2059,11 @@
         "explications fournies au client",
         "information client",
       ],
-      valueExtractor: (data) => (data?.explications_donnees ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.explications_donnees;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     recommanderait: {
@@ -2014,7 +2085,11 @@
         "recommanderait",
         "recommanderait celtiis",
       ],
-      valueExtractor: (data) => (data?.recommanderait ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.recommanderait;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     accepte_recontact: {
@@ -2036,7 +2111,11 @@
         "accepte recontact",
         "accepte d'etre recontacte",
       ],
-      valueExtractor: (data) => (data?.accepte_recontact ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.accepte_recontact;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     qualite: {
@@ -2673,7 +2752,7 @@
       ],
       valueExtractor: (data) => {
         // 1. Compter d'abord les poteaux physiques uniques dans points_gps
-        const pts = Array.isArray(data?.points_gps) ? data.points_gps : [];
+        const pts = safeGetArray(data?.points_gps);
         const polePts = pts.filter((p) => p && normalizeText(p.type).includes("poteau")).length;
         if (polePts > 0) return String(polePts);
 
@@ -2691,7 +2770,7 @@
         if (data?.nb_poteaux_armes) return String(Number(data.nb_poteaux_armes) || 0);
         const fromMat = getMaterielQuantity(data, "poteau", "poteaux", "poteau_sbee", "poteau_pj");
         if (fromMat) return fromMat;
-        const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+        const wa = safeGetArray(data?.whatsapp_photos);
         const waPoles = wa.filter((p) => {
           if (!p) return false;
           const desc = `${p.name || ""} ${p.nom || ""} ${p.type || ""} ${p.caption || ""}`.toLowerCase();
@@ -2988,7 +3067,11 @@
       type: "boolean",
       attrPatterns: [/^etiquetage/i],
       labelKeywords: ["etiquetage"],
-      valueExtractor: (data) => (data?.etiquetage ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.etiquetage ?? data?.travaux_conformes;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     nettoyage: {
@@ -3003,7 +3086,11 @@
       type: "boolean",
       attrPatterns: [/^nettoyage/i],
       labelKeywords: ["nettoyage"],
-      valueExtractor: (data) => (data?.nettoyage ? true : (data?.travail_propre ? true : null)),
+      valueExtractor: (data) => {
+        const v = data?.nettoyage ?? data?.travail_propre;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     depose: {
@@ -3018,7 +3105,11 @@
       type: "boolean",
       attrPatterns: [/^depose/i],
       labelKeywords: ["depose"],
-      valueExtractor: (data) => (data?.depose ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.depose ?? data?.travaux_conformes;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     colliers_serres: {
@@ -3033,7 +3124,11 @@
       type: "boolean",
       attrPatterns: [/^colliers?_?serres?/i, /^field_colliers?_?serres?/i],
       labelKeywords: ["colliers serres", "collier serre"],
-      valueExtractor: (data) => (data?.colliers_serres ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.colliers_serres ?? data?.travaux_conformes;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     fat_normalise: {
@@ -3048,7 +3143,11 @@
       type: "boolean",
       attrPatterns: [/^fat_?normalise/i],
       labelKeywords: ["fat normalise"],
-      valueExtractor: (data) => (data?.fat_normalise ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.fat_normalise ?? data?.travaux_conformes;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     tutorat: {
@@ -3063,7 +3162,11 @@
       type: "boolean",
       attrPatterns: [/^tutorat/i],
       labelKeywords: ["tutorat"],
-      valueExtractor: (data) => (data?.tutorat ? true : null),
+      valueExtractor: (data) => {
+        const v = data?.tutorat ?? data?.travaux_conformes;
+        if (v === false || v === 0 || v === "0" || v === "false") return false;
+        return true;
+      },
     },
 
     plaque: {
@@ -3346,9 +3449,14 @@
       // On ne disqualifie JAMAIS un champ si son label direct ou son attribut ID/Name
       // correspond expressément et positivement à sa cible (ex: directLabel contient "fat" pour puissance_fat_dbm)
       if (def.negativeKeywords && def.negativeKeywords.length > 0) {
+        // Un champ n'est jamais disqualifié s'il correspond positivement par son label direct, ses attributs ou ses mots-clés forts
         const hasDirectPositiveMatch = def.labelKeywords.some((kw) => {
           const nKw = normalizeText(kw);
-          return nKw.length >= 3 && (normDirectLabel.includes(nKw) || normAttrs.some((a) => a.includes(nKw)));
+          if (nKw.length < 3) return false;
+          if (normDirectLabel.includes(nKw) || normAttrs.some((a) => a.includes(nKw))) return true;
+          // Cas spécifique "linéaire" : si le libellé contient explicitement le mot-clé principal
+          if (def.key === "lineaire_m" && (normalizedLabel.includes("lineaire") || normalizedLabel.includes("metrage"))) return true;
+          return normalizedLabel.includes(nKw);
         });
 
         if (!hasDirectPositiveMatch) {
@@ -3404,12 +3512,18 @@
     }
 
     // Correspondance dynamique de secours pour tout matériau personnalisé enregistré dans FibreTrack
-    if (!bestMatch && interventionData?.materiel_pose && typeof interventionData.materiel_pose === "object") {
-      for (const [rawKey, rawVal] of Object.entries(interventionData.materiel_pose)) {
+    const dynMp = safeGetObject(interventionData?.materiel_pose);
+    if (!bestMatch && Object.keys(dynMp).length > 0) {
+      const RESERVED_MATERIEL_KEYS = new Set([
+        "ont", "pto", "fat", "box", "sn", "mac", "lineaire", "poteau", "poteaux",
+        "sbee", "petitjean", "pj", "debit", "ping", "gps", "lat", "lng", "client",
+        "telephone", "contact", "date", "heure", "statut", "etat"
+      ]);
+      for (const [rawKey, rawVal] of Object.entries(dynMp)) {
         const numVal = Number(rawVal);
         if (isNaN(numVal) || numVal <= 0) continue;
         const normMat = normalizeText(rawKey);
-        if (!normMat || normMat.length < 3) continue;
+        if (!normMat || normMat.length < 3 || RESERVED_MATERIEL_KEYS.has(normMat)) continue;
 
         let matched = false;
         for (const attr of attributes) {
@@ -3449,6 +3563,9 @@
     FIELD_DEFINITIONS,
     CELPROS_PHOTO_SLOTS,
     normalizeText,
+    safeGetArray,
+    safeGetObject,
+    normalizeInterventionData,
     getElementAttributeCandidates,
     getElementLabelText,
     matchElementToField,

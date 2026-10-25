@@ -64,6 +64,7 @@ export async function uploadInterventionMedia({
   source,
   slot,
   photoType,
+  photoId,
   onProgress,
 }) {
   const buildForm = () => {
@@ -79,6 +80,7 @@ export async function uploadInterventionMedia({
     if (label) form.append("label", label);
     if (slot) form.append("slot", slot);
     if (photoType) form.append("photo_type", photoType);
+    if (photoId) form.append("photo_id", String(photoId));
     if (isImported !== undefined) form.append("is_imported", isImported ? "1" : "0");
     if (source) form.append("source", source);
     const filename = file?.name || (type === "video" ? "media.mp4" : "media.jpg");

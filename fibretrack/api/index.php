@@ -36,9 +36,11 @@ define('STOCK_EXCEL_MAP', [
 
 function canonicalDesignation($designation) {
   $normalized = strtolower(trim((string)$designation));
+  $unaccented = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $normalized);
+  $cleanKey = ($unaccented !== false && $unaccented !== '') ? strtolower(trim($unaccented)) : $normalized;
+
   $aliases = [
     'connecteur mecanique' => 'connecteur',
-    'connecteur mécanique' => 'connecteur',
     'connecteur' => 'connecteur',
     'ont box' => 'ont',
     'box ont' => 'ont',
@@ -48,8 +50,26 @@ function canonicalDesignation($designation) {
     'ont / otp' => 'ont',
     'pto fibre' => 'pto',
     'prise pto' => 'pto',
+    'poteau sbee arme' => 'poteau_sbee_arme',
+    'poteau_sbee_arme' => 'poteau_sbee_arme',
+    'traverse 13t' => 'traverse_13t',
+    'traverse_13t' => 'traverse_13t',
+    'traverse 15t' => 'traverse_15t',
+    'traverse_15t' => 'traverse_15t',
+    'cable fibre 1fo' => 'fibre_1fo',
+    'fibre 1fo' => 'fibre_1fo',
+    'fibre_1fo' => 'fibre_1fo',
+    'boitier closer' => 'closer',
+    'closer' => 'closer',
+    'piton d\'ancrage' => 'piton',
+    'piton' => 'piton',
+    'pince d\'ancrage' => 'pince',
+    'pince' => 'pince',
+    'repeteur wifi' => 'repeteur_wifi',
+    'repeteur wi-fi' => 'repeteur_wifi',
+    'repeteur_wifi' => 'repeteur_wifi',
   ];
-  return $aliases[$normalized] ?? trim((string)$designation);
+  return $aliases[$cleanKey] ?? ($aliases[$normalized] ?? trim((string)$designation));
 }
 
 function buildTotalMaterielPose(array $d): array {
@@ -121,6 +141,8 @@ function saveBase64ImageToDisk(string $base64, string $interventionId, string $f
     $w = imagesx($src);
     $h = imagesy($src);
     $maxDim = 1280;
+    $targetW = $w;
+    $targetH = $h;
     if ($w > $maxDim || $h > $maxDim) {
       if ($w > $h) {
         $targetH = (int)round(($h * $maxDim) / $w);
@@ -129,11 +151,13 @@ function saveBase64ImageToDisk(string $base64, string $interventionId, string $f
         $targetW = (int)round(($w * $maxDim) / $h);
         $targetH = $maxDim;
       }
-      $dst = imagecreatetruecolor($targetW, $targetH);
-      imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetW, $targetH, $w, $h);
-      imagedestroy($src);
-      $src = $dst;
     }
+    // Fond blanc obligatoire : sans lui, la transparence (PNG/WebP) devient noire en JPEG
+    $dst = imagecreatetruecolor($targetW, $targetH);
+    imagefill($dst, 0, 0, imagecolorallocate($dst, 255, 255, 255));
+    imagecopyresampled($dst, $src, 0, 0, 0, 0, $targetW, $targetH, $w, $h);
+    imagedestroy($src);
+    $src = $dst;
     ob_start();
     imagejpeg($src, null, 78);
     $outBin = ob_get_clean();
@@ -160,7 +184,150 @@ function saveBase64ImageToDisk(string $base64, string $interventionId, string $f
   return 'https://fibretrack.mantota.com/api/' . $relativeDir . '/' . $filename;
 }
 
+function sanitizeAndValidatePhotos(array $photos, ?PDO $pdo = null): array {
+  $clean = [];
+  $seenSlots = [];
+  $seenIds = [];
+  $isMultiSlot = function($slot, $type, $isAdd): bool {
+    if ($isAdd) return true;
+    $s = strtolower((string)$slot);
+    $t = strtolower((string)$type);
+    return $s === 'additionnelle' || str_starts_with($s, 'additionnelle_')
+      || $s === 'autre_poteau' || str_starts_with($s, 'autre_poteau_')
+      || $s === 'contrat_client' || str_starts_with($s, 'contrat_client_')
+      || $t === 'additionnelle' || $t === 'autre_poteau' || $t === 'contrat_client';
+  };
 
+  $reversed = array_reverse($photos);
+  foreach ($reversed as $ph) {
+    if (!is_array($ph)) continue;
+    $slot = (string)($ph['slot'] ?? ($ph['type'] ?? ''));
+    $type = (string)($ph['type'] ?? $slot);
+    $isAdd = !empty($ph['additionnelle']) || !empty($ph['is_additionnelle']);
+
+    // Éliminer définitivement les faux slots fantômes générés par l'ancienne réconciliation media_
+    if (str_starts_with($slot, 'media_')) {
+      continue;
+    }
+    $cardId = (string)($ph['id'] ?? '');
+    if ($cardId !== '') {
+      if (isset($seenIds[$cardId])) continue;
+      $seenIds[$cardId] = true;
+    }
+
+    $url = (string)($ph['url'] ?? '');
+    // Vérifier l'existence physique du fichier s'il pointe sur le stockage local du serveur
+    if (str_contains($url, 'uploads/photos/') || str_contains($url, 'uploads/interventions/')) {
+      $rel = null;
+      if (strpos($url, 'uploads/photos/') !== false) {
+        $rel = substr($url, strpos($url, 'uploads/photos/'));
+      } elseif (strpos($url, 'uploads/interventions/') !== false) {
+        $rel = substr($url, strpos($url, 'uploads/interventions/'));
+      }
+      if ($rel !== null && strpos($rel, '..') === false) {
+        $abs = __DIR__ . '/' . $rel;
+        if (!is_file($abs)) {
+          // Fichier inexistant (404) -> purger et nettoyer intervention_media
+          if ($pdo) {
+            try {
+              $pdo->prepare("DELETE FROM intervention_media WHERE file_path = ? OR file_path = ?")->execute([$rel, '/' . $rel]);
+            } catch (Exception $e) {}
+          }
+          continue;
+        }
+
+        // Purge physique des images entièrement noires (erreur de capture canvas mobile)
+        $sz = (int)@filesize($abs);
+        if ($sz < 65536) {
+          $im = @imagecreatefromjpeg($abs);
+          if ($im) {
+            $s = @imagescale($im, 16, 16);
+            if ($s) {
+              $lumSum = 0;
+              for ($x = 0; $x < 16; $x++) {
+                for ($y = 0; $y < 12; $y++) { // 75% supérieur de l'image (zone photo, hors bandeau GPS bas)
+                  $c = imagecolorat($s, $x, $y);
+                  $lumSum += (($c >> 16 & 255) + ($c >> 8 & 255) + ($c & 255)) / 3;
+                }
+              }
+              imagedestroy($s);
+              $avgLum = $lumSum / (16 * 12);
+              if ($avgLum < 1.0) {
+                // Image noire corrompue : supprimer le fichier physique et retirer de la fiche
+                imagedestroy($im);
+                @unlink($abs);
+                if ($pdo) {
+                  try {
+                    $pdo->prepare("DELETE FROM intervention_media WHERE file_path = ? OR file_path = ?")->execute([$rel, '/' . $rel]);
+                  } catch (Exception $e) {}
+                }
+                continue;
+              }
+            }
+            imagedestroy($im);
+          }
+        }
+      }
+    }
+
+    // Déduplication pour les slots uniques (ex: ont_sn, fat, etc.) : conserver uniquement la dernière version valide
+    if (!$isMultiSlot($slot, $type, $isAdd) && $slot !== '') {
+      $slotKey = strtolower($slot);
+      if (isset($seenSlots[$slotKey])) {
+        continue;
+      }
+      $seenSlots[$slotKey] = true;
+    }
+
+    $clean[] = $ph;
+  }
+
+  $clean = array_reverse($clean);
+
+  // Dédoublonnage défensif (anciens clients sans photo_id) : même catégorie + même instant de prise
+  $categoryOf = function(array $ph): string {
+    $slot = strtolower((string)($ph['slot'] ?? ($ph['type'] ?? '')));
+    if (preg_match('/^(autre_poteau|contrat_client|additionnelle)(_.*)?$/', $slot, $mm)) return $mm[1];
+    return $slot;
+  };
+  $score = function(array $ph): int {
+    $s = 0;
+    foreach (['added', 'name', 'description', 'lieu', 'label'] as $k) if (!empty($ph[$k])) $s++;
+    if (!empty($ph['additionnelle']) || !empty($ph['is_additionnelle'])) $s += 2;
+    return $s;
+  };
+  $groups = [];
+  foreach ($clean as $idx => $ph) {
+    $ts = strtotime((string)($ph['horodatage'] ?? ''));
+    $url = (string)($ph['url'] ?? '');
+    if (!$ts || $url === '' || str_starts_with($url, 'data:')) continue;
+    $cat = $categoryOf($ph);
+    $matched = false;
+    foreach ($groups as $gk => $members) {
+      [$gcat, $gts] = explode('|', $gk);
+      if ($gcat === $cat && abs((int)$gts - $ts) <= 2) {
+        $groups[$gk][] = $idx;
+        $matched = true;
+        break;
+      }
+    }
+    if (!$matched) $groups[$cat . '|' . $ts] = [$idx];
+  }
+  $drop = [];
+  foreach ($groups as $members) {
+    if (count($members) < 2) continue;
+    $clientTwins = array_filter($members, fn($m) => !empty($clean[$m]['added']));
+    if (empty($clientTwins)) continue;
+    foreach ($members as $m) {
+      if (empty($clean[$m]['added'])) $drop[$m] = true;
+    }
+  }
+  if (!empty($drop)) {
+    $clean = array_values(array_filter($clean, fn($i) => !isset($drop[$i]), ARRAY_FILTER_USE_KEY));
+  }
+
+  return $clean;
+}
 
 function lockStockQuantity(PDO $pdo, string $designation): int {
   $ensure = $pdo->prepare('INSERT INTO stock (designation, quantite) VALUES (?, 0) ON DUPLICATE KEY UPDATE designation = VALUES(designation)');
@@ -427,6 +594,37 @@ try {
     }
     @chmod(__DIR__ . '/' . $relativePath, 0644);
 
+    // Rejeter les photos entièrement noires (erreur de capture canvas mobile)
+    if ($type === 'photo') {
+      $savedAbs = __DIR__ . '/' . $relativePath;
+      $sz = (int)@filesize($savedAbs);
+      if ($sz < 65536) {
+        $im = @imagecreatefromjpeg($savedAbs);
+        if ($im) {
+          $s = @imagescale($im, 16, 16);
+          if ($s) {
+            $lumSum = 0;
+            for ($x = 0; $x < 16; $x++) {
+              for ($y = 0; $y < 12; $y++) {
+                $c = imagecolorat($s, $x, $y);
+                $lumSum += (($c >> 16 & 255) + ($c >> 8 & 255) + ($c & 255)) / 3;
+              }
+            }
+            imagedestroy($s);
+            $avgLum = $lumSum / (16 * 12);
+            if ($avgLum < 1.0) {
+              imagedestroy($im);
+              @unlink($savedAbs);
+              http_response_code(422);
+              echo json_encode(['error' => 'Photo noire rejetée par le serveur']);
+              return;
+            }
+          }
+          imagedestroy($im);
+        }
+      }
+    }
+
     $thumbUrl = '';
     if (!empty($_POST['thumbnail_base64'])) {
       $rawThumb = (string)$_POST['thumbnail_base64'];
@@ -515,8 +713,11 @@ try {
             || str_starts_with($slotName, 'additionnelle_')
             || str_starts_with($slotName, 'contrat_client_');
 
+          $clientPhotoId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($_POST['photo_id'] ?? ''));
+          $cardId = $clientPhotoId !== '' ? $clientPhotoId : $mediaId;
+
           $newPhotoItem = [
-            'id' => $mediaId,
+            'id' => $cardId,
             'slot' => $slotName,
             'type' => $photoType,
             'label' => trim((string)($_POST['label'] ?? ($type === 'fiche' ? 'Contrat Client Signé' : 'Photo terrain'))),
@@ -530,9 +731,23 @@ try {
           ];
 
           $foundSlot = false;
-          if (!$isMultiSlot) {
+          // 1) Même id de carte (le client a déjà enregistré cette photo) : mise à jour sur place
+          foreach ($currWa as &$cph) {
+            if (is_array($cph) && !empty($cph['id']) && (string)$cph['id'] === $cardId) {
+              $keepSlot = $cph['slot'] ?? null;
+              $keepType = $cph['type'] ?? null;
+              $cph = array_merge($cph, $newPhotoItem);
+              if (!empty($keepSlot)) $cph['slot'] = $keepSlot;
+              if (!empty($keepType)) $cph['type'] = $keepType;
+              $foundSlot = true;
+              break;
+            }
+          }
+          unset($cph);
+          // 2) Slot unique : remplacement du slot existant
+          if (!$foundSlot && !$isMultiSlot) {
             foreach ($currWa as &$cph) {
-              if (!empty($cph['slot']) && $cph['slot'] === $slotName) {
+              if (is_array($cph) && !empty($cph['slot']) && $cph['slot'] === $slotName) {
                 $cph = array_merge($cph, $newPhotoItem);
                 $foundSlot = true;
                 break;
@@ -884,20 +1099,6 @@ try {
               ];
               $vidIds[] = $mId;
             }
-          } else {
-            if (!in_array($mId, $waIds, true)) {
-              $r['whatsapp_photos'][] = [
-                'id' => $mId,
-                'slot' => 'media_' . $mId,
-                'type' => $m['type'],
-                'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
-                'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
-                'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
-                'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                'ajoute_par' => $m['added_by'] ?? 'Technicien',
-              ];
-              $waIds[] = $mId;
-            }
           }
         }
         $r['videos_terrain'] = $currVids;
@@ -975,28 +1176,12 @@ try {
                 $vidIds[] = $mId;
                 $vidUrls[] = $mUrl;
               }
-            } else {
-              if (!in_array($mId, $waIds, true) && !in_array($mUrl, $waUrls, true)) {
-                $r['whatsapp_photos'][] = [
-                  'id' => $mId,
-                  'slot' => 'media_' . $mId,
-                  'type' => $m['type'],
-                  'label' => $m['type'] === 'fiche' ? 'Contrat Client Signé' : 'Photo terrain',
-                  'url' => $mUrl,
-                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
-                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
-                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
-                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                  'ajoute_par' => $m['added_by'] ?? 'Technicien',
-                ];
-                $waIds[] = $mId;
-                $waUrls[] = $mUrl;
-              }
             }
           }
         }
       } catch (Exception $e) {}
 
+      $r['whatsapp_photos'] = sanitizeAndValidatePhotos($r['whatsapp_photos'], db());
       echo json_encode($r);
       break;
 
@@ -1184,24 +1369,6 @@ try {
                 $vidUrls[] = $mUrl;
                 $needsDbCleanup = true;
               }
-            } else {
-              if (!in_array($mId, $waIds, true) && !in_array($mUrl, $waUrls, true)) {
-                $r['whatsapp_photos'][] = [
-                  'id' => $mId,
-                  'slot' => 'media_' . $mId,
-                  'type' => $m['type'],
-                  'label' => $m['type'] === 'fiche' ? 'Contrat Client Signé' : 'Photo terrain',
-                  'url' => $mUrl,
-                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
-                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
-                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
-                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                  'ajoute_par' => $m['added_by'] ?? 'Technicien',
-                ];
-                $waIds[] = $mId;
-                $waUrls[] = $mUrl;
-                $needsDbCleanup = true;
-              }
             }
           }
         }
@@ -1209,6 +1376,17 @@ try {
         if ($needsDbCleanup) {
           $cleanStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, points_gps = ?, videos_terrain = ? WHERE id = ?');
           $cleanStmt->execute([json_encode($r['whatsapp_photos']), json_encode($r['points_gps']), json_encode($r['videos_terrain']), $id]);
+        }
+      } catch (Exception $e) {}
+
+      // Purge des photos fantômes (fichier absent = carte vide / 404) et des doublons media_*
+      try {
+        $beforeWa = is_array($r['whatsapp_photos']) ? $r['whatsapp_photos'] : [];
+        $afterWa = sanitizeAndValidatePhotos($beforeWa, db());
+        if (count($afterWa) !== count($beforeWa)) {
+          $r['whatsapp_photos'] = $afterWa;
+          // Persistance sans toucher modifie_le (évite de déclencher une resynchronisation inutile)
+          db()->prepare('UPDATE interventions SET whatsapp_photos = ? WHERE id = ?')->execute([json_encode($afterWa), $id]);
         }
       } catch (Exception $e) {}
       echo json_encode($r);
@@ -1473,34 +1651,10 @@ try {
         $serverWa = json_decode($existing['whatsapp_photos'] ?? '[]', true) ?? [];
         if (!is_array($serverWa)) $serverWa = [];
       }
-      // Inclure également toute photo uploadée via media_upload dans intervention_media
-      if (!empty($d['id'])) {
-        try {
-          $mStmt = $pdo->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type NOT IN ('video', 'video_terrain')");
-          $mStmt->execute([$d['id']]);
-          $medias = $mStmt->fetchAll();
-          if (!empty($medias)) {
-            $existingWaIds = array_map('strval', array_filter(array_column($serverWa, 'id')));
-            foreach ($medias as $m) {
-              $mId = (string)$m['id'];
-              if (!in_array($mId, $existingWaIds, true)) {
-                $serverWa[] = [
-                  'id' => $mId,
-                  'slot' => 'media_' . $mId,
-                  'type' => $m['type'],
-                  'url' => 'https://fibretrack.mantota.com/api/' . ltrim($m['file_path'], '/'),
-                  'lat' => $m['latitude'] !== null ? (float)$m['latitude'] : null,
-                  'lng' => $m['longitude'] !== null ? (float)$m['longitude'] : null,
-                  'precision_m' => $m['precision_m'] !== null ? (float)$m['precision_m'] : null,
-                  'horodatage' => $m['captured_at'] ?: date('Y-m-d H:i:s'),
-                  'ajoute_par' => $m['added_by'] ?? '',
-                ];
-              }
-            }
-          }
-        } catch (Exception $e) {}
-      }
-
+      // media_upload alimente déjà whatsapp_photos avec le bon slot : on n'injecte plus les lignes
+      // intervention_media sous forme de cartes « media_<id> » (cause des doublons et des 404).
+      // On purge au contraire les cartes fantômes (fichier absent) et doublons de slot.
+      $serverWa = sanitizeAndValidatePhotos($serverWa, $pdo);
       // Supprimer physiquement du disque SSD les fichiers des photos expressément supprimées
       if (!empty($deletedWaPhotos) && !empty($serverWa)) {
         foreach ($serverWa as $oldPh) {
@@ -1566,7 +1720,7 @@ try {
           $cleanIncoming[] = $srvPh;
         }
 
-        $incomingWa = $cleanIncoming;
+        $incomingWa = sanitizeAndValidatePhotos($cleanIncoming, $pdo);
       }
 
       // --- videos_terrain : fusion additive multi-techniciens + rejet des URLs blob: locales ---
@@ -1869,14 +2023,33 @@ try {
         }
       }
 
-      // --- Déduction stock : à faire seulement au premier passage à 'termine' ---
-      $finalStatus = $d['statut'] ?? ($existing['statut'] ?? '');
+      // --- Détection statut & Déduction / Restitution stock ---
+      $rawFinalStatus = $d['statut'] ?? ($existing['statut'] ?? '');
+      $finalStatus = strtolower(trim((string)$rawFinalStatus));
 
-      $shouldDeductStock = $finalStatus === 'termine'
-        && (!$existing || (int)($existing['materiel_deduit'] ?? 0) === 0)
+      $incomingMotif = trim((string)($d['motif_non_traite'] ?? ''));
+      $existingMotif = trim((string)($existing['motif_non_traite'] ?? ''));
+      $finalMotif = $incomingMotif !== '' ? $incomingMotif : $existingMotif;
+
+      $isNonTraite = in_array($finalStatus, ['non_traite', 'non_traitee', 'annule', 'annulee', 'inacheve', 'inachevee'], true)
+        || ($finalMotif !== '' && $finalStatus !== 'termine');
+      $isTermine = !$isNonTraite && ($finalStatus === 'termine');
+
+      if ($isNonTraite && $finalStatus !== 'non_traite') {
+        $finalStatus = 'non_traite';
+        $d['statut'] = 'non_traite';
+      }
+
+      $wasDeducted = $existing && (int)($existing['materiel_deduit'] ?? 0) === 1;
+
+      $shouldDeductStock = $isTermine
+        && !$wasDeducted
         && (!$patchMode || in_array('statut', $changedFields, true) || $materialPatch);
-      $shouldReconcileStock = $finalStatus === 'termine'
-        && ($shouldDeductStock || ($existing && (int)($existing['materiel_deduit'] ?? 0) === 1 && $materialPatch));
+
+      $shouldReconcileStock = $isTermine
+        && ($shouldDeductStock || ($wasDeducted && $materialPatch));
+
+      $shouldRefundStock = !$isTermine && $wasDeducted;
 
       $serverNow = date('Y-m-d H:i:s');
       try {
@@ -1901,7 +2074,11 @@ try {
           $shouldPatchVid = ($changedFields !== null ? in_array('videos_terrain', $changedFields, true) : isset($d['videos_terrain'])) || !empty($incomingDeletedVideos);
           if ($shouldPatchWa) $patchAssignments[] = 'whatsapp_photos = :whatsapp_photos';
           if ($shouldPatchVid) $patchAssignments[] = 'videos_terrain = :videos_terrain';
-          if ($shouldDeductStock) $patchAssignments[] = 'materiel_deduit = 1';
+          if ($shouldDeductStock) {
+            $patchAssignments[] = 'materiel_deduit = 1';
+          } elseif ($shouldRefundStock || (!$isTermine && isset($d['materiel_deduit']) && (int)$d['materiel_deduit'] === 0)) {
+            $patchAssignments[] = 'materiel_deduit = 0';
+          }
           $patchAssignments[] = 'modifie_par = :modifie_par';
           $patchAssignments[] = 'modifie_le = :modifie_le';
           $stmt = $pdo->prepare('UPDATE interventions SET ' . implode(', ', array_unique($patchAssignments)) . ' WHERE id = :id');
@@ -1925,16 +2102,17 @@ try {
           $stmt->execute();
         } else {
           $d['modifie_le'] = $serverNow;
+          $matDeduitClause = $shouldDeductStock ? ", materiel_deduit = 1" : ($shouldRefundStock || !$isTermine ? ", materiel_deduit = 0" : "");
           $stmt = $pdo->prepare("INSERT INTO interventions SET " .
             implode(', ', array_map(fn($f) => "$f = :$f", $fields)) .
             ", materiel_pose = :materiel_pose, points_gps = :points_gps, whatsapp_photos = :whatsapp_photos, videos_terrain = :videos_terrain" .
-            ($shouldDeductStock ? ", materiel_deduit = 1" : "") .
+            $matDeduitClause .
             " ON DUPLICATE KEY UPDATE " . $setClause .
             ", materiel_pose = :materiel_pose" .
             ", points_gps = :points_gps" .
             ", whatsapp_photos = :whatsapp_photos" .
             ", videos_terrain = :videos_terrain" .
-            ($shouldDeductStock ? ", materiel_deduit = 1" : ""));
+            $matDeduitClause);
 
           foreach ($fields as $f) {
             $val = $d[$f] ?? null;
@@ -1969,6 +2147,23 @@ try {
             ], true);
             $deducted++;
           }
+        } elseif ($shouldRefundStock) {
+          $usageStmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? GROUP BY designation");
+          $usageStmt->execute([$d['id']]);
+          $recordedUsage = $usageStmt->fetchAll();
+          foreach ($recordedUsage as $movement) {
+            $netUsed = (int)$movement['quantite'];
+            if ($netUsed > 0) {
+              changeStockQuantity($pdo, $movement['designation'], $netUsed, [
+                'intervention_id' => $d['id'],
+                'nom_client' => $d['nom_client'] ?? ($existing['nom_client'] ?? ''),
+                'nom_technicien' => $d['nom_technicien'] ?? ($existing['nom_technicien'] ?? ''),
+                'motif' => 'Restitution stock - intervention ' . ($isNonTraite ? 'non traitée / inachevée' : $finalStatus),
+              ], true);
+              $deducted--;
+            }
+          }
+          $pdo->prepare("UPDATE interventions SET materiel_deduit = 0 WHERE id = ?")->execute([$d['id']]);
         }
 
         $updatedStmt = $pdo->prepare('SELECT modifie_le FROM interventions WHERE id = ?');

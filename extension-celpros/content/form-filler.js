@@ -317,6 +317,10 @@
       return { success: false, filledCount: 0, photosInjected: 0, error: "Racine DOM ou données d'intervention manquantes" };
     }
 
+    const data = (FieldMapping && typeof FieldMapping.normalizeInterventionData === "function")
+      ? FieldMapping.normalizeInterventionData(interventionData)
+      : interventionData;
+
     const currentStep = detectCurrentStep(root);
 
     // 1. Remplissage des champs textuels, numériques, selects, radios, checkboxes
@@ -332,7 +336,10 @@
     const preservedDetails = [];
     const unmatchedElements = [];
 
+    const isCancelled = typeof options?.shouldAbort === "function" ? options.shouldAbort : () => false;
+
     for (const el of elements) {
+      if (isCancelled()) break;
       // Éviter de re-traiter plusieurs fois le même groupe de boutons radio
       if (el.type === "radio" && el.name) {
         if (processedRadioGroups.has(el.name)) continue;
@@ -340,11 +347,11 @@
       }
 
       // Appariement intelligent du champ (avec support des matériels dynamiques réels)
-      const match = FieldMapping.matchElementToField(el, interventionData);
+      const match = FieldMapping.matchElementToField(el, data);
 
       if (match && match.definition) {
         const { definition } = match;
-        const val = definition.valueExtractor(interventionData);
+        const val = definition.valueExtractor(data);
 
         // Si le champ a été modifié manuellement par l'utilisateur, ne pas l'écraser
         if (isElementUserModified(el) && !options.forceOverwrite) {
@@ -359,9 +366,10 @@
           continue;
         }
 
-        // RÈGLE ABSOLUE : Si la valeur n'est pas renseignée (vide, null, undefined, false),
-        // NE PAS remplir le champ sur CelPros (le laisser intact/vide).
-        if (val !== undefined && val !== null && val !== "" && val !== false) {
+        // RÈGLE ABSOLUE : Si la valeur n'est pas renseignée (vide, null, undefined),
+        // ou si elle vaut false pour un champ texte/nombre, NE PAS remplir le champ sur CelPros.
+        // Pour une case à cocher, un booléen (true/false) est une valeur légitime qui doit être appliquée.
+        if (val !== undefined && val !== null && val !== "" && (val !== false || el.type === "checkbox")) {
           const filled = fillElement(el, val, definition, options);
           if (filled) {
             filledDetails.push({
@@ -387,9 +395,9 @@
     // 2. Injection automatique des photos correspondantes
     let photoReport = { totalSlotsFound: 0, injectedCount: 0, missingCount: 0, details: [] };
     const pf = PhotoFiller || (typeof globalThis !== "undefined" && globalThis.PhotoFiller) || (typeof window !== "undefined" && window.PhotoFiller);
-    if (pf && typeof pf.fillPhotosOnPage === "function") {
+    if (!isCancelled() && pf && typeof pf.fillPhotosOnPage === "function") {
       try {
-        photoReport = await pf.fillPhotosOnPage(interventionData, root);
+        photoReport = await pf.fillPhotosOnPage(data, root, options);
       } catch (err) {
         console.warn("[FormFiller] Erreur lors de l'injection des photos:", err);
       }
@@ -473,34 +481,25 @@
 
   function arePolesDuplicates(a, b) {
     if (!a || !b) return false;
-    if (a.id && b.id && a.id === b.id) return true;
+    if (a.id && b.id) {
+      return String(a.id) === String(b.id);
+    }
+    if (a.horodatage && b.horodatage && String(a.horodatage) !== String(b.horodatage)) {
+      return false;
+    }
+    const photoA = a.photo_url || a.photo || "";
+    const photoB = b.photo_url || b.photo || "";
+    if (photoA && photoB && String(photoA) !== String(photoB)) {
+      return false;
+    }
 
     const numA = Number(a.numero);
     const numB = Number(b.numero);
-    if (numA > 0 && numB > 0) {
-      if (numA !== numB) return false;
-    }
-
-    const latA = a.lat ?? a.latitude;
-    const lngA = a.lng ?? a.longitude;
-    const latB = b.lat ?? b.latitude;
-    const lngB = b.lng ?? b.longitude;
-
-    if (latA != null && lngA != null && latB != null && lngB != null) {
-      if (Math.abs(latA - latB) < 0.00005 && Math.abs(lngA - lngB) < 0.00005) {
-        return true;
-      }
-    }
+    if (!numA || !numB || numA !== numB) return false;
 
     const isImpA = Boolean(a.implante || a.implanted) || ["implanté", "implante"].includes(String(a.sous_type || "").toLowerCase().trim());
     const isImpB = Boolean(b.implante || b.implanted) || ["implanté", "implante"].includes(String(b.sous_type || "").toLowerCase().trim());
-    const isArmA = (Boolean(a.arme || a.armed) || ["armé", "arme"].includes(String(a.sous_type || "").toLowerCase().trim())) && !a.traverse && a.sous_type !== "Traversé";
-    const isArmB = (Boolean(b.arme || b.armed) || ["armé", "arme"].includes(String(b.sous_type || "").toLowerCase().trim())) && !b.traverse && b.sous_type !== "Traversé";
-    const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
-    const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
-
-    if (catA !== catB) return false;
-    if (!numA || !numB || numA !== numB) return false;
+    if (isImpA !== isImpB) return false;
 
     const txtA = `${a.proprietaire || ""} ${a.type_poteau || ""} ${a.nom || ""}`.toLowerCase();
     const txtB = `${b.proprietaire || ""} ${b.type_poteau || ""} ${b.nom || ""}`.toLowerCase();
@@ -511,6 +510,31 @@
 
     if ((aIsSbee && bIsPj) || (aIsPj && bIsSbee)) {
       return false;
+    }
+
+    const latA = Number(a.lat ?? a.latitude);
+    const lngA = Number(a.lng ?? a.longitude);
+    const latB = Number(b.lat ?? b.latitude);
+    const lngB = Number(b.lng ?? b.longitude);
+    const hasGpsA = !isNaN(latA) && !isNaN(lngA) && latA !== 0 && lngA !== 0;
+    const hasGpsB = !isNaN(latB) && !isNaN(lngB) && latB !== 0 && lngB !== 0;
+    if (hasGpsA && hasGpsB) {
+      if (Math.abs(latA - latB) >= 0.00001 || Math.abs(lngA - lngB) >= 0.00001) {
+        return false;
+      }
+    }
+
+    const isArmA = (Boolean(a.arme || a.armed) || ["armé", "arme"].includes(String(a.sous_type || "").toLowerCase().trim())) && !a.traverse && !a.traversed && a.sous_type !== "Traversé";
+    const isArmB = (Boolean(b.arme || b.armed) || ["armé", "arme"].includes(String(b.sous_type || "").toLowerCase().trim())) && !b.traverse && !b.traversed && b.sous_type !== "Traversé";
+    const catA = isImpA ? "implante" : isArmA ? "arme" : "traverse";
+    const catB = isImpB ? "implante" : isArmB ? "arme" : "traverse";
+
+    if (catA !== catB) {
+      const sameOwner = (aIsSbee && bIsSbee) || (aIsPj && bIsPj);
+      const sameExactGps = hasGpsA && hasGpsB && Math.abs(latA - latB) < 0.00001 && Math.abs(lngA - lngB) < 0.00001;
+      if (!sameOwner || !sameExactGps || a.id || b.id) {
+        return false;
+      }
     }
 
     return true;
@@ -558,7 +582,9 @@
   // 1. Rapport Global WhatsApp (Structure exacte demandée par l'équipe)
   function formatGlobalReport(data, compteurJour = {}) {
     if (!data) return "";
-    const d = data;
+    const d = (FieldMapping && typeof FieldMapping.normalizeInterventionData === "function")
+      ? FieldMapping.normalizeInterventionData(data)
+      : data;
     const mp = d.materiel_pose && typeof d.materiel_pose === "object" ? d.materiel_pose : {};
     const val = (key) => fmt2(mp[key]);
 
@@ -759,7 +785,9 @@
   // 2. Rapport de Conformité (Structure officielle audit)
   function formatConformiteReport(data) {
     if (!data) return "";
-    const d = data;
+    const d = (FieldMapping && typeof FieldMapping.normalizeInterventionData === "function")
+      ? FieldMapping.normalizeInterventionData(data)
+      : data;
     const dateFr = toFrDate(d.date);
     const msanFat = formatMsanFat(d.msan, d.fat_ref);
 

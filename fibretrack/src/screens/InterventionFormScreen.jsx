@@ -37,7 +37,7 @@ import {
   ALL_FAT_PORTS,
 } from "../lib/ports";
 import { parseClientInfo } from "../lib/clientParser";
-import { isInterventionTerminee } from "../lib/interventionFilters";
+import { isInterventionTerminee, isInterventionNonTraitee } from "../lib/interventionFilters";
 import { calculateMaterials } from "../lib/materialsCalculation.js";
 import { downloadPhotoFile, downloadAllPhotosAsZip } from "../lib/photoDownload";
 import { findPhotoForSlot } from "../lib/slotPhotos";
@@ -59,6 +59,7 @@ import {
   IconFileText,
   IconRefresh,
   IconCheckCircle,
+  IconXCircle,
   IconPole,
   IconZap,
   IconCable,
@@ -275,6 +276,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
   const finishingRef = useRef(false);
   const [finishModalOpen, setFinishModalOpen] = useState(false);
   const [finishSuccessData, setFinishSuccessData] = useState(null);
+  const [nonTraiteModalOpen, setNonTraiteModalOpen] = useState(false);
+  const [selectedNonTraiteReason, setSelectedNonTraiteReason] = useState("Client non joint / reporté");
+  const [customNonTraiteReason, setCustomNonTraiteReason] = useState("");
 
   // Géolocalisation automatique de la zone (Quartier, Ville)
   const [detectingZone, setDetectingZone] = useState(false);
@@ -608,6 +612,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           file: blob,
           slot,
           photoType: photoType || slot,
+          photoId,
           label: label || slot || "Photo terrain",
           latitude: lat,
           longitude: lng,
@@ -1697,8 +1702,8 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       uploadPhotoInBackground({
         photoId: newPhoto.id,
         photoDataUrl: embeddedPhoto,
-        slot: slotKey,
-        photoType: slotKey,
+        slot: newPhoto.slot || slotKey,
+        photoType: newPhoto.type || slotKey,
         label: slotLabel,
         lat,
         lng,
@@ -2956,7 +2961,27 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           } catch {}
 
           pendingVideoFilesRef.current.set(updatedTargetVideo.id, file);
-          setVideoProgress({ pct: 15, msg: `Téléversement direct vers le serveur…` });
+          let fileToUpload = file;
+          if (file && file.size > 5 * 1024 * 1024) {
+            setVideoProgress({ pct: 20, msg: `Optimisation vidéo reprise (${formatFileSize(file.size)})…` });
+            try {
+              const comp = await compressVideo(file, {
+                bannerInfo,
+                onProgress: (pct, msg) => {
+                  setVideoProgress({ pct: Math.min(55, 20 + Math.round(pct * 0.35)), msg: msg || "Compression vidéo…" });
+                },
+              });
+              if (comp && comp.blob && comp.blob.size > 0 && comp.blob.size < file.size) {
+                fileToUpload = comp.blob;
+                dur = comp.duration || dur;
+                if (comp.thumbnailDataUrl) thumbUrl = comp.thumbnailDataUrl;
+              }
+            } catch (cErr) {
+              console.warn("Compression vidéo reprise ignorée:", cErr);
+            }
+          }
+
+          setVideoProgress({ pct: fileToUpload !== file ? 58 : 15, msg: `Téléversement direct vers le serveur…` });
 
           // Suppression de l'ancienne vidéo du serveur si elle y existait
           if (replaceTarget.id && !replaceTarget.id.startsWith("vid_")) {
@@ -2971,7 +2996,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
           const uploaded = await uploadInterventionMedia({
             interventionId: data.id,
             type: "video",
-            file,
+            file: fileToUpload,
             latitude: activeLat,
             longitude: activeLng,
             precisionM: activePrecision,
@@ -2983,7 +3008,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
             source,
             onProgress: ({ pct, loaded, total }) => {
               setVideoProgress({
-                pct: Math.min(99, 10 + Math.round(pct * 0.89)),
+                pct: Math.min(99, (fileToUpload !== file ? 60 : 15) + Math.round(pct * (fileToUpload !== file ? 0.39 : 0.84))),
                 msg: `Envoi vidéo (${formatFileSize(loaded)} / ${formatFileSize(total)})…`,
               });
             },
@@ -3134,16 +3159,43 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
 
           pendingVideoFilesRef.current.set(video.id, file);
 
+          let fileToUpload = file;
+          // Compression automatique si la vidéo dépasse 5 Mo pour envoi ultra-rapide (< 3 secondes sur réseau 3G/4G)
+          if (file && file.size > 5 * 1024 * 1024) {
+            setVideoProgress({
+              pct: 20,
+              msg: `Optimisation vidéo #${i + 1}/${newItemsWithFiles.length} (${formatFileSize(file.size)})…`,
+            });
+            try {
+              const comp = await compressVideo(file, {
+                bannerInfo: isImported ? null : bannerInfo,
+                onProgress: (pct, msg) => {
+                  setVideoProgress({
+                    pct: Math.min(55, 20 + Math.round(pct * 0.35)),
+                    msg: msg || "Compression vidéo…",
+                  });
+                },
+              });
+              if (comp && comp.blob && comp.blob.size > 0 && comp.blob.size < file.size) {
+                fileToUpload = comp.blob;
+                dur = comp.duration || dur;
+                if (comp.thumbnailDataUrl) thumbUrl = comp.thumbnailDataUrl;
+              }
+            } catch (cErr) {
+              console.warn("Compression vidéo ignorée, repli envoi standard:", cErr);
+            }
+          }
+
           setVideoProgress({
-            pct: 15,
-            msg: `Téléversement vidéo #${i + 1}/${newItemsWithFiles.length} (${formatFileSize(file.size)})…`,
+            pct: fileToUpload !== file ? 58 : 15,
+            msg: `Téléversement vidéo #${i + 1}/${newItemsWithFiles.length} (${formatFileSize(fileToUpload.size)})…`,
           });
 
           try {
             const uploaded = await uploadInterventionMedia({
               interventionId: data.id,
               type: "video",
-              file,
+              file: fileToUpload,
               latitude: video.lat,
               longitude: video.lng,
               precisionM: video.precision_m,
@@ -3155,7 +3207,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               source,
               onProgress: ({ pct, loaded, total }) => {
                 setVideoProgress({
-                  pct: Math.min(99, 10 + Math.round(pct * 0.89)),
+                  pct: Math.min(99, (fileToUpload !== file ? 60 : 15) + Math.round(pct * (fileToUpload !== file ? 0.39 : 0.84))),
                   msg: `Envoi vidéo #${i + 1}/${newItemsWithFiles.length} (${formatFileSize(loaded)} / ${formatFileSize(total)})…`,
                 });
               },
@@ -3558,6 +3610,79 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
     } finally {
       setFinishing(false);
       finishingRef.current = false;
+    }
+  }
+
+  async function handleConfirmNonTraite(reason) {
+    const finalReason = reason || selectedNonTraiteReason;
+    setFinishing(true);
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    try {
+      const dirtySnapshot = new Set([...dirtyFieldsRef.current, "statut", "motif_non_traite", "materiel_deduit", "whatsapp_photos", "points_gps", "videos_terrain"]);
+      markDirty("statut");
+      markDirty("motif_non_traite");
+      markDirty("materiel_deduit");
+      const cleanVideos = (videosTerrainRef.current || []).filter((v) => v && (!v.url || !String(v.url).startsWith("blob:")));
+      const finalData = {
+        ...dataRef.current,
+        statut: "non_traite",
+        motif_non_traite: finalReason,
+        materiel_deduit: 0,
+        whatsapp_photos: whatsappPhotosRef.current,
+        videos_terrain: cleanVideos,
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
+        deleted_points: [...deletedGpsPointIdsRef.current],
+        deleted_whatsapp_photos: [...deletedWhatsappPhotoIdsRef.current],
+        deleted_videos: [...deletedVideoIdsRef.current],
+        _deleted_video_ids: [...deletedVideoIdsRef.current],
+        _fully_loaded: true,
+      };
+      saveInterventionLocally(finalData);
+      setData(finalData);
+      dataRef.current = finalData;
+
+      try {
+        saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
+        await saveQueueRef.current;
+      } catch (netErr) {
+        console.warn("non_traite server sync warning:", netErr);
+      }
+      setNonTraiteModalOpen(false);
+      onClose("non_traitees");
+    } catch (err) {
+      console.error("declare non-traite error:", err);
+      alert("Erreur lors de l'enregistrement : " + (err.message || "inconnue"));
+    } finally {
+      setFinishing(false);
+    }
+  }
+
+  async function handleReprendreIntervention() {
+    setFinishing(true);
+    try {
+      const dirtySnapshot = new Set([...dirtyFieldsRef.current, "statut", "motif_non_traite"]);
+      markDirty("statut");
+      markDirty("motif_non_traite");
+      const finalData = {
+        ...dataRef.current,
+        statut: "en_cours",
+        motif_non_traite: "",
+        modifie_par: currentUser,
+        modifie_le: new Date().toISOString(),
+        changed_fields: [...dirtySnapshot, "modifie_par", "modifie_le"],
+        _fully_loaded: true,
+      };
+      saveInterventionLocally(finalData);
+      setData(finalData);
+      dataRef.current = finalData;
+      try {
+        saveQueueRef.current = saveQueueRef.current.catch(() => {}).then(() => saveIntervention(finalData));
+        await saveQueueRef.current;
+      } catch {}
+    } finally {
+      setFinishing(false);
     }
   }
 
@@ -5181,6 +5306,9 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   <p className="form-card-sub">
                     Enregistrement et stockage de vidéos compressées (chantier, poteaux, passages délicats, etc.)
                   </p>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#059669", fontWeight: 600, display: "flex", alignItems: "center", gap: 5 }}>
+                    ⚡ Astuce terrain : 5 à 10 secondes suffisent pour valider le passage (envoi ultra-rapide en ~3s).
+                  </div>
                 </div>
                 <span
                   className={`photo-slot-badge ${videosTerrain.length > 0 ? "badge-success" : "badge-optional"}`}
@@ -6226,7 +6354,50 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
       </div>
 
       <footer className="form-footer">
-        {isInterventionTerminee(data) ? (
+        {isInterventionNonTraitee(data) ? (
+          <div className="form-finish-card is-canceled-card" style={{ background: "#fff7ed", borderColor: "#fed7aa", padding: 18, borderRadius: 12, border: "1px solid #fed7aa" }}>
+            <div className="form-finish-header" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
+              <span className="form-finish-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#ffedd5", padding: 8, borderRadius: 10 }}>
+                <IconXCircle size={24} color="#ea580c" />
+              </span>
+              <div>
+                <h4 className="form-finish-title" style={{ margin: "0 0 4px", color: "#9a3412", fontSize: 16, fontWeight: 700 }}>
+                  Intervention déclarée non traitée / inachevée
+                </h4>
+                <p className="form-finish-desc" style={{ margin: 0, color: "#c2410c", fontSize: 13 }}>
+                  Motif : <strong>{data.motif_non_traite || "Non spécifié"}</strong> • Aucun matériel n'est déduit du stock.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: "#ea580c", borderColor: "#ea580c", padding: "10px 18px", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={handleReprendreIntervention}
+                disabled={finishing}
+              >
+                <IconRefresh size={16} /> Reprendre l'intervention
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "10px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={() => setNonTraiteModalOpen(true)}
+              >
+                Modifier le motif
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "10px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}
+                onClick={() => onClose("non_traitees")}
+              >
+                <IconHome size={16} /> Revenir aux non traitées
+              </button>
+            </div>
+          </div>
+        ) : isInterventionTerminee(data) ? (
           <div className="form-finish-card is-done-card" style={{ background: "#f0fdf4", borderColor: "#86efac", padding: 18, borderRadius: 12, border: "1px solid #86efac" }}>
             <div className="form-finish-header" style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 12 }}>
               <span className="form-finish-icon" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#dcfce7", padding: 8, borderRadius: 10 }}>
@@ -6237,7 +6408,7 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                   Intervention clôturée et validée (Terminée)
                 </h4>
                 <p className="form-finish-desc" style={{ margin: 0, color: "#15803d", fontSize: 13 }}>
-                  Ce dossier a été validé. Vos modifications sont enregistrées automatiquement.
+                  Ce dossier a été validé de bout en bout. Le matériel a été déduit du stock d'équipe.
                 </p>
               </div>
             </div>
@@ -6253,10 +6424,19 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
               <button
                 type="button"
                 className="btn-secondary"
+                style={{ padding: "10px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6, color: "#b91c1c" }}
+                onClick={() => setNonTraiteModalOpen(true)}
+                title="Déclarer ce dossier non traité (restituera le matériel au stock)"
+              >
+                <IconXCircle size={16} /> Déclarer non traitée
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
                 style={{ padding: "10px 16px", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 6 }}
                 onClick={() => onClose("terminees")}
               >
-                <IconHome size={16} /> Revenir à l'accueil
+                <IconHome size={16} /> Revenir aux terminées
               </button>
             </div>
           </div>
@@ -6267,22 +6447,34 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 <IconFlag size={22} color="#15803d" />
               </span>
               <div>
-                <h4 className="form-finish-title">Clôture de l'intervention</h4>
+                <h4 className="form-finish-title">Clôture du dossier</h4>
                 <p className="form-finish-desc">
-                  Assurez-vous que les informations, photos et poteaux sont bien complets avant de clôturer.
+                  Clôturez l'intervention si le raccordement est achevé, ou déclarez-la non traitée si l'intervention n'a pas pu aboutir.
                 </p>
               </div>
             </div>
-            <button
-              type="button"
-              className="btn-finish-intervention"
-              onClick={() => setFinishModalOpen(true)}
-              disabled={finishing}
-              style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
-            >
-              <IconFlag size={16} color="#fff" />
-              {finishing ? "Finalisation en cours…" : "Terminer l'intervention"}
-            </button>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="btn-finish-intervention"
+                onClick={() => setFinishModalOpen(true)}
+                disabled={finishing}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+              >
+                <IconFlag size={16} color="#fff" />
+                {finishing ? "Finalisation en cours…" : "Terminer l'intervention"}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setNonTraiteModalOpen(true)}
+                disabled={finishing}
+                style={{ display: "inline-flex", alignItems: "center", gap: 8, borderColor: "#fed7aa", background: "#fff7ed", color: "#c2410c", fontWeight: 700 }}
+              >
+                <IconXCircle size={16} color="#ea580c" />
+                Déclarer non traitée / Inachevée
+              </button>
+            </div>
           </div>
         )}
       </footer>
@@ -6478,6 +6670,145 @@ export default function InterventionFormScreen({ intervention, onClose, onFinish
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {nonTraiteModalOpen && (
+        <div
+          className="modal-overlay"
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: "rgba(15, 23, 42, 0.65)",
+            backdropFilter: "blur(4px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: 16,
+          }}
+          onClick={() => setNonTraiteModalOpen(false)}
+        >
+          <div
+            className="modal-card"
+            style={{
+              background: "#fff",
+              borderRadius: 16,
+              maxWidth: 480,
+              width: "100%",
+              padding: 24,
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.2)",
+              textAlign: "left",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", background: "#ffedd5", padding: 8, borderRadius: 10 }}>
+                <IconXCircle size={22} color="#ea580c" />
+              </span>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 18, color: "#9a3412", fontWeight: 800 }}>
+                  Déclarer non traitée / Inachevée
+                </h3>
+                <p style={{ margin: "2px 0 0", fontSize: 13, color: "#64748b" }}>
+                  Ce dossier sera isolé et <strong>aucun matériel ne sera déduit du stock</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ margin: "14px 0" }}>
+              <label style={{ display: "block", fontSize: 13.5, fontWeight: 700, color: "#334155", marginBottom: 8 }}>
+                Sélectionnez le motif d'échec ou d'interruption :
+              </label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {[
+                  "Client non joint / reporté",
+                  "Tuyau SBEE écrasé ou bouché",
+                  "Zone non éligible / hors couverture",
+                  "Refus du client",
+                  "Problème d'accès au poteau / FAT",
+                  "Manque de matériel / rupture",
+                  "Autre motif (personnalisé)",
+                ].map((reason) => (
+                  <label
+                    key={reason}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "9px 12px",
+                      borderRadius: 8,
+                      border: "1.5px solid",
+                      borderColor: selectedNonTraiteReason === reason ? "#ea580c" : "#e2e8f0",
+                      background: selectedNonTraiteReason === reason ? "#fff7ed" : "#fff",
+                      cursor: "pointer",
+                      fontSize: 13.5,
+                      fontWeight: selectedNonTraiteReason === reason ? 700 : 500,
+                      color: selectedNonTraiteReason === reason ? "#9a3412" : "#334155",
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="nonTraiteReason"
+                      value={reason}
+                      checked={selectedNonTraiteReason === reason}
+                      onChange={() => setSelectedNonTraiteReason(reason)}
+                      style={{ accentColor: "#ea580c" }}
+                    />
+                    <span>{reason}</span>
+                  </label>
+                ))}
+              </div>
+
+              {selectedNonTraiteReason === "Autre motif (personnalisé)" && (
+                <div style={{ marginTop: 10 }}>
+                  <textarea
+                    rows={3}
+                    placeholder="Précisez la raison détaillée…"
+                    value={customNonTraiteReason}
+                    onChange={(e) => setCustomNonTraiteReason(e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1.5px solid #ea580c",
+                      fontSize: 13.5,
+                      fontFamily: "inherit",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 18 }}>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setNonTraiteModalOpen(false)}
+                disabled={finishing}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ background: "#ea580c", borderColor: "#ea580c", fontWeight: 700 }}
+                onClick={() => {
+                  const reason = selectedNonTraiteReason === "Autre motif (personnalisé)"
+                    ? (customNonTraiteReason.trim() || "Autre motif")
+                    : selectedNonTraiteReason;
+                  handleConfirmNonTraite(reason);
+                }}
+                disabled={finishing}
+              >
+                {finishing ? "Enregistrement…" : "Confirmer comme non traitée"}
+              </button>
+            </div>
           </div>
         </div>
       )}

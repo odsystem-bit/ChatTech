@@ -47,3 +47,62 @@ export function formatDateTimeFR(value) {
   if (!d) return value ? String(value) : "";
   return d.toLocaleString();
 }
+
+/**
+ * Vérifie si deux dates correspondent au même jour calendaire.
+ * @param {string|Date|null} value
+ * @param {string|Date} [ref]
+ * @returns {boolean}
+ */
+export function isSameDay(value, ref = new Date()) {
+  const d = parseServerDate(value);
+  const r = parseServerDate(ref);
+  if (!d || !r) return false;
+  return (
+    d.getFullYear() === r.getFullYear() &&
+    d.getMonth() === r.getMonth() &&
+    d.getDate() === r.getDate()
+  );
+}
+
+/**
+ * Vérifie si une date tombe dans la même semaine calendaire (du lundi au dimanche).
+ * @param {string|Date|null} value
+ * @param {string|Date} [ref]
+ * @returns {boolean}
+ */
+export function isSameWeek(value, ref = new Date()) {
+  const d = parseServerDate(value);
+  const r = parseServerDate(ref);
+  if (!d || !r) return false;
+
+  const getMonday = (date) => {
+    const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const day = copy.getDay(); // 0 is Sunday, 1 is Monday
+    const diff = (day === 0 ? -6 : 1) - day;
+    copy.setDate(copy.getDate() + diff);
+    copy.setHours(0, 0, 0, 0);
+    return copy;
+  };
+
+  const monRef = getMonday(r);
+  const sunRef = new Date(monRef);
+  sunRef.setDate(sunRef.getDate() + 6);
+  sunRef.setHours(23, 59, 59, 999);
+
+  return d >= monRef && d <= sunRef;
+}
+
+/**
+ * Vérifie si une date tombe dans le même mois et même année.
+ * @param {string|Date|null} value
+ * @param {string|Date} [ref]
+ * @returns {boolean}
+ */
+export function isSameMonth(value, ref = new Date()) {
+  const d = parseServerDate(value);
+  const r = parseServerDate(ref);
+  if (!d || !r) return false;
+  return d.getFullYear() === r.getFullYear() && d.getMonth() === r.getMonth();
+}
+

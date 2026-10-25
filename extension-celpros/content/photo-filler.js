@@ -58,11 +58,39 @@
     }
   }
 
-  // Convertit une URL HTTP ou dataURL en File (avec contournement CSP via Service Worker)
+  const FILE_CACHE_MAX = 40;
+  const srcFileCache = new Map();
+
+  function getCachedFile(cacheKey) {
+    if (!srcFileCache.has(cacheKey)) return null;
+    const file = srcFileCache.get(cacheKey);
+    srcFileCache.delete(cacheKey);
+    srcFileCache.set(cacheKey, file);
+    return file;
+  }
+
+  function setCachedFile(cacheKey, file) {
+    if (!cacheKey || !file) return;
+    if (srcFileCache.has(cacheKey)) {
+      srcFileCache.delete(cacheKey);
+    } else if (srcFileCache.size >= FILE_CACHE_MAX) {
+      const oldest = srcFileCache.keys().next().value;
+      if (oldest !== undefined) srcFileCache.delete(oldest);
+    }
+    srcFileCache.set(cacheKey, file);
+  }
+
+  // Convertit une URL HTTP ou dataURL en File (avec contournement CSP via Service Worker et cache LRU)
   async function srcToFile(src, filename = "photo.jpg") {
     if (!src || typeof src !== "string") return null;
+    const cacheKey = `${filename}::${src.length}::${src.slice(0, 64)}::${src.slice(-64)}`;
+    const cached = getCachedFile(cacheKey);
+    if (cached) return cached;
+
     if (src.startsWith("data:")) {
-      return dataUrlToFile(src, filename);
+      const f = dataUrlToFile(src, filename);
+      if (f) setCachedFile(cacheKey, f);
+      return f;
     }
 
     // 1. Passage par le service worker en priorité pour contourner CORS & CSP sur CelPros
@@ -75,7 +103,9 @@
           });
         });
         if (resp && resp.ok && resp.dataUrl) {
-          return dataUrlToFile(resp.dataUrl, filename);
+          const f = dataUrlToFile(resp.dataUrl, filename);
+          if (f) setCachedFile(cacheKey, f);
+          return f;
         }
       } catch (swErr) {
         console.warn("[PhotoFiller] Délégation background FETCH_MEDIA échouée:", swErr);
@@ -89,8 +119,11 @@
     }
     try {
       const res = await fetch(url);
+      if (!res.ok) return null;
       const blob = await res.blob();
-      return new File([blob], filename, { type: blob.type || "image/jpeg" });
+      const f = new File([blob], filename, { type: blob.type || "image/jpeg" });
+      setCachedFile(cacheKey, f);
+      return f;
     } catch (err) {
       console.warn("[PhotoFiller] Erreur fetch srcToFile:", err);
       return null;
@@ -144,7 +177,15 @@
   }
 
   function getEligibleWhatsappPhotos(data) {
-    const wa = Array.isArray(data?.whatsapp_photos) ? data.whatsapp_photos : [];
+    let wa = data?.whatsapp_photos;
+    if (typeof wa === "string") {
+      try {
+        wa = JSON.parse(wa);
+      } catch {
+        wa = [];
+      }
+    }
+    if (!Array.isArray(wa)) wa = [];
     return wa.filter((p) => !isExcludedFromCelpros(p));
   }
 
@@ -500,6 +541,7 @@
       key: "combine",
       label: "Combiné téléphonique",
       celprosLabel: "Image combiné",
+      ignored: true,
       keywords: [
         "image combine",
         "photo combine",
@@ -526,6 +568,7 @@
       key: "fiche_combine",
       label: "Fiche combiné",
       celprosLabel: "Image fiche combiné",
+      ignored: true,
       keywords: [
         "image fiche combine",
         "photo fiche combine",
@@ -575,10 +618,38 @@
           return { src: data.signature_client, name: "signature_client.png", slot: "contrat_client" };
         }
         const wa = getEligibleWhatsappPhotos(data);
-        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "contrat_client" || p.type === "contrat_client"));
-        if (direct) return { src: getPhotoSource(direct), name: "contrat_signe.jpg", slot: "contrat_client" };
+        const direct = wa.find((p) => getPhotoSource(p) && (p.slot === "contrat_client" || p.slot === "contrat_client_1" || p.type === "contrat_client"));
+        if (direct) return { src: getPhotoSource(direct), name: "contrat_signe.jpg", slot: direct.slot || "contrat_client" };
         const legacy = wa.find((p) => getPhotoSource(p) && p.name && /^(contrat|signature|contrat[-_ ]*client)(\s*\d+)?(\.jpe?g|\.png)?$/i.test(p.name.trim()));
         if (legacy) return { src: getPhotoSource(legacy), name: "contrat_signe.jpg", slot: "contrat_client" };
+        return null;
+      },
+    },
+    {
+      key: "contrat_client_2",
+      label: "Photo contrat client (2)",
+      celprosLabel: "Photo du 2ème contrat client",
+      keywords: [
+        "contrat 2",
+        "second contrat",
+        "contrat client 2",
+        "2eme contrat",
+        "deuxieme contrat",
+      ],
+      attrPatterns: [
+        /^field_?(photo_?)?contrat_?2/i,
+        /^photo_?contrat_?2/i,
+        /^contrat_?client_?2/i,
+      ],
+      negativeKeywords: ["fat", "pto", "mesure", "debit", "wifi", "combine", "cable"],
+      getPhoto: (data) => {
+        const wa = getEligibleWhatsappPhotos(data);
+        const c2 = wa.find((p) => getPhotoSource(p) && (p.slot === "contrat_client_2" || p.name?.includes("contrat_client_2") || p.label?.includes("(2)")));
+        if (c2) return { src: getPhotoSource(c2), name: "contrat_signe_2.jpg", slot: "contrat_client_2" };
+        const allContrats = wa.filter((p) => getPhotoSource(p) && (p.slot?.startsWith("contrat_client") || p.type === "contrat_client" || /contrat/i.test(p.name || "")));
+        if (allContrats.length >= 2) {
+          return { src: getPhotoSource(allContrats[1]), name: "contrat_signe_2.jpg", slot: "contrat_client_2" };
+        }
         return null;
       },
     },
@@ -629,35 +700,62 @@
     return null;
   }
 
-  // Injecte un fichier dans un input[type="file"] via DataTransfer
-  function injectFileIntoInput(inputEl, file, containerEl = null) {
+  // Nettoie le texte d'un élément en retirant les badges d'état injectés par ChapTech
+  function getCleanElementText(el) {
+    if (!el) return "";
+    const raw = el.innerText || el.textContent || "";
+    if (!raw) return "";
+    return raw
+      .replace(/✅\s*Photo injectée\s*\([^)]*\)/gi, "")
+      .replace(/⚠️\s*Photo absente dans FibreTrack\s*:[^\n\r]*/gi, "")
+      .trim();
+  }
+
+  // Injecte un fichier dans un input[type="file"] via DataTransfer (idempotent si le même fichier est déjà injecté)
+  function injectFileIntoInput(inputEl, file, containerEl = null, photoSrc = "") {
     if (!inputEl || !file) return false;
     try {
-      let dt = null;
-      if (typeof DataTransfer !== "undefined") {
-        dt = new DataTransfer();
-        dt.items.add(file);
-        inputEl.files = dt.files;
-      } else {
-        inputEl.files = [file];
-      }
+      const srcSig = photoSrc ? `${file.name}::${file.size}::${photoSrc.slice(-48)}` : `${file.name}::${file.size}`;
+      const alreadySame =
+        inputEl.files &&
+        inputEl.files.length === 1 &&
+        inputEl.files[0] &&
+        inputEl.files[0].name === file.name &&
+        inputEl.files[0].size === file.size &&
+        inputEl.dataset &&
+        inputEl.dataset.chaptechInjectedSig === srcSig;
 
-      // Événements standards pour frameworks réactifs (Angular, React, Vue)
-      if (typeof inputEl.dispatchEvent === "function") {
-        inputEl.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
-        inputEl.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
-      }
+      if (!alreadySame) {
+        let dt = null;
+        if (typeof DataTransfer !== "undefined") {
+          dt = new DataTransfer();
+          dt.items.add(file);
+          inputEl.files = dt.files;
+        } else {
+          inputEl.files = [file];
+        }
 
-      // Si le conteneur écoute l'événement drop
-      if (containerEl && typeof containerEl.dispatchEvent === "function") {
-        try {
-          const dropEvt = new DragEvent("drop", {
-            bubbles: true,
-            cancelable: true,
-            dataTransfer: dt,
-          });
-          containerEl.dispatchEvent(dropEvt);
-        } catch {}
+        if (inputEl.dataset) {
+          inputEl.dataset.chaptechInjectedSig = srcSig;
+        }
+
+        // Événements standards pour frameworks réactifs (Angular, React, Vue)
+        if (typeof inputEl.dispatchEvent === "function") {
+          inputEl.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+          inputEl.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+        }
+
+        // Si le conteneur écoute l'événement drop
+        if (containerEl && typeof containerEl.dispatchEvent === "function") {
+          try {
+            const dropEvt = new DragEvent("drop", {
+              bubbles: true,
+              cancelable: true,
+              dataTransfer: dt,
+            });
+            containerEl.dispatchEvent(dropEvt);
+          } catch {}
+        }
       }
 
       if (containerEl) {
@@ -683,15 +781,19 @@
 
     // Éviter d'ajouter plusieurs badges
     const existingBadge = container.querySelector ? container.querySelector(".chaptech-photo-injected-badge") : null;
+    const targetText = `✅ Photo injectée (${fileName})`;
     if (existingBadge) {
-      existingBadge.innerHTML = `✅ Photo injectée (${fileName})`;
+      existingBadge.innerHTML = targetText;
+      existingBadge.textContent = targetText;
       return;
     }
     const doc = container.ownerDocument || (typeof document !== "undefined" ? document : null);
     if (doc) {
       const badge = doc.createElement("div");
       badge.className = "chaptech-photo-injected-badge";
-      badge.innerHTML = `✅ Photo injectée (${fileName})`;
+      if (badge.dataset) badge.dataset.chaptechManaged = "true";
+      badge.innerHTML = targetText;
+      badge.textContent = targetText;
       if (badge.style) {
         badge.style.cssText =
           "background: #16a34a; color: #fff; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-top: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);";
@@ -715,7 +817,10 @@
       if (doc) {
         const badge = doc.createElement("div");
         badge.className = "chaptech-photo-missing-badge";
-        badge.innerHTML = `⚠️ Photo absente dans FibreTrack : ${label}`;
+        if (badge.dataset) badge.dataset.chaptechManaged = "true";
+        const targetText = `⚠️ Photo absente dans FibreTrack : ${label}`;
+        badge.innerHTML = targetText;
+        badge.textContent = targetText;
         if (badge.style) {
           badge.style.cssText =
             "background: #d97706; color: #fff; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; display: inline-block; margin-top: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.15);";
@@ -729,6 +834,14 @@
   function identifyPhotoContainer(container, input = null) {
     if (!container) return null;
     const targetInput = input || findFileInputForContainer(container);
+
+    // Ne jamais identifier un slot dynamique de poteau comme une règle statique (ex: autre_poteau)
+    if (
+      container.dataset?.chaptechPoleSlot === "true" ||
+      targetInput?.dataset?.chaptechPoleSlot === "true"
+    ) {
+      return null;
+    }
 
     const attributes = [];
     if (targetInput) {
@@ -749,28 +862,28 @@
       try {
         const escapedId = typeof CSS !== "undefined" && CSS.escape ? CSS.escape(targetInput.id) : targetInput.id;
         const explicitLabel = doc.querySelector(`label[for="${escapedId}"]`);
-        if (explicitLabel) labelTexts.push(explicitLabel.textContent || "");
+        if (explicitLabel) labelTexts.push(getCleanElementText(explicitLabel));
       } catch {}
     }
 
     const innerLabel = container.querySelector("label, h3, h4, h5, strong, [class*='title'], [class*='label']");
-    if (innerLabel) labelTexts.push(innerLabel.textContent || "");
+    if (innerLabel) labelTexts.push(getCleanElementText(innerLabel));
 
     if (container.previousElementSibling) {
       const prev = container.previousElementSibling;
       const tag = prev.tagName?.toLowerCase();
       if (tag === "label" || tag === "span" || tag === "h3" || tag === "h4" || tag === "strong" || tag === "p") {
-        labelTexts.push(prev.textContent || "");
+        labelTexts.push(getCleanElementText(prev));
       }
     }
 
-    labelTexts.push(container.innerText || container.textContent || "");
+    labelTexts.push(getCleanElementText(container));
 
     const parent = container.parentElement;
     if (parent && parent.querySelectorAll && parent.querySelectorAll('input[type="file"]').length <= 1) {
       const pLabel = parent.querySelector("label, h3, h4, strong, [class*='title'], [class*='label']");
       if (pLabel && pLabel !== innerLabel) {
-        labelTexts.push(pLabel.textContent || "");
+        labelTexts.push(getCleanElementText(pLabel));
       }
     }
 
@@ -846,7 +959,7 @@
     for (const input of fileInputs) {
       if (seenInputs.has(input)) continue;
       seenInputs.add(input);
-      const parent = input.closest ? input.closest(".upload-box, .dropzone, [class*='upload'], [class*='photo'], [class*='drop'], div") : input.parentElement;
+      const parent = input.closest ? input.closest(".upload-box, .dropzone, [class*='upload'], [class*='photo'], [class*='drop']") : null;
       const targetParent = parent || input.parentElement;
       if (targetParent && !seenContainers.has(targetParent)) {
         seenContainers.add(targetParent);
@@ -854,16 +967,14 @@
       }
     }
 
-    // 2. Toutes les zones en pointillés avec texte "photo" ou "importer"
-    const dashedBoxes = Array.from(root.querySelectorAll("div, label, section")).filter((el) => {
+    // 2. Toutes les zones d'upload avec texte "photo" ou "importer"
+    const uploadBoxes = Array.from(root.querySelectorAll(".upload-box, .dropzone, [class*='upload'], [class*='dropzone'], [class*='drop-box']")).filter((el) => {
       if (seenContainers.has(el)) return false;
       const txt = (el.innerText || "").toLowerCase();
-      const hasPhotoKeyword = txt.includes("photo") || txt.includes("importer") || txt.includes("appareil photo");
-      const isCard = (el.clientWidth || 0) > 120 && (el.clientHeight || 0) > 60;
-      return hasPhotoKeyword && isCard;
+      return txt.includes("photo") || txt.includes("importer") || txt.includes("appareil photo");
     });
 
-    for (const box of dashedBoxes) {
+    for (const box of uploadBoxes) {
       if (!seenContainers.has(box)) {
         seenContainers.add(box);
         const input = findFileInputForContainer(box);
@@ -877,10 +988,18 @@
   }
 
   // Fonction principale : remplit automatiquement les photos de la page uniquement si elles existent dans l'intervention
-  async function fillPhotosOnPage(interventionData, root = (typeof document !== "undefined" ? document : null)) {
+  async function fillPhotosOnPage(interventionData, root = (typeof document !== "undefined" ? document : null), options = {}) {
     if (!interventionData || !root) {
       return { success: false, injectedCount: 0, missingCount: 0, details: [] };
     }
+    const isCancelled = typeof options?.shouldAbort === "function" ? options.shouldAbort : () => false;
+    if (isCancelled()) {
+      return { success: false, cancelled: true, injectedCount: 0, missingCount: 0, details: [] };
+    }
+
+    const data = (FieldMapping && typeof FieldMapping.normalizeInterventionData === "function")
+      ? FieldMapping.normalizeInterventionData(interventionData)
+      : interventionData;
 
     const uploadSlots = findAllUploadContainers(root);
     const injectedDetails = [];
@@ -891,6 +1010,7 @@
     const missingInputs = new Set();
 
     for (const slot of uploadSlots) {
+      if (isCancelled()) break;
       const input = slot.input || findFileInputForContainer(slot.container);
       if (input && (processedInputs.has(input) || missingInputs.has(input))) {
         continue;
@@ -905,7 +1025,15 @@
         continue;
       }
 
-      const photoInfo = rule.getPhoto(interventionData);
+      // Si le slot est explicitement masqué (ex: Combiné téléphonique, Fiche combinée)
+      if (rule.ignored || rule.key === "combine" || rule.key === "fiche_combine") {
+        if (slot.container && slot.container.style) {
+          slot.container.style.display = "none";
+        }
+        continue;
+      }
+
+      const photoInfo = rule.getPhoto(data);
       if (!photoInfo || !photoInfo.src) {
         // La case existe dans CelPros mais aucune photo n'a été prise pour ce slot dans FibreTrack :
         // Marquer strictement comme manquante et NE JAMAIS laisser une autre photo s'y injecter
@@ -921,11 +1049,12 @@
 
       // Éviter d'injecter la même photo dans plusieurs slots différents par erreur
       if (assignedPhotoSources.has(photoInfo.src)) {
-        console.warn(`[PhotoFiller] Photo déjà injectée pour un autre slot, ignorée pour ${rule.key}`);
+        // Déjà injecté pour ce slot ou son clone responsive : continuer silencieusement
         continue;
       }
 
       const file = await srcToFile(photoInfo.src, photoInfo.name);
+      if (isCancelled()) break;
       if (!file) continue;
 
       if (input) {
@@ -933,7 +1062,7 @@
           continue;
         }
 
-        const ok = injectFileIntoInput(input, file, slot.container);
+        const ok = injectFileIntoInput(input, file, slot.container, photoInfo.src);
         if (ok) {
           processedInputs.add(input);
           assignedPhotoSources.add(photoInfo.src);
@@ -946,20 +1075,22 @@
 
           // Renseigner automatiquement les débits (Montant, Descendant, Ping) associés à la photo
           if (rule.key === "debit_wifi" || rule.key === "debit_cable") {
-            handleSpeedtestAutoFill(slot.container, interventionData, root);
+            handleSpeedtestAutoFill(slot.container, data, root);
           }
 
           // Renseigner automatiquement les mesures de puissance (FAT, PTO) associées à la photo
           if (rule.key === "mesure_fat" || rule.key === "mesure_pto") {
-            handlePowerAutoFill(slot.container, rule.key, interventionData, root);
+            handlePowerAutoFill(slot.container, rule.key, data, root);
           }
         }
       }
     }
 
     // Injection spécifique pour les poteaux si présents dans Step 4 (en protégeant les slots manquants)
-    const polesInjected = await handlePoteauxPhotos(interventionData, root, missingInputs, processedInputs);
-    injectedDetails.push(...polesInjected);
+    if (!isCancelled()) {
+      const polesInjected = await handlePoteauxPhotos(data, root, missingInputs, processedInputs, options);
+      injectedDetails.push(...polesInjected);
+    }
 
     return {
       success: true,
@@ -1101,33 +1232,128 @@
     }
   }
 
+  // Protection active contre l'ouverture intempestive du sélecteur de fichiers de l'OS
+  let fileDialogSuppressed = false;
+
+  function suppressNativeFileDialog(fn) {
+    if (typeof HTMLInputElement === "undefined" || !HTMLInputElement.prototype) {
+      return fn();
+    }
+    const originalClick = HTMLInputElement.prototype.click;
+    try {
+      fileDialogSuppressed = true;
+      HTMLInputElement.prototype.click = function () {
+        if (this && this.type === "file" && fileDialogSuppressed) {
+          console.warn("[PhotoFiller] Tentative d'ouverture de l'explorateur de fichiers bloquée:", this);
+          return;
+        }
+        return originalClick.apply(this, arguments);
+      };
+      return fn();
+    } finally {
+      fileDialogSuppressed = false;
+      HTMLInputElement.prototype.click = originalClick;
+    }
+  }
+
+  async function suppressNativeFileDialogAsync(asyncFn) {
+    if (typeof HTMLInputElement === "undefined" || !HTMLInputElement.prototype) {
+      return await asyncFn();
+    }
+    const originalClick = HTMLInputElement.prototype.click;
+    try {
+      fileDialogSuppressed = true;
+      HTMLInputElement.prototype.click = function () {
+        if (this && this.type === "file" && fileDialogSuppressed) {
+          console.warn("[PhotoFiller] Tentative d'ouverture de l'explorateur de fichiers bloquée (async):", this);
+          return;
+        }
+        return originalClick.apply(this, arguments);
+      };
+      return await asyncFn();
+    } finally {
+      fileDialogSuppressed = false;
+      HTMLInputElement.prototype.click = originalClick;
+    }
+  }
+
+  // Détecte formellement si un élément est lié à un déclencheur d'upload de fichier
+  // afin de NE JAMAIS le cliquer (ce qui ouvrirait le sélecteur de fichiers de l'OS).
+  function isFileUploadTrigger(el) {
+    if (!el) return false;
+    if (el.tagName === "INPUT" && el.type === "file") return true;
+    if (el.tagName === "LABEL" && el.htmlFor) {
+      const doc = el.ownerDocument || (typeof document !== "undefined" ? document : null);
+      if (doc) {
+        const target = doc.getElementById(el.htmlFor);
+        if (target && target.tagName === "INPUT" && target.type === "file") return true;
+      }
+    }
+    if (typeof el.querySelector === "function" && el.querySelector('input[type="file"]')) return true;
+    if (typeof el.closest === "function") {
+      const parentUpload = el.closest('input[type="file"], label[for], [class*="upload"], [class*="dropzone"], [class*="custom-file"], [class*="file-picker"]');
+      if (parentUpload) {
+        if (typeof parentUpload.querySelector === "function" && parentUpload.querySelector('input[type="file"]')) return true;
+        if (parentUpload.tagName === "LABEL" && parentUpload.htmlFor) {
+          const doc = el.ownerDocument || (typeof document !== "undefined" ? document : null);
+          if (doc) {
+            const target = doc.getElementById(parentUpload.htmlFor);
+            if (target && target.type === "file") return true;
+          }
+        }
+      }
+    }
+    const txt = (el.innerText || el.textContent || "").toLowerCase();
+    const aria = (typeof el.getAttribute === "function" ? el.getAttribute("aria-label") || "" : "").toLowerCase();
+    const title = (typeof el.getAttribute === "function" ? el.getAttribute("title") || "" : "").toLowerCase();
+    const cls = String(el.className || "").toLowerCase();
+    if (
+      cls.includes("upload") || cls.includes("dropzone") || cls.includes("file-input") || cls.includes("photo-box") ||
+      aria.includes("télécharger") || aria.includes("telecharger") || aria.includes("upload") || aria.includes("photo") || aria.includes("image") ||
+      title.includes("télécharger") || title.includes("telecharger") || title.includes("upload") || title.includes("photo") || title.includes("image") ||
+      txt.includes("télécharger") || txt.includes("telecharger") || txt.includes("parcourir") || txt.includes("browse") || txt.includes("importer") || txt.includes("prendre")
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   // Déclenche un clic hautement compatible avec Angular et les navigateurs modernes
   function robustClick(el) {
     if (!el) return false;
-    const target = (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
-    try {
-      if (typeof target.focus === "function") target.focus();
-      const mouseOpts = { bubbles: true, cancelable: true, view: typeof window !== "undefined" ? window : null };
-      if (typeof PointerEvent !== "undefined") {
-        try { target.dispatchEvent(new PointerEvent("pointerdown", mouseOpts)); } catch {}
+    // GARDE-FOU ABSOLU : Ne JAMAIS cliquer sur un déclencheur d'upload de fichier
+    // pour éviter l'ouverture intempestive en boucle du gestionnaire de fichiers de l'OS
+    if (isFileUploadTrigger(el)) {
+      return false;
+    }
+    return suppressNativeFileDialog(() => {
+      const elementsToClick = new Set([el]);
+      if (typeof el.closest === "function") {
+        const btn = el.closest("button, a, [role='button'], .btn");
+        if (btn && !isFileUploadTrigger(btn)) elementsToClick.add(btn);
       }
-      try { target.dispatchEvent(new MouseEvent("mousedown", mouseOpts)); } catch {}
-      if (typeof PointerEvent !== "undefined") {
-        try { target.dispatchEvent(new PointerEvent("pointerup", mouseOpts)); } catch {}
-      }
-      try { target.dispatchEvent(new MouseEvent("mouseup", mouseOpts)); } catch {}
-      try { target.dispatchEvent(new MouseEvent("click", mouseOpts)); } catch {}
-      if (typeof target.click === "function") {
-        target.click();
+      for (const target of elementsToClick) {
+        if (isFileUploadTrigger(target)) continue;
+        if (target.tagName === "INPUT" && target.type === "file") continue;
+        try {
+          if (typeof target.focus === "function") target.focus();
+          const mouseOpts = { bubbles: true, cancelable: true, view: typeof window !== "undefined" ? window : null };
+          if (typeof PointerEvent !== "undefined") {
+            try { target.dispatchEvent(new PointerEvent("pointerdown", mouseOpts)); } catch {}
+          }
+          try { target.dispatchEvent(new MouseEvent("mousedown", mouseOpts)); } catch {}
+          if (typeof PointerEvent !== "undefined") {
+            try { target.dispatchEvent(new PointerEvent("pointerup", mouseOpts)); } catch {}
+          }
+          try { target.dispatchEvent(new MouseEvent("mouseup", mouseOpts)); } catch {}
+          try { target.dispatchEvent(new MouseEvent("click", mouseOpts)); } catch {}
+          if (typeof target.click === "function") {
+            target.click();
+          }
+        } catch {}
       }
       return true;
-    } catch {
-      try {
-        if (typeof target.click === "function") target.click();
-        return true;
-      } catch {}
-    }
-    return false;
+    });
   }
 
   // Cherche l'élément titre/libellé de la section Poteaux dans CelPros (Étape 4)
@@ -1137,9 +1363,10 @@
 
     // 1. Chercher un élément dont le libellé mentionne explicitement "Poteaux" ou "Appuis"
     for (const el of candidates) {
-      if (el.children && el.children.length > 3) continue;
+      if (el.children && el.children.length > 4) continue;
       const txt = (el.innerText || el.textContent || "").trim();
-      if (/^(?:poteaux|poteaux travers[eé]s|appuis|appuis a[eé]riens)$/i.test(txt) ||
+      const clean = txt.replace(/[+\s]/g, "").toLowerCase();
+      if (clean === "poteaux" || clean === "poteauxtraverses" || clean === "appuis" || clean === "appuisaeriens" ||
           (/poteaux/i.test(txt) && /max\s*10/i.test(txt))) {
         return el;
       }
@@ -1147,7 +1374,7 @@
 
     // 2. Recherche textuelle ciblée
     for (const el of candidates) {
-      if (el.children && el.children.length > 3) continue;
+      if (el.children && el.children.length > 4) continue;
       const txt = (el.innerText || el.textContent || "").trim();
       if (/\bpoteaux\b/i.test(txt) && !/travers|implant|arm|nombre|nb/i.test(txt) && txt.length < 50) {
         return el;
@@ -1172,35 +1399,55 @@
 
     // Remonter vers le conteneur englobant (la carte "Rattachement" ou le groupe englobant)
     if (typeof titleEl.closest === "function") {
-      const card = titleEl.closest(".card, section, fieldset, .form-section, form, div.col-12");
+      const card = titleEl.closest(".card, section, fieldset, .form-section, form, [class*='step'], main");
       if (card) return card;
     }
     return titleEl.parentElement?.parentElement || titleEl.parentElement || root;
   }
 
-  // Cherche le bouton '+' pour ajouter un nouveau poteau dans CelPros
+  // Cherche le bouton '+' pour ajouter un nouveau poteau dans CelPros (exclusivement hors zones d'upload)
   function findAddPoleButton(container, root) {
     const titleEl = findPoteauxTitle(container || root);
-    const headerRow = titleEl ? (titleEl.closest ? (titleEl.closest(".d-flex, .row, [class*='row'], div") || titleEl.parentElement) : titleEl.parentElement) : null;
-    const areas = [headerRow, container, root].filter(Boolean);
+    let headerRow = null;
+    if (titleEl && typeof titleEl.closest === "function") {
+      headerRow = titleEl.closest(".d-flex, .row, [class*='row'], [class*='header'], [class*='title']");
+      if (!headerRow) headerRow = titleEl.parentElement;
+    } else if (titleEl) {
+      headerRow = titleEl.parentElement;
+    }
+
+    const siblingArea = titleEl?.parentElement?.parentElement || titleEl?.parentElement;
+    // RESTRICTION CRITIQUE : NE JAMAIS chercher dans tout le document 'root' pour ne pas capturer les boutons d'upload d'autres sections !
+    const areas = [headerRow, siblingArea, container].filter(Boolean);
 
     for (const area of areas) {
-      const candidates = Array.from(area.querySelectorAll("button, a, [role='button'], .btn, i, span, svg"));
+      const candidates = Array.from(area.querySelectorAll("button, a, [role='button'], .btn, i, span, svg, mat-icon"));
       for (const el of candidates) {
+        // Ignorer immédiatement tout élément lié à un upload de fichier
+        if (isFileUploadTrigger(el)) continue;
+
         const txt = (el.innerText || el.textContent || "").trim();
-        const aria = (el.getAttribute("aria-label") || "").toLowerCase();
-        const title = (el.getAttribute("title") || "").toLowerCase();
-        const cls = (el.className || (typeof el.className === "string" ? el.className : "")).toLowerCase();
+        const aria = (typeof el.getAttribute === "function" ? el.getAttribute("aria-label") || "" : "").toLowerCase();
+        const title = (typeof el.getAttribute === "function" ? el.getAttribute("title") || "" : "").toLowerCase();
+        const cls = String(el.className || "").toLowerCase();
+        const tag = el.tagName?.toLowerCase();
+
+        const btn = (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
+        if (isFileUploadTrigger(btn)) continue;
 
         if (txt === "+" || /^(?:\+\s*|\+[\s\w]*|ajouter|ajouter un poteau|add)$/i.test(txt)) {
-          return (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
+          return btn;
         }
-        if (aria.includes("ajouter") || aria.includes("add") || aria.includes("plus") ||
-            title.includes("ajouter") || title.includes("add") || title.includes("plus")) {
-          return (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
+        if (aria.includes("ajouter un poteau") || title.includes("ajouter un poteau") ||
+            (aria.includes("ajouter") && !aria.includes("photo") && !aria.includes("image") && !aria.includes("file"))) {
+          return btn;
         }
-        if (cls.includes("fa-plus") || cls.includes("btn-plus") || cls.includes("plus-icon") || cls.includes("add-btn") || cls.includes("fa-plus-circle")) {
-          return (typeof el.closest === "function" ? el.closest("button, a, [role='button'], .btn") : null) || el;
+        if ((cls.includes("fa-plus") || cls.includes("btn-plus") || cls.includes("plus-icon") || cls.includes("add-btn") || cls.includes("fa-plus-circle")) &&
+            !cls.includes("upload") && !cls.includes("file") && !cls.includes("photo")) {
+          return btn;
+        }
+        if (tag === "mat-icon" && txt.toLowerCase() === "add") {
+          return btn;
         }
       }
     }
@@ -1208,16 +1455,52 @@
   }
 
   // Récupère et ordonne rigoureusement tous les poteaux à injecter :
-  // 1) "Photos de poteaux géolocalisés (CelPros)" triées par numéro (Poteau 1, Poteau 2, ...)
-  // 2) "Autres poteaux" situés dans "Boîte à Photos CelPros"
+  // PHASE A : Poteaux numérotés 1..N (Poteau 1, Poteau 2, ...) dans l'ordre séquentiel strict
+  // PHASE B : "Autres poteaux" traités exclusivement après l'ensemble des poteaux numérotés
   function collectAllPoles(interventionData) {
     const poles = [];
     const assignedSources = new Set();
-    const pts = Array.isArray(interventionData?.points_gps) ? interventionData.points_gps : [];
+    let pts = interventionData?.points_gps;
+    if (typeof pts === "string") {
+      try {
+        pts = JSON.parse(pts);
+      } catch {
+        pts = [];
+      }
+    }
+    if (!Array.isArray(pts)) pts = [];
+
+    // Support des poteaux directs (interventionData.poteaux) si présents
+    let directPoles = interventionData?.poteaux;
+    if (typeof directPoles === "string") {
+      try {
+        directPoles = JSON.parse(directPoles);
+      } catch {
+        directPoles = [];
+      }
+    }
+    if (Array.isArray(directPoles)) {
+      for (const dp of directPoles) {
+        if (!dp) continue;
+        const dpSrc = getPhotoSource(dp.photo) || getPhotoSource(dp);
+        const alreadyInPts = pts.some((p) => {
+          if (!p) return false;
+          if (p.id && dp.id) return String(p.id) === String(dp.id);
+          const pSrc = getPhotoSource(p.photo) || getPhotoSource(p);
+          if (pSrc && dpSrc) return pSrc.trim().toLowerCase() === dpSrc.trim().toLowerCase();
+          return Number(p.numero) === Number(dp.numero) && String(p.sous_type || "") === String(dp.sous_type || "");
+        });
+        if (!alreadyInPts) {
+          pts.push({ type: "Poteau", ...dp });
+        }
+      }
+    }
+
     const wa = getEligibleWhatsappPhotos(interventionData);
 
-    // 1. Photos de poteaux géolocalisés (CelPros)
-    // Extraire tous les numéros présents (1, 2, 3...)
+    // ========================================================
+    // PHASE A : POTEAUX NUMÉROTÉS (1..N) DANS L'ORDRE SÉQUENTIEL
+    // ========================================================
     const poleNums = new Set();
     for (const p of pts) {
       if (p && (p.type === "Poteau" || normalizeText(p.type).includes("poteau"))) {
@@ -1227,52 +1510,97 @@
     }
     for (const p of wa) {
       const slot = String(p?.slot || "").toLowerCase();
+      const type = String(p?.type || "").toLowerCase();
+      if (slot.includes("autre") || type.includes("autre")) continue;
       const m = slot.match(/^poteau_?(\d+)$/);
       if (m) {
         const n = Number(m[1]);
         if (!isNaN(n) && n > 0) poleNums.add(n);
+      } else if (p?.numero && !isNaN(Number(p.numero)) && Number(p.numero) > 0) {
+        poleNums.add(Number(p.numero));
       }
     }
 
+    const normalizeSrc = (s) => (typeof s === "string" ? s.trim().toLowerCase() : "");
+
     // Tri strict croissant : Poteau 1, Poteau 2, Poteau 3...
+    // Si plusieurs poteaux distincts partagent le même numéro (ex: Traversé 1 et Implanté 1), chacun est préservé.
     const sortedNums = Array.from(poleNums).sort((a, b) => a - b);
     for (const num of sortedNums) {
-      const gpsPoint = pts.find(
+      const gpsPoints = pts.filter(
         (p) => p && (p.type === "Poteau" || normalizeText(p.type).includes("poteau")) && Number(p.numero) === num
       );
-      const waPhoto = wa.find((p) => {
+      const waPhotos = wa.filter((p) => {
         const slot = String(p?.slot || "").toLowerCase();
-        return slot === `poteau_${num}` || slot === `poteau${num}`;
+        const type = String(p?.type || "").toLowerCase();
+        if (slot.includes("autre") || type.includes("autre")) return false;
+        return slot === `poteau_${num}` || slot === `poteau${num}` || Number(p?.numero) === num;
       });
 
-      const src = getPhotoSource(gpsPoint?.photo) || getPhotoSource(waPhoto?.url) || getPhotoSource(waPhoto?.photo) || getPhotoSource(gpsPoint);
-      if (!src || assignedSources.has(src)) continue;
+      if (gpsPoints.length > 0) {
+        for (let idx = 0; idx < gpsPoints.length; idx++) {
+          const gpsPoint = gpsPoints[idx];
+          const waPhoto = waPhotos[idx] || (idx === 0 ? waPhotos[0] : null);
+          const src = getPhotoSource(gpsPoint?.photo) || getPhotoSource(gpsPoint) || getPhotoSource(waPhoto?.url) || getPhotoSource(waPhoto?.photo);
+          if (!src) continue;
+          const normSrc = normalizeSrc(src);
+          if (assignedSources.has(normSrc)) continue;
 
-      const lat = gpsPoint?.lat ?? waPhoto?.lat ?? interventionData?.latitude ?? null;
-      const lng = gpsPoint?.lng ?? waPhoto?.lng ?? interventionData?.longitude ?? null;
-      const precision_m = gpsPoint?.precision_m ?? waPhoto?.precision_m ?? null;
+          if (gpsPoint?.photo) assignedSources.add(normalizeSrc(getPhotoSource(gpsPoint.photo)));
+          if (waPhoto?.url) assignedSources.add(normalizeSrc(getPhotoSource(waPhoto.url)));
+          if (waPhoto?.photo) assignedSources.add(normalizeSrc(getPhotoSource(waPhoto.photo)));
+          assignedSources.add(normSrc);
 
-      assignedSources.add(src);
-      poles.push({
-        src,
-        name: `poteau_${num}.jpg`,
-        label: `Poteau ${num}`,
-        numero: num,
-        lat,
-        lng,
-        precision_m,
-        isAutrePoteau: false,
-      });
+          const lat = gpsPoint?.lat ?? gpsPoint?.latitude ?? waPhoto?.lat ?? interventionData?.latitude ?? null;
+          const lng = gpsPoint?.lng ?? gpsPoint?.longitude ?? waPhoto?.lng ?? interventionData?.longitude ?? null;
+          const precision_m = gpsPoint?.precision_m ?? waPhoto?.precision_m ?? null;
+
+          poles.push({
+            src,
+            name: `poteau_${num}.jpg`,
+            label: `Poteau ${num}`,
+            numero: num,
+            lat,
+            lng,
+            precision_m,
+            isAutrePoteau: false,
+          });
+        }
+      }
+
+      for (const waPhoto of waPhotos) {
+        const src = getPhotoSource(waPhoto?.url) || getPhotoSource(waPhoto?.photo) || getPhotoSource(waPhoto);
+        if (!src) continue;
+        const normSrc = normalizeSrc(src);
+        if (assignedSources.has(normSrc)) continue;
+        assignedSources.add(normSrc);
+
+        const fallbackGps = gpsPoints[0];
+        const lat = waPhoto?.lat ?? fallbackGps?.lat ?? fallbackGps?.latitude ?? interventionData?.latitude ?? null;
+        const lng = waPhoto?.lng ?? fallbackGps?.lng ?? fallbackGps?.longitude ?? interventionData?.longitude ?? null;
+        const precision_m = waPhoto?.precision_m ?? fallbackGps?.precision_m ?? null;
+
+        poles.push({
+          src,
+          name: `poteau_${num}.jpg`,
+          label: `Poteau ${num}`,
+          numero: num,
+          lat,
+          lng,
+          precision_m,
+          isAutrePoteau: false,
+        });
+      }
     }
 
-    // Points GPS Poteau sans numéro explicite (fallback)
+    // Points GPS Poteau sans numéro explicite (fallback séquentiel ordonné)
     for (const p of pts) {
       if (p && (p.type === "Poteau" || normalizeText(p.type).includes("poteau"))) {
         const n = Number(p.numero);
         if (isNaN(n) || n <= 0) {
           const src = getPhotoSource(p.photo) || getPhotoSource(p);
-          if (src && !assignedSources.has(src)) {
-            assignedSources.add(src);
+          if (src && !assignedSources.has(normalizeSrc(src))) {
+            assignedSources.add(normalizeSrc(src));
             const fallbackNum = poles.length + 1;
             poles.push({
               src,
@@ -1289,25 +1617,61 @@
       }
     }
 
-    // 2. "Autres poteaux" situés dans "Boîte à Photos CelPros"
+    // Photos Poteau dans wa sans numéro explicite (fallback si non encore assignées)
+    for (const p of wa) {
+      const slot = String(p?.slot || "").toLowerCase();
+      const type = String(p?.type || "").toLowerCase();
+      const isNumbered = Boolean(slot.match(/^poteau_?\d+$/) || (p?.numero && !isNaN(Number(p.numero)) && Number(p.numero) > 0));
+      if (!isNumbered && (slot === "poteau" || type === "poteau") && !slot.includes("autre") && !type.includes("autre")) {
+        const src = getPhotoSource(p);
+        if (src && !assignedSources.has(normalizeSrc(src))) {
+          assignedSources.add(normalizeSrc(src));
+          const fallbackNum = poles.length + 1;
+          poles.push({
+            src,
+            name: `poteau_${fallbackNum}.jpg`,
+            label: `Poteau ${fallbackNum}`,
+            numero: fallbackNum,
+            lat: p.lat ?? interventionData?.latitude ?? null,
+            lng: p.lng ?? interventionData?.longitude ?? null,
+            precision_m: p.precision_m ?? null,
+            isAutrePoteau: false,
+          });
+        }
+      }
+    }
+
+    // ========================================================
+    // PHASE B : "AUTRES POTEAUX" TRAITÉS APRÈS LES NUMÉROTÉS
+    // ========================================================
     const autresPoles = [];
+    const seenAutreKeys = new Set();
     for (const p of wa) {
       const src = getPhotoSource(p);
-      if (!src || assignedSources.has(src)) continue;
+      if (!src) continue;
 
       const slot = String(p?.slot || "").toLowerCase();
       const type = String(p?.type || "").toLowerCase();
       const desc = getPhotoDescription(p);
 
       if (slot === "autre_poteau" || slot.startsWith("autre_poteau") || type === "autre_poteau" || desc.includes("autre poteau")) {
+        const normSrc = normalizeSrc(src);
+        // Si cette URL exacte appartenait déjà à un poteau numéroté de Phase A (sans ID distinct d'autre_poteau), ignorer
+        if (assignedSources.has(normSrc) && !p.id) continue;
+
+        const uniqueKey = p.id
+          ? `id:${p.id}`
+          : `src:${normSrc}::${String(p.name || "").trim().toLowerCase()}::${String(p.label || "").trim().toLowerCase()}::${String(p.horodatage || "")}`;
+        if (seenAutreKeys.has(uniqueKey)) continue;
+        seenAutreKeys.add(uniqueKey);
         autresPoles.push(p);
       }
     }
 
     autresPoles.forEach((p, idx) => {
       const src = getPhotoSource(p);
-      if (!src || assignedSources.has(src)) return;
-      assignedSources.add(src);
+      if (!src) return;
+      assignedSources.add(normalizeSrc(src));
 
       const lat = p.lat ?? interventionData?.latitude ?? null;
       const lng = p.lng ?? interventionData?.longitude ?? null;
@@ -1330,26 +1694,27 @@
   }
 
   // Récupère tous les slots d'upload dédiés aux poteaux sur CelPros (Étape 4)
-  function findExistingPoleSlots(card, poteauxTitle) {
-    if (!card) return [];
+  function findExistingPoleSlots(cardOrRoot, poteauxTitle) {
+    const container = cardOrRoot || (typeof document !== "undefined" ? document : null);
+    if (!container) return [];
 
     const isForbiddenForPoles = (txt) => {
       return /c[aâ]ble|interne|externe|fat|pto|scan|mesure|d[eé]bit|wifi|contrat|combin[eé]|abonn[eé]|ont|box/i.test(txt);
     };
 
-    const fileInputs = Array.from(card.querySelectorAll('input[type="file"]'));
+    const fileInputs = Array.from(container.querySelectorAll('input[type="file"]'));
     const poleSlots = [];
 
     for (const inp of fileInputs) {
       const idName = `${inp.id || ""} ${inp.name || ""} ${inp.getAttribute("formcontrolname") || ""} ${inp.className || ""}`.toLowerCase();
       if (isForbiddenForPoles(idName)) continue;
 
-      const container = (typeof inp.closest === "function" ? inp.closest(".upload-box, [class*='upload'], .dropzone, div") : null) || inp.parentElement;
-      const containerText = (container?.innerText || container?.textContent || "").toLowerCase();
+      const cont = (typeof inp.closest === "function" ? inp.closest(".upload-box, [class*='upload'], .dropzone, [class*='drop'], div") : null) || inp.parentElement;
+      const containerText = getCleanElementText(cont).toLowerCase();
       if (isForbiddenForPoles(containerText)) continue;
 
       // Protection stricte : ne jamais recycler une case expressément marquée comme photo absente
-      if (container && container.querySelector && container.querySelector(".chaptech-photo-missing-badge")) {
+      if (cont && cont.querySelector && cont.querySelector(".chaptech-photo-missing-badge")) {
         continue;
       }
 
@@ -1369,10 +1734,10 @@
       const isExplicitPole = idName.includes("poteau") || containerText.includes("poteau") || containerText.includes("appui") || idName.includes("pole") || containerText.includes("pole");
 
       if (isExplicitPole || (isAfterHeader && !isForbiddenForPoles(containerText))) {
-        const row = (typeof inp.closest === "function" ? inp.closest(".row, .form-row, [class*='row'], .card-body, .col-12, [class*='item']") : null) || container?.parentElement || container;
+        const row = (typeof inp.closest === "function" ? inp.closest(".row, .form-row, [class*='row'], .card-body, .col-12, [class*='item']") : null) || cont?.parentElement || cont;
         poleSlots.push({
           input: inp,
-          container,
+          container: cont,
           row,
         });
       }
@@ -1398,14 +1763,20 @@
       container.querySelectorAll('input:not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
     );
 
-    // 2. Si pas trouvé, remonter au parent direct (ligne du poteau) uniquement s'il n'englobe pas d'autres slots de fichiers
-    if (inputs.length === 0 && container.parentElement) {
-      const parent = container.parentElement;
-      const otherFileInputs = parent.querySelectorAll ? parent.querySelectorAll('input[type="file"]') : [];
-      if (otherFileInputs.length <= 1) {
-        inputs = Array.from(
-          parent.querySelectorAll('input:not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
-        );
+    // 2. Si pas trouvé, remonter au parent direct ou à la ligne (slot.row) uniquement s'il n'englobe pas d'autres slots de fichiers
+    if (inputs.length === 0) {
+      const candidates = [container.parentElement, slot.row].filter(Boolean);
+      for (const parent of candidates) {
+        const otherFileInputs = parent.querySelectorAll ? parent.querySelectorAll('input[type="file"]') : [];
+        if (otherFileInputs.length <= 1) {
+          const found = Array.from(
+            parent.querySelectorAll('input:not([type="file"]):not([type="hidden"]):not([type="button"]):not([type="submit"]):not([type="checkbox"]):not([type="radio"])')
+          );
+          if (found.length > 0) {
+            inputs = found;
+            break;
+          }
+        }
       }
     }
 
@@ -1452,19 +1823,20 @@
   }
 
   // Gère l'ajout et l'injection des photos de poteaux géolocalisés et "Autre poteau" (uniquement si elles existent)
-  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null), missingInputs = new Set(), processedInputs = new Set()) {
+  async function handlePoteauxPhotos(interventionData, root = (typeof document !== "undefined" ? document : null), missingInputs = new Set(), processedInputs = new Set(), options = {}) {
     const details = [];
     if (!root || !interventionData) return details;
+    const isCancelled = typeof options?.shouldAbort === "function" ? options.shouldAbort : () => false;
+    if (isCancelled()) return details;
 
     const allPoles = collectAllPoles(interventionData);
     if (!allPoles.length) return details;
 
-    // Détection de la section Poteaux
+    // Détection de la section Poteaux (spécifique à l'Étape 4)
     const poteauxTitle = findPoteauxTitle(root);
     if (!poteauxTitle) return details;
 
     const section = findPoteauxSection(root) || root;
-    const addBtn = findAddPoleButton(section, root);
     const maxPoles = Math.min(10, allPoles.length);
 
     const getPoleSlots = () => findExistingPoleSlots(section, poteauxTitle);
@@ -1475,7 +1847,9 @@
     if (multipleSlot) {
       const poleFiles = [];
       for (let i = 0; i < maxPoles; i++) {
+        if (isCancelled()) return details;
         const f = await srcToFile(allPoles[i].src, allPoles[i].name);
+        if (isCancelled()) return details;
         if (f) poleFiles.push(f);
       }
       if (poleFiles.length > 0) {
@@ -1488,9 +1862,11 @@
           processedInputs.add(multipleSlot.input);
           for (let i = 0; i < poleFiles.length; i++) {
             details.push({
-              slot: allPoles[i].isAutrePoteau ? `autre_poteau_${i + 1}` : `poteau_${allPoles[i].numero || i + 1}`,
+              slot: `poteau_${i + 1}`,
               label: allPoles[i].label,
               fileName: poleFiles[i].name,
+              category: allPoles[i].isAutrePoteau ? "autre_poteau" : "poteau",
+              isAutrePoteau: Boolean(allPoles[i].isAutrePoteau),
               sizeKb: Math.round(poleFiles[i].size / 1024),
               gps: allPoles[i].lat != null && allPoles[i].lng != null ? `${Number(allPoles[i].lat).toFixed(6)}, ${Number(allPoles[i].lng).toFixed(6)}` : undefined,
             });
@@ -1501,46 +1877,62 @@
     }
 
     // Cas 2 : Slots dynamiques unitaires (appuyer sur '+' pour faire apparaître chaque case)
+    let addPoleButtonFailed = false;
     for (let i = 0; i < maxPoles; i++) {
+      if (isCancelled()) break;
       const pole = allPoles[i];
       if (!pole || !pole.src) continue;
 
       let slots = getPoleSlots();
 
-      // Si aucun slot disponible à l'index i, cliquer sur '+' et attendre réactivement jusqu'à 2000ms
-      if (slots.length <= i && addBtn) {
-        const prevCount = slots.length;
-        robustClick(addBtn);
+      // Si aucun slot disponible à l'index i, chercher le bouton '+' SANS RISQUE D'UPLOAD
+      if (slots.length <= i && !addPoleButtonFailed) {
+        const addBtn = findAddPoleButton(section, root);
+        if (addBtn && !isFileUploadTrigger(addBtn)) {
+          const prevCount = slots.length;
+          await suppressNativeFileDialogAsync(async () => {
+            if (isCancelled()) return;
+            robustClick(addBtn);
 
-        // Scrutation active toutes les 80ms
-        const start = Date.now();
-        while (Date.now() - start < 2000) {
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          slots = getPoleSlots();
-          if (slots.length > prevCount) {
-            break;
+            // Scrutation active courte (maximum 600ms au lieu de 1500ms)
+            const start = Date.now();
+            while (Date.now() - start < 600) {
+              if (isCancelled()) break;
+              await new Promise((resolve) => setTimeout(resolve, 80));
+              slots = getPoleSlots();
+              if (slots.length > prevCount) {
+                break;
+              }
+            }
+          });
+          if (isCancelled()) break;
+
+          // Si le clic n'a pas augmenté le nombre de slots, désactiver immédiatement pour tous les poteaux suivants
+          if (slots.length <= prevCount) {
+            addPoleButtonFailed = true;
           }
-        }
-
-        // Retry au bout de 500ms si Angular n'a pas encore réagi
-        if (slots.length <= prevCount) {
-          robustClick(addBtn);
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          slots = getPoleSlots();
+        } else {
+          addPoleButtonFailed = true;
         }
       }
 
-      // Sélectionner le slot correspondant : jamais un input manquant ni déjà injecté
-      const targetSlot = slots[i] || slots.find((s) => s.input && !missingInputs.has(s.input) && !processedInputs.has(s.input) && (!s.input.files || s.input.files.length === 0));
+      // RÈGLE ABSOLUE DE SÉQUENCE :
+      // Le poteau à l'indice i doit être injecté UNIQUEMENT dans le slot à l'indice i !
+      // Ne JAMAIS se rabattre sur slots.find(...) qui ré-injectait Poteau 1 en boucle sur le premier slot.
+      const targetSlot = slots[i];
       if (targetSlot && targetSlot.input) {
         if (missingInputs.has(targetSlot.input) || processedInputs.has(targetSlot.input)) {
           continue;
         }
 
         const file = await srcToFile(pole.src, pole.name);
+        if (isCancelled()) break;
         if (file) {
           const container = targetSlot.container;
-          const ok = injectFileIntoInput(targetSlot.input, file, container);
+          if (container && container.dataset) container.dataset.chaptechPoleSlot = "true";
+          if (targetSlot.input && targetSlot.input.dataset) targetSlot.input.dataset.chaptechPoleSlot = "true";
+
+          const ok = injectFileIntoInput(targetSlot.input, file, container, pole.src);
           if (ok) {
             processedInputs.add(targetSlot.input);
             // Renseigner automatiquement les coordonnées GPS
@@ -1550,6 +1942,8 @@
               slot: `poteau_${i + 1}`,
               label: pole.label,
               fileName: file.name,
+              category: pole.isAutrePoteau ? "autre_poteau" : "poteau",
+              isAutrePoteau: Boolean(pole.isAutrePoteau),
               sizeKb: Math.round(file.size / 1024),
               gps: pole.lat != null && pole.lng != null ? `${Number(pole.lat).toFixed(6)}, ${Number(pole.lng).toFixed(6)}` : undefined,
             });
@@ -1580,5 +1974,7 @@
     findExistingPoleSlots,
     injectPoleCoordinates,
     handlePoteauxPhotos,
+    suppressNativeFileDialog,
+    suppressNativeFileDialogAsync,
   };
 });

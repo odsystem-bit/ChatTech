@@ -1,12 +1,57 @@
-import { parseServerDate } from "./date.js";
+import { parseServerDate, isSameDay, isSameWeek, isSameMonth } from "./date.js";
+
+/**
+ * Détermine si une intervention est supprimée.
+ * @param {object} intv
+ * @returns {boolean}
+ */
+export function isInterventionSupprimee(intv) {
+  if (!intv || typeof intv !== "object") return true;
+  if (intv.supprime_le) return true;
+  const s = String(intv.statut || "").trim().toLowerCase();
+  return s === "supprime" || s === "supprimee" || s === "deleted";
+}
+
+/**
+ * Détermine si une intervention a été déclarée non traitée / annulée (conservée dans l'historique).
+ * RÈGLE ABSOLUE : Une intervention non traitée N'EST JAMAIS une intervention terminée.
+ * @param {object} intv
+ * @returns {boolean}
+ */
+export function isInterventionNonTraitee(intv) {
+  if (!intv || typeof intv !== "object") return false;
+  if (isInterventionSupprimee(intv)) return false;
+  const s = String(intv.statut || "").trim().toLowerCase();
+  const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  if (norm === "non_traite" || norm === "non_traitee" || norm === "annule" || norm === "annulee" || norm === "inacheve" || norm === "inachevee") {
+    return true;
+  }
+  if (intv.motif_non_traite && String(intv.motif_non_traite).trim() !== "" && norm !== "termine" && norm !== "terminee") {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Détermine la date de complétion d'une intervention pour les filtres par période.
+ * @param {object} intv
+ * @returns {string|null}
+ */
+export function getInterventionCompletionDate(intv) {
+  return intv?.date_cloture || intv?.cloture_le || intv?.cloture_at || intv?.modifie_le || intv?.date || null;
+}
 
 /**
  * Détermine si une intervention est terminée.
+ * Une intervention est terminée lorsqu'elle a été menée à son terme avec succès.
+ * Les interventions non traitées / inachevées sont strictement exclues.
  * @param {object} intv
  * @returns {boolean}
  */
 export function isInterventionTerminee(intv) {
   if (!intv || typeof intv !== "object") return false;
+  if (isInterventionSupprimee(intv)) return false;
+  if (isInterventionNonTraitee(intv)) return false;
   const s = String(intv.statut || "").trim().toLowerCase();
   const norm = s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   if (norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done") {
@@ -19,7 +64,36 @@ export function isInterventionTerminee(intv) {
 }
 
 /**
- * Détermine si une intervention est en cours (effectivement démarrée et non terminée).
+ * Détermine si une intervention appartient à la feuille de route "Tournée du jour" (uniquement à effectuer).
+ * Une intervention terminée, supprimée, déclarée non traitée ou déjà en cours de traitement
+ * quitte automatiquement la tournée du jour.
+ * @param {object} intv
+ * @param {string|null} [targetDate] - Date cible YYYY-MM-DD (optionnel)
+ * @returns {boolean}
+ */
+export function isInterventionATraiterTournee(intv, targetDate = null) {
+  if (!intv || typeof intv !== "object") return false;
+  if (isInterventionSupprimee(intv)) return false;
+  if (isInterventionTerminee(intv)) return false;
+  if (isInterventionNonTraitee(intv)) return false;
+
+  const s = String(intv.statut || "").trim().toLowerCase();
+  const isWaiting = Boolean(intv.tournee_verrouille) || s === "en_attente" || s === "a_faire" || s === "planifie" || s === "planifiee";
+  if (!isWaiting) return false;
+
+  if (targetDate) {
+    if (intv.tournee_du_jour) {
+      return String(intv.tournee_du_jour).slice(0, 10) === targetDate;
+    }
+    const intvDate = String(intv.date || "").slice(0, 10);
+    return intvDate === targetDate;
+  }
+
+  return true;
+}
+
+/**
+ * Détermine si une intervention est en cours (effectivement démarrée / prise en charge et non terminée).
  * Les interventions simplement planifiées dans la tournée mais non lancées (statut 'en_attente' ou 'tournee_verrouille')
  * NE SONT PAS en cours.
  * @param {object} intv
@@ -27,10 +101,11 @@ export function isInterventionTerminee(intv) {
  */
 export function isInterventionEnCours(intv) {
   if (!intv || typeof intv !== "object") return false;
+  if (isInterventionSupprimee(intv)) return false;
   if (isInterventionTerminee(intv)) return false;
-  if (intv.supprime_le) return false;
+  if (isInterventionNonTraitee(intv)) return false;
   const s = String(intv.statut || "").trim().toLowerCase();
-  if (s === "non_traite" || s === "annule" || s === "supprime" || s === "en_attente") return false;
+  if (s === "en_attente" || s === "a_faire" || s === "planifie" || s === "planifiee") return false;
   if (Boolean(intv.tournee_verrouille)) return false;
   if (intv.tournee_du_jour && (Boolean(intv.tournee_verrouille) || s !== "en_cours")) return false;
   return true;
@@ -42,11 +117,11 @@ export function isInterventionEnCours(intv) {
  * @returns {{ label: string, variant: 'done' | 'progress' | 'pending' | 'danger' }}
  */
 export function getInterventionBadge(intv) {
-  const s = String(intv?.statut || "").trim().toLowerCase();
-  if (s === "non_traite" || s === "annule") {
-    return { label: "Non traité", variant: "danger" };
+  if (isInterventionNonTraitee(intv)) {
+    return { label: "Non traitée", variant: "danger" };
   }
-  if (intv?.tournee_verrouille || s === "en_attente") {
+  const s = String(intv?.statut || "").trim().toLowerCase();
+  if (intv?.tournee_verrouille || s === "en_attente" || s === "a_faire" || s === "planifie" || s === "planifiee") {
     return { label: "En attente", variant: "pending" };
   }
   if (isInterventionTerminee(intv)) {
@@ -79,7 +154,7 @@ export function normalizeSearchText(text) {
 /**
  * Vérifie si une intervention correspond à une requête de recherche textuelle globale.
  * Recherche sur : ID (court ou long), nom client, téléphones (fixe et mobile),
- * technicien, type/offre, zone/adresse, FAT/MSAN.
+ * technicien, type/offre, zone/adresse, FAT/MSAN, date.
  * @param {object} intv
  * @param {string} query
  * @returns {boolean}
@@ -98,7 +173,7 @@ export function matchesInterventionSearch(intv, query) {
   if (client.includes(q) || dossier.includes(q)) return true;
 
   // 3. Téléphones (fixe et mobile, recherche brute sans tirets/espaces également)
-  const telFixe = normalizeSearchText(intv.telephone_ligne);
+  const telFixe = normalizeSearchText(intv.telephone_ligne || intv.telephone);
   const telMobile = normalizeSearchText(intv.mobile);
   const digitsOnlyQ = q.replace(/\D/g, "");
   if (telFixe.includes(q) || telMobile.includes(q)) return true;
@@ -113,20 +188,26 @@ export function matchesInterventionSearch(intv, query) {
   const equipe = normalizeSearchText(intv.nom_equipe);
   if (tech.includes(q) || equipe.includes(q)) return true;
 
-  // 5. Type d'intervention / Offre / État
+  // 5. Type d'intervention / Offre / État / Motif non traité
   const offre = normalizeSearchText(intv.offre_souscrite);
   const etat = normalizeSearchText(intv.etat);
-  if (offre.includes(q) || etat.includes(q)) return true;
+  const motif = normalizeSearchText(intv.motif_non_traite);
+  if (offre.includes(q) || etat.includes(q) || motif.includes(q)) return true;
 
   // 6. Adresse et zone géographique
-  const zone = normalizeSearchText(intv.adresse_zone);
+  const zone = normalizeSearchText(intv.adresse_zone || intv.ville || intv.commune);
   if (zone.includes(q)) return true;
 
-  // 7. Références FAT, MSAN, Port
+  // 7. Références FAT, MSAN, Port, SN
   const fat = normalizeSearchText(intv.fat_ref);
   const msan = normalizeSearchText(intv.msan);
   const port = normalizeSearchText(intv.port);
-  if (fat.includes(q) || msan.includes(q) || port.includes(q)) return true;
+  const sn = normalizeSearchText(intv.ont_sn || intv.sn);
+  if (fat.includes(q) || msan.includes(q) || port.includes(q) || sn.includes(q)) return true;
+
+  // 8. Date (YYYY-MM-DD)
+  const dateStr = normalizeSearchText(intv.tournee_du_jour || intv.date);
+  if (dateStr.includes(q)) return true;
 
   return false;
 }
@@ -164,9 +245,11 @@ export function sortInterventions(list, sortBy = "date_desc") {
  * Filtre et organise les interventions pour l'accueil.
  * @param {object[]} allInterventions
  * @param {{
- *   activeTab: 'en_cours' | 'terminees',
- *   searchQuery: string,
- *   searchTabFilter?: 'all' | 'en_cours' | 'terminees',
+ *   activeTab?: 'tournee' | 'en_cours' | 'terminees' | 'non_traitees' | 'rapport',
+ *   historySubFilter?: 'terminees' | 'non_traitees' | 'all',
+ *   periodFilter?: 'today' | 'week' | 'month' | 'all',
+ *   searchQuery?: string,
+ *   searchTabFilter?: 'all' | 'en_cours' | 'terminees' | 'non_traitees',
  *   technicienFilter?: string,
  *   sortBy?: 'date_desc' | 'date_asc' | 'client_asc' | 'client_desc',
  *   page?: number,
@@ -176,29 +259,48 @@ export function sortInterventions(list, sortBy = "date_desc") {
 export function filterAndOrganizeInterventions(allInterventions = [], options = {}) {
   const {
     activeTab = "en_cours",
+    historySubFilter = "terminees",
+    periodFilter = "all",
     searchQuery = "",
     searchTabFilter = "all",
     technicienFilter = "all",
     sortBy = "date_desc",
     page = 1,
     pageSize = 15,
+    targetDate,
+    selectedDate,
   } = options;
 
   // 1. Compteurs globaux (toujours basés sur TOUTES les interventions valides non supprimées)
   let enCoursCount = 0;
   let termineesCount = 0;
+  let nonTraiteesCount = 0;
   let tourneeTodayCount = 0;
-  const todayIso = new Date().toISOString().slice(0, 10);
+  let rapportCount = 0;
+  let termineesTodayCount = 0;
+  let termineesWeekCount = 0;
+  let termineesMonthCount = 0;
+
+  const now = new Date();
+  const defaultToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const todayIso = targetDate || selectedDate || defaultToday;
 
   for (const intv of allInterventions) {
-    if (!intv || intv.supprime_le || String(intv.statut || "").toLowerCase() === "supprime") continue;
+    if (isInterventionSupprimee(intv)) continue;
+    rapportCount++;
     if (isInterventionTerminee(intv)) {
       termineesCount++;
+      const cDate = getInterventionCompletionDate(intv);
+      if (isSameDay(cDate)) termineesTodayCount++;
+      if (isSameWeek(cDate)) termineesWeekCount++;
+      if (isSameMonth(cDate)) termineesMonthCount++;
+    } else if (isInterventionNonTraitee(intv)) {
+      nonTraiteesCount++;
     } else if (isInterventionEnCours(intv)) {
       enCoursCount++;
     }
 
-    if (intv?.tournee_du_jour === todayIso || (intv?.date && String(intv.date).slice(0, 10) === todayIso && intv?.tournee_ordre)) {
+    if (isInterventionATraiterTournee(intv, todayIso)) {
       tourneeTodayCount++;
     }
   }
@@ -207,7 +309,7 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
   const techniciens = [
     ...new Set(
       allInterventions
-        .filter((i) => i && !i.supprime_le && String(i.statut || "").toLowerCase() !== "supprime")
+        .filter((i) => !isInterventionSupprimee(i))
         .map((i) => (i.nom_technicien || "").trim())
         .filter(Boolean)
     ),
@@ -217,17 +319,20 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
 
   // 3. Application du filtre de recherche (recherche GLOBALE dans toutes les interventions actives)
   let filtered = allInterventions.filter((intv) => {
-    if (!intv || intv.supprime_le || String(intv.statut || "").toLowerCase() === "supprime") return false;
+    if (isInterventionSupprimee(intv)) return false;
     return matchesInterventionSearch(intv, searchQuery);
   });
 
   // Compteurs dans les résultats de recherche
   let searchEnCoursCount = 0;
   let searchTermineesCount = 0;
+  let searchNonTraiteesCount = 0;
   if (hasSearch) {
     for (const intv of filtered) {
       if (isInterventionTerminee(intv)) {
         searchTermineesCount++;
+      } else if (isInterventionNonTraitee(intv)) {
+        searchNonTraiteesCount++;
       } else if (isInterventionEnCours(intv)) {
         searchEnCoursCount++;
       }
@@ -236,16 +341,36 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
 
   // 4. Filtrage par catégorie / onglet
   if (hasSearch) {
-    // Si recherche active, filtrer selon le sous-onglet de recherche choisi ('all', 'en_cours', 'terminees')
+    // Si recherche active, filtrer selon le sous-onglet de recherche choisi
     if (searchTabFilter === "en_cours") {
       filtered = filtered.filter(isInterventionEnCours);
     } else if (searchTabFilter === "terminees") {
       filtered = filtered.filter(isInterventionTerminee);
+    } else if (searchTabFilter === "non_traitees") {
+      filtered = filtered.filter(isInterventionNonTraitee);
     }
   } else {
     // Mode standard : afficher uniquement la catégorie sélectionnée
-    if (activeTab === "terminees") {
-      filtered = filtered.filter(isInterventionTerminee);
+    if (activeTab === "non_traitees" || (activeTab === "terminees" && historySubFilter === "non_traitees")) {
+      filtered = filtered.filter(isInterventionNonTraitee);
+    } else if (activeTab === "terminees") {
+      if (historySubFilter === "all") {
+        filtered = filtered.filter((i) => isInterventionTerminee(i) || isInterventionNonTraitee(i));
+      } else {
+        filtered = filtered.filter(isInterventionTerminee);
+        if (periodFilter === "today") {
+          filtered = filtered.filter((i) => isSameDay(getInterventionCompletionDate(i)));
+        } else if (periodFilter === "week") {
+          filtered = filtered.filter((i) => isSameWeek(getInterventionCompletionDate(i)));
+        } else if (periodFilter === "month") {
+          filtered = filtered.filter((i) => isSameMonth(getInterventionCompletionDate(i)));
+        }
+      }
+    } else if (activeTab === "tournee") {
+      filtered = filtered.filter((i) => isInterventionATraiterTournee(i, todayIso));
+    } else if (activeTab === "rapport") {
+      // L'onglet Rapport centralise toutes les interventions non supprimées
+      filtered = filtered.filter((i) => !isInterventionSupprimee(i));
     } else {
       filtered = filtered.filter(isInterventionEnCours);
     }
@@ -270,15 +395,23 @@ export function filterAndOrganizeInterventions(allInterventions = [], options = 
 
   return {
     items: paginatedItems,
+    allMatchingItems: sorted,
     totalItems,
     totalPages,
     currentPage,
     enCoursCount,
     termineesCount,
+    termineesTodayCount,
+    termineesWeekCount,
+    termineesMonthCount,
+    nonTraiteesCount,
     tourneeTodayCount,
+    rapportCount,
     hasSearch,
     searchEnCoursCount,
     searchTermineesCount,
+    searchNonTraiteesCount,
     techniciens,
   };
 }
+

@@ -72,13 +72,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     return safe.replace(regex, "<mark class='match-hl'>$1</mark>");
   }
 
-  function formatApiActionUrl(baseUrl, action) {
+  function formatApiActionUrl(baseUrl, action, apiCode = "") {
     let clean = (baseUrl || "https://fibretrack.mantota.com/api/index.php").trim().replace(/\/+$/, "");
     if (!clean.includes(".php") && !clean.includes("?")) {
       clean = `${clean}/index.php`;
     }
     const sep = clean.includes("?") ? "&" : "?";
-    return `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
+    const codeParam = apiCode ? `&user_code=${encodeURIComponent(String(apiCode).trim())}` : "";
+    return `${clean}${sep}action=${encodeURIComponent(action)}${codeParam}&_t=${Date.now()}`;
   }
 
   function renderActiveIntervention(d) {
@@ -188,7 +189,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!list) {
       const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
       const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
-      const url = formatApiActionUrl(apiUrl, "interventions_list_light");
+      const url = formatApiActionUrl(apiUrl, "interventions_list_light", apiCode);
 
       try {
         const res = await fetch(url, {
@@ -407,7 +408,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (!item) {
       const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
       const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
-      const url = formatApiActionUrl(apiUrl, "intervention_get");
+      const url = formatApiActionUrl(apiUrl, "intervention_get", apiCode);
 
       try {
         const res = await fetch(url, {
@@ -440,21 +441,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (popupSearchInput) popupSearchInput.value = (item.nom_client || "").trim();
       showMessage(`⚡ Dossier actif : <strong>${escapeHtml(item.nom_client)}</strong>`);
 
-      // Sauvegarde dans storage (synchronise instantanément tous les onglets via storage.onChanged)
+      // Sauvegarde dans storage (synchronise proprement via storage.onChanged sans spammer tous les onglets)
       await chrome.storage.local.set({ activeIntervention: item });
-
-      // Notification directe optionnelle vers les onglets avec try/catch (Promise, jamais d'erreur)
-      try {
-        const tabs = await chrome.tabs.query({});
-        for (const tab of tabs) {
-          if (tab.id) {
-            chrome.tabs.sendMessage(tab.id, {
-              action: "ACTIVE_INTERVENTION_UPDATED",
-              payload: item,
-            }).catch(() => {});
-          }
-        }
-      } catch {}
     }
   }
 
@@ -544,7 +532,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     const apiUrl = cfgApiUrl ? cfgApiUrl.value.trim() : "https://fibretrack.mantota.com/api/index.php";
     const apiCode = cfgApiCode ? cfgApiCode.value.trim() : "9999";
-    const url = formatApiActionUrl(apiUrl, "interventions_list_light");
+    const url = formatApiActionUrl(apiUrl, "interventions_list_light", apiCode);
 
     try {
       const res = await fetch(url, {

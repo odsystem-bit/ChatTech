@@ -1,19 +1,22 @@
 import { formatDateFR } from "../lib/date.js";
-import { getInterventionBadge, isInterventionTerminee } from "../lib/interventionFilters.js";
-import { IconWifi, IconCamera } from "./Icons.jsx";
+import { getInterventionBadge, isInterventionTerminee, isInterventionNonTraitee } from "../lib/interventionFilters.js";
+import { IconWifi, IconCamera, IconFileText, IconRefresh } from "./Icons.jsx";
 
 /**
  * Carte d'intervention compacte, professionnelle et responsive.
  * @param {{
  *   intervention: object,
  *   onOpen: (intv: object) => void,
+ *   onOpenReport?: (intv: object, e: MouseEvent) => void,
+ *   onReactivate?: (intv: object, e: MouseEvent) => void,
  *   onDelete: (id: string, e: MouseEvent) => void,
  *   isOpening: boolean
  * }} props
  */
-export default function InterventionCard({ intervention, onOpen, onDelete, isOpening }) {
+export default function InterventionCard({ intervention, onOpen, onOpenReport, onReactivate, onDelete, isOpening }) {
   const badge = getInterventionBadge(intervention);
   const isDone = isInterventionTerminee(intervention);
+  const isNonTraitee = isInterventionNonTraitee(intervention);
   const shortId = (intervention.id || "").slice(0, 8).toUpperCase();
   const phone = intervention.mobile || intervention.telephone_ligne || "";
   const technician = (intervention.nom_technicien || "").trim();
@@ -23,7 +26,7 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
   const offer = (intervention.offre_souscrite || intervention.etat || "Raccordement").trim();
 
   return (
-    <div className={`intv-card-wrapper ${isDone ? "is-done" : "is-progress"}`}>
+    <div className={`intv-card-wrapper ${isDone ? "is-done" : isNonTraitee ? "is-canceled" : "is-progress"}`}>
       <div
         className="intv-card-main"
         role="button"
@@ -43,6 +46,12 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
             {isOpening ? "Ouverture…" : badge.label}
           </span>
         </div>
+
+        {isNonTraitee && intervention.motif_non_traite && (
+          <div style={{ fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "4px 8px", marginBottom: 6 }}>
+            <strong>Motif :</strong> {intervention.motif_non_traite}
+          </div>
+        )}
 
         <div className="intv-card-chips">
           {phone ? (
@@ -119,11 +128,43 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
             <span className="intv-card-loc-empty">Localisation non renseignée</span>
           )}
 
-          <span className="intv-card-date">
-            {isDone && intervention.modifie_le
-              ? `Clôturée le ${formatDateFR(intervention.modifie_le)}`
-              : `Créée le ${formatDateFR(intervention.date)}`}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            {isNonTraitee && onReactivate && (
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "3px 8px", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onReactivate(intervention, e);
+                }}
+                title="Remettre cette intervention en cours"
+              >
+                <IconRefresh size={12} />
+                <span>Reprendre</span>
+              </button>
+            )}
+            {onOpenReport && (
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: "3px 8px", fontSize: 11, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 4 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onOpenReport(intervention, e);
+                }}
+                title="Consulter et télécharger les rapports de cette intervention"
+              >
+                <IconFileText size={12} />
+                <span>Rapport</span>
+              </button>
+            )}
+            <span className="intv-card-date">
+              {isDone && intervention.modifie_le
+                ? `Clôturée le ${formatDateFR(intervention.modifie_le)}`
+                : `Créée le ${formatDateFR(intervention.date)}`}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -142,3 +183,4 @@ export default function InterventionCard({ intervention, onOpen, onDelete, isOpe
     </div>
   );
 }
+

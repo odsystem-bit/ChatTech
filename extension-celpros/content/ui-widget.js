@@ -2,14 +2,15 @@
 // Interface injectée dans la page CelPros / FAT Automation
 
 (function (root, factory) {
+  const g = typeof globalThis !== "undefined" ? globalThis : (typeof self !== "undefined" ? self : this);
   if (typeof define === "function" && define.amd) {
     define(["./field-mapping", "./form-filler"], factory);
   } else if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(g.FieldMapping, g.FormFiller);
   } else {
-    root.CelprosWidget = factory(root.FieldMapping, root.FormFiller);
+    g.CelprosWidget = factory(g.FieldMapping, g.FormFiller);
   }
-})(typeof self !== "undefined" ? self : this, function (FieldMapping, FormFiller) {
+})(typeof self !== "undefined" ? self : (typeof globalThis !== "undefined" ? globalThis : this), function (FieldMapping, FormFiller) {
   "use strict";
 
   class CelprosWidget {
@@ -18,17 +19,85 @@
       this.isCollapsed = false;
       this.interventions = [];
       this.selectedIntervention = null;
+      this.selectedFingerprint = "";
       this.apiStatus = "unknown"; // "connected", "error", "loading"
       this.filterText = "";
       this.statusTabFilter = "all"; // "all" (par défaut), "termine", "en_cours"
       this.lastFillReport = null;
-      this.autoPilotEnabled = true;
+      let savedAutoPilot = null;
+      try {
+        savedAutoPilot = typeof localStorage !== "undefined" ? localStorage.getItem("chaptech_autopilot_enabled") : null;
+      } catch {}
+      this.autoPilotEnabled = savedAutoPilot !== null ? savedAutoPilot !== "false" : true;
       this.currentStepInfo = null;
       this.lastStepFilled = null;
       this.isAutofilling = false;
+      this.autofillAbortId = 0;
+      this.lastAutofillTime = 0;
+      this.lastServerFetchTime = 0;
+      this.autofillCooldownMs = 1200;
       this.observer = null;
       this.autoFillTimeout = null;
       this.pollingInterval = null;
+    }
+
+    canAutoFill() {
+      return Boolean(this.autoPilotEnabled && this.selectedIntervention && !this.isAutofilling);
+    }
+
+    setAutoPilotState(enabled, persist = true) {
+      const next = Boolean(enabled);
+      this.autoPilotEnabled = next;
+      if (!next) {
+        if (this.autoFillTimeout) {
+          clearTimeout(this.autoFillTimeout);
+          this.autoFillTimeout = null;
+        }
+        this.autofillAbortId++;
+      }
+      const toggle = typeof document !== "undefined" ? document.getElementById("chaptech-toggle-autopilot") : null;
+      if (toggle && toggle.checked !== next) {
+        toggle.checked = next;
+      }
+      try {
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem("chaptech_autopilot_enabled", String(next));
+        }
+      } catch {}
+      if (persist && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        Promise.resolve(
+          chrome.storage.local.set({ autoPilotEnabled: next, chaptech_autopilot_enabled: next })
+        ).catch(() => {});
+      }
+    }
+
+    computeInterventionFingerprint(item) {
+      if (!item || typeof item !== "object" || !item.id) return "";
+      const wa = Array.isArray(item.whatsapp_photos)
+        ? item.whatsapp_photos.map((p) => `${p?.id || ""}:${p?.slot || ""}:${(p?.url || "").slice(-24)}`).join("|")
+        : String(item.whatsapp_photos || "");
+      const gps = Array.isArray(item.points_gps)
+        ? item.points_gps.map((p) => `${p?.id || ""}:${p?.type || ""}:${p?.numero || ""}:${p?.lat || ""}:${p?.lng || ""}:${(p?.photo || "").slice(-24)}`).join("|")
+        : String(item.points_gps || "");
+      const mat = item.materiel_pose && typeof item.materiel_pose === "object"
+        ? JSON.stringify(item.materiel_pose)
+        : String(item.materiel_pose || "");
+      return [
+        String(item.id),
+        String(item.updated_at || item.modifie_le || ""),
+        String(item.statut || ""),
+        String(item.nom_client || item.nom_dossier || ""),
+        String(item.fat_ref || ""),
+        String(item.port || ""),
+        String(item.ont_sn || item.sn || ""),
+        String(item.depart_m ?? ""),
+        String(item.arrivee_m ?? ""),
+        String(item.puissance_fat_dbm ?? ""),
+        String(item.puissance_pto_dbm ?? ""),
+        wa,
+        gps,
+        mat,
+      ].join("::");
     }
 
     init() {
@@ -38,6 +107,7 @@
       }
 
       this.createDom();
+      this.setAutoPilotState(this.autoPilotEnabled, false);
       this.attachGlobalInputTracking();
       this.loadInitialState();
       this.attachEventListeners();
@@ -287,11 +357,26 @@
       return norm === "termine" || norm === "terminee" || norm === "cloture" || norm === "cloturee" || norm === "clos" || norm === "closed" || norm === "done" || Boolean(item.date_cloture);
     }
 
+    isInterventionFormPresent(doc = (typeof document !== "undefined" ? document : null)) {
+      if (!doc || !doc.body) return false;
+      // Page de connexion CelPros : NE JAMAIS interférer ni bloquer
+      if (doc.querySelector('input[type="password"]')) {
+        return false;
+      }
+      // Formulaire d'intervention présent si indicateur d'étape ou champs spécifiques
+      const hasStepper = Boolean(doc.querySelector(".step, .stepper, [class*='step'], [class*='wizard'], [class*='form-wizard']"));
+      const hasFields = Boolean(doc.querySelector('#field_travauxConformes, #field_ontSn, [name="ontSn"], [formcontrolname="ontSn"], [name="clientNom"], [formcontrolname="clientNom"], [class*="upload-box"]'));
+      return hasStepper || hasFields;
+    }
+
     attachGlobalInputTracking() {
       // Capture des saisies réelles de l'utilisateur pour protéger toute modification manuelle
       const markModified = (e) => {
         const target = e.target;
         if (!target) return;
+        // Ignorer complètement les saisies à l'intérieur du widget ChapTech lui-même
+        if (target.closest && target.closest("#chaptech-celpros-widget-root")) return;
+
         const tag = (target.tagName || "").toLowerCase();
         if (tag === "input" || tag === "select" || tag === "textarea") {
           if (!target.dataset) return;
@@ -339,12 +424,11 @@
 
     setupAutoSyncPolling() {
       if (this.pollingInterval) clearInterval(this.pollingInterval);
-      // Polling actif de 3s pour détecter les modifications en direct sur les interventions
-      this.pollingInterval = setInterval(async () => {
-        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+
+      const triggerImmediateCheck = async () => {
         if (!this.selectedIntervention || !this.selectedIntervention.id) return;
         if (this.isAutofilling) return;
-
+        if (!this.isInterventionFormPresent(document)) return;
         try {
           const update = await this.checkForInterventionUpdates(
             this.selectedIntervention.id,
@@ -352,20 +436,28 @@
           );
           if (update && update.hasChanged && update.item) {
             this.showToast(
-              `⚡ Données actualisées en direct depuis le terrain (${update.item.nom_client || "Dossier"}) !`,
+              `⚡ Données actualisées en direct depuis FibreTrack (${update.item.nom_client || "Dossier"}) !`,
               "info",
               3000
             );
             this.setSelectedIntervention(update.item, false);
-            // En mode Super-Pilote, actualiser l'étape en cours sans écraser les saisies manuelles
-            if (this.autoPilotEnabled) {
-              this.handleAutofill(true);
-            }
           }
-        } catch {
-          // Erreur silencieuse de polling
-        }
-      }, 3000);
+        } catch {}
+      };
+
+      if (typeof document !== "undefined" && !this._visibilityBound) {
+        this._visibilityBound = true;
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") triggerImmediateCheck();
+        });
+      }
+
+      // Polling léger de 15s (uniquement si un formulaire d'intervention est actif et la page visible)
+      this.pollingInterval = setInterval(async () => {
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+        if (!this.isInterventionFormPresent(document)) return;
+        await triggerImmediateCheck();
+      }, 15000);
     }
 
     async checkForInterventionUpdates(id, lastKnownUpdatedAt = null) {
@@ -384,7 +476,10 @@
           });
           if (resp && resp.ok) return resp.data;
         } catch (e) {
-          console.warn("[CelPros Widget] Échec CHECK_FOR_UPDATES via background:", e);
+          if (!this._lastCheckWarning || Date.now() - this._lastCheckWarning > 60000) {
+            this._lastCheckWarning = Date.now();
+            console.warn("[CelPros Widget] Échec CHECK_FOR_UPDATES via background:", e.message || e);
+          }
         }
       }
 
@@ -455,7 +550,10 @@
             if (resp && resp.error) throw new Error(resp.error);
           }
         } catch (swErr) {
-          console.warn("[CelPros Widget] Passage background indisponible, tentative directe:", swErr.message);
+          if (!this._lastSwWarning || Date.now() - this._lastSwWarning > 60000) {
+            this._lastSwWarning = Date.now();
+            console.warn("[CelPros Widget] Passage background indisponible, tentative directe:", swErr.message);
+          }
         }
       }
 
@@ -474,7 +572,8 @@
         clean = `${clean}/index.php`;
       }
       const sep = clean.includes("?") ? "&" : "?";
-      const url = `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
+      const codeParam = apiCode ? `&user_code=${encodeURIComponent(String(apiCode).trim())}` : "";
+      const url = `${clean}${sep}action=${encodeURIComponent(action)}${codeParam}&_t=${Date.now()}`;
       const options = {
         method,
         cache: "no-store",
@@ -503,22 +602,37 @@
       const savedCollapsed = localStorage.getItem("chaptech_widget_collapsed") === "true";
       this.setCollapsed(savedCollapsed);
 
-      // Charger d'abord les fiches fraîches depuis l'API pour avoir la liste à jour
-      await this.fetchInterventions();
-
-      // Charger l'intervention active stockée si présente
+      // 1. Chargement instantané depuis le stockage local (0ms, non-bloquant)
       if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
         try {
-          const stored = await chrome.storage.local.get(["activeIntervention"]);
-          if (stored && stored.activeIntervention && stored.activeIntervention.id) {
-            // Recharger les détails réels de cette intervention pour avoir toutes les photos et GPS à jour
-            await this.onInterventionChange(stored.activeIntervention.id);
-          } else if (!this.selectedIntervention && this.interventions.length > 0) {
-            // Sinon sélectionner le dossier #1 le plus récent
-            await this.onInterventionChange(this.interventions[0].id);
+          const stored = await chrome.storage.local.get([
+            "activeIntervention",
+            "cachedInterventions",
+            "autoPilotEnabled",
+            "chaptech_autopilot_enabled",
+          ]);
+          if (stored.chaptech_autopilot_enabled !== undefined) {
+            this.setAutoPilotState(Boolean(stored.chaptech_autopilot_enabled), false);
+          } else if (stored.autoPilotEnabled !== undefined) {
+            this.setAutoPilotState(Boolean(stored.autoPilotEnabled), false);
+          }
+          if (Array.isArray(stored.cachedInterventions) && stored.cachedInterventions.length > 0) {
+            this.interventions = stored.cachedInterventions;
+            this.renderInterventionOptions();
+            this.setApiStatus("connected", "Connecté");
+          }
+          if (stored.activeIntervention && stored.activeIntervention.id) {
+            this.setSelectedIntervention(stored.activeIntervention, false);
+          } else if (this.interventions.length > 0) {
+            this.setSelectedIntervention(this.interventions[0], false);
           }
         } catch {}
       }
+
+      // 2. Rafraîchissement en arrière-plan sans bloquer le démarrage de la page CelPros
+      setTimeout(() => {
+        this.fetchInterventions().catch(() => {});
+      }, 1200);
     }
 
     setCollapsed(collapsed) {
@@ -850,32 +964,99 @@
     setSelectedIntervention(data, syncToBackground = true) {
       if (!data) {
         this.selectedIntervention = null;
+        this.selectedFingerprint = "";
         this.updateSummaryCard();
-        return;
+        return false;
       }
 
-      this.selectedIntervention = data;
+      const incoming = { ...data };
+
+      // Normalisation défensive des tableaux JSON stringifiés
+      if (typeof incoming.whatsapp_photos === "string") {
+        try { incoming.whatsapp_photos = JSON.parse(incoming.whatsapp_photos); } catch { incoming.whatsapp_photos = []; }
+      }
+      if (typeof incoming.points_gps === "string") {
+        try { incoming.points_gps = JSON.parse(incoming.points_gps); } catch { incoming.points_gps = []; }
+      }
+      if (typeof incoming.materiel_pose === "string") {
+        try { incoming.materiel_pose = JSON.parse(incoming.materiel_pose); } catch {}
+      }
+
+      // Protection contre l'écrasement d'une fiche complète (avec photos) par une fiche légère (interventions_list_light / interventions_list)
+      if (
+        this.selectedIntervention &&
+        String(this.selectedIntervention.id) === String(incoming.id) &&
+        incoming._fully_loaded !== true
+      ) {
+        const exWa = Array.isArray(this.selectedIntervention.whatsapp_photos) ? this.selectedIntervention.whatsapp_photos : [];
+        const incWa = Array.isArray(incoming.whatsapp_photos) ? incoming.whatsapp_photos : [];
+        const exHasWaUrls = exWa.some((p) => p && (p.url || p.photo || p.src));
+        const incHasWaUrls = incWa.some((p) => p && (p.url || p.photo || p.src));
+        if (exHasWaUrls && !incHasWaUrls) {
+          incoming.whatsapp_photos = exWa;
+        }
+        const exGps = Array.isArray(this.selectedIntervention.points_gps) ? this.selectedIntervention.points_gps : [];
+        const incGps = Array.isArray(incoming.points_gps) ? incoming.points_gps : [];
+        const exHasGpsPhotos = exGps.some((p) => p && p.photo);
+        const incHasGpsPhotos = incGps.some((p) => p && p.photo);
+        if (exHasGpsPhotos && !incHasGpsPhotos) {
+          if (incGps.length === 0) {
+            incoming.points_gps = exGps;
+          } else {
+            incoming.points_gps = incGps.map((pt, idx) => {
+              if (pt && !pt.photo) {
+                const match = exGps.find(
+                  (ep) =>
+                    ep &&
+                    ((ep.id && pt.id && ep.id === pt.id) ||
+                      (ep.type === pt.type && Number(ep.numero || 0) === Number(pt.numero || 0)))
+                ) || exGps[idx];
+                if (match && match.photo) {
+                  return { ...pt, photo: match.photo };
+                }
+              }
+              return pt;
+            });
+          }
+        }
+      }
+
+      const prevId = this.selectedIntervention ? String(this.selectedIntervention.id || "") : "";
+      const nextId = incoming.id ? String(incoming.id) : "";
+      const newFp = this.computeInterventionFingerprint(incoming);
+      const didChange = !this.selectedFingerprint || newFp !== this.selectedFingerprint;
+      if (prevId !== nextId || didChange) {
+        this.lastStepFilled = null;
+      }
+
+      this.selectedIntervention = incoming;
+      this.selectedFingerprint = newFp;
       this.updateSummaryCard();
 
-      // Synchroniser visuellement la sélection dans le <select>
-      const select = document.getElementById("chaptech-intervention-select");
-      if (select && data.id) {
-        select.value = data.id;
+      if (typeof document !== "undefined") {
+        // Synchroniser visuellement la sélection dans le <select>
+        const select = document.getElementById("chaptech-intervention-select");
+        if (select && incoming.id) {
+          select.value = incoming.id;
+        }
+
+        // Synchroniser l'input de recherche
+        const searchInput = document.getElementById("chaptech-search-input");
+        if (searchInput && incoming.nom_client) {
+          searchInput.value = (incoming.nom_client || "").trim();
+        }
       }
 
-      // Synchroniser l'input de recherche
-      const searchInput = document.getElementById("chaptech-search-input");
-      if (searchInput && data.nom_client) {
-        searchInput.value = (data.nom_client || "").trim();
+      // Ne sauvegarder dans chrome.storage.local QUE si demandé explicitement (syncToBackground=true) ET si modifié
+      if (syncToBackground && didChange && typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
+        Promise.resolve(chrome.storage.local.set({ activeIntervention: incoming })).catch(() => {});
       }
 
-      // Sauvegarder dans le stockage local pour que tous les onglets et le popup soient synchronisés
-      if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-        chrome.storage.local.set({ activeIntervention: data }).catch(() => {});
-      }
+      return didChange;
     }
 
     updateSummaryCard() {
+      if (typeof document === "undefined") return;
       const card = document.getElementById("chaptech-summary-card");
       const btnAutofill = document.getElementById("chaptech-btn-autofill");
       if (!card || !btnAutofill) return;
@@ -904,14 +1085,6 @@
       document.getElementById("card-sn").textContent = d.sn || d.ont_sn || "-";
 
       this.updateStepDisplay();
-
-      // En mode Super-Pilote, déclencher automatiquement le remplissage de l'étape courante
-      if (this.autoPilotEnabled && !this.isAutofilling) {
-        if (this.autoFillTimeout) clearTimeout(this.autoFillTimeout);
-        this.autoFillTimeout = setTimeout(() => {
-          this.handleAutofill(true);
-        }, 300);
-      }
     }
 
     getStepMeta(num) {
@@ -936,18 +1109,66 @@
       if (sub) sub.textContent = meta.desc;
     }
 
+    // Contrôle strict de conformité avant soumission ou passage à l'étape suivante
+    checkMandatoryCompliance(root = (typeof document !== "undefined" ? document : null)) {
+      if (!root) return { valid: true };
+      const stepNum = FormFiller && FormFiller.detectCurrentStep ? FormFiller.detectCurrentStep(root) : 1;
+      // Contrôle impératif pour l'Étape 5 : PV de conformité
+      if (stepNum === 5) {
+        const mandatorySelectors = [
+          '#field_travauxConformes, input[name="travauxConformes"], input[formcontrolname="travauxConformes"]',
+          '#field_emplacementValide, input[name="emplacementValide"], input[formcontrolname="emplacementValide"]',
+          '#field_travailPropre, input[name="travailPropre"], input[formcontrolname="travailPropre"]',
+          '#field_serviceTeste, input[name="serviceTeste"], input[formcontrolname="serviceTeste"]',
+          '#field_serviceFonctionne, input[name="serviceFonctionne"], input[formcontrolname="serviceFonctionne"]',
+          '#field_explicationsDonnees, input[name="explicationsDonnees"], input[formcontrolname="explicationsDonnees"]',
+        ];
+        const unchecked = [];
+        for (const sel of mandatorySelectors) {
+          const el = root.querySelector(sel);
+          if (el && el.type === "checkbox" && !el.checked) {
+            unchecked.push(el);
+          }
+        }
+        if (unchecked.length > 0) {
+          return {
+            valid: false,
+            message: `${unchecked.length} case(s) obligatoire(s) du PV de conformité (Étape 5) doivent être cochées !`,
+            firstUnchecked: unchecked[0],
+            uncheckedList: unchecked,
+          };
+        }
+      }
+      return { valid: true };
+    }
+
     setupAutoPilotObserver() {
       if (this.observer || typeof MutationObserver === "undefined") return;
 
       // Surveillance des transitions dynamiques dans le DOM de CelPros (SPA)
       this.observer = new MutationObserver((mutations) => {
-        if (!this.autoPilotEnabled || !this.selectedIntervention || this.isAutofilling) return;
+        if (!this.canAutoFill()) return;
+        // GARDE-FOU 1 : Ne jamais observer ni déclencher d'autofill sur la page de connexion ou hors formulaire
+        if (!this.isInterventionFormPresent(document)) return;
+        // GARDE-FOU ANTI-BOUCLE : Ne jamais relancer d'autofill pendant la fenêtre de cooldown
+        if (Date.now() - (this.lastAutofillTime || 0) < this.autofillCooldownMs) return;
 
         let hasRelevantChange = false;
         for (const m of mutations) {
           if (m.type === "childList" && m.addedNodes.length > 0) {
             for (const n of m.addedNodes) {
               if (n.nodeType === 1) {
+                // Ignorer complètement les nœuds générés par notre propre widget ou nos badges d'injection
+                if (
+                  n.id === "chaptech-celpros-widget-root" ||
+                  n.closest?.("#chaptech-celpros-widget-root") ||
+                  n.classList?.contains("chaptech-photo-injected-badge") ||
+                  n.classList?.contains("chaptech-photo-missing-badge") ||
+                  n.classList?.contains("chaptech-pole-injected") ||
+                  n.dataset?.chaptechManaged === "true"
+                ) {
+                  continue;
+                }
                 const tag = n.tagName.toLowerCase();
                 if (
                   tag === "form" ||
@@ -970,30 +1191,74 @@
         if (hasRelevantChange) {
           if (this.autoFillTimeout) clearTimeout(this.autoFillTimeout);
           this.autoFillTimeout = setTimeout(() => {
+            this.autoFillTimeout = null;
+            if (!this.canAutoFill()) return;
+            if (Date.now() - (this.lastAutofillTime || 0) < this.autofillCooldownMs) return;
+            if (!this.isInterventionFormPresent(document)) return;
             const stepNum = FormFiller && FormFiller.detectCurrentStep ? FormFiller.detectCurrentStep(document) : 1;
             this.updateStepDisplay(stepNum);
             if (this.lastStepFilled !== stepNum) {
               this.handleAutofill(true);
             }
-          }, 350);
+          }, 600);
         }
       });
 
       this.observer.observe(document.body, { childList: true, subtree: true });
 
-      // Écouter les clics sur les boutons de navigation (Suivant / Précédent / Numéros d'étapes)
+      // Écouter les clics sur les boutons de navigation (Suivant / Précédent / Numéros d'étapes / Valider)
       document.addEventListener(
         "click",
         (e) => {
+          // Si le clic provient de notre propre widget, ne rien bloquer
+          if (e.target.closest && e.target.closest("#chaptech-celpros-widget-root")) {
+            return;
+          }
+
+          // Si on est sur la page de connexion ou hors formulaire, NE JAMAIS INTERCEPTER AUCUN CLIC !
+          if (!this.isInterventionFormPresent(document)) {
+            return;
+          }
+
+          // Contrôle impératif des cases obligatoires lors du passage à l'étape suivante ou de la soumission
+          const nextBtn = e.target.closest("button, a, [type='submit'], .btn-primary, [class*='next'], [class*='valider'], [class*='submit'], [class*='wizard']");
+          if (nextBtn) {
+            const btnText = (nextBtn.innerText || nextBtn.textContent || "").toLowerCase().trim();
+            const isGoingForward = /suivant|valider|terminer|soumettre|enregistrer|confirmer|next|submit/i.test(btnText) ||
+                                   nextBtn.className?.includes?.("next") || nextBtn.type === "submit";
+            if (isGoingForward) {
+              const validation = this.checkMandatoryCompliance(document);
+              if (!validation.valid) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof e.stopImmediatePropagation === "function") e.stopImmediatePropagation();
+                this.showToast(`⚠️ Validation bloquée : ${validation.message}`, "error", 6000);
+                if (validation.firstUnchecked && typeof validation.firstUnchecked.scrollIntoView === "function") {
+                  validation.firstUnchecked.scrollIntoView({ behavior: "smooth", block: "center" });
+                  validation.firstUnchecked.focus?.();
+                  if (validation.firstUnchecked.classList) {
+                    validation.firstUnchecked.classList.add("celpros-missing-highlight");
+                    setTimeout(() => validation.firstUnchecked.classList?.remove("celpros-missing-highlight"), 4000);
+                  }
+                }
+                return;
+              }
+            }
+          }
+
           const btn = e.target.closest("button, a, .step, [class*='step'], [class*='next'], [class*='wizard']");
-          if (btn && this.autoPilotEnabled && this.selectedIntervention) {
-            setTimeout(() => {
+          if (btn && this.canAutoFill()) {
+            if (Date.now() - (this.lastAutofillTime || 0) < this.autofillCooldownMs) return;
+            if (this.autoFillTimeout) clearTimeout(this.autoFillTimeout);
+            this.autoFillTimeout = setTimeout(() => {
+              this.autoFillTimeout = null;
+              if (!this.canAutoFill()) return;
               const stepNum = FormFiller && FormFiller.detectCurrentStep ? FormFiller.detectCurrentStep(document) : 1;
               this.updateStepDisplay(stepNum);
               if (this.lastStepFilled !== stepNum) {
                 this.handleAutofill(true);
               }
-            }, 450);
+            }, 600);
           }
         },
         true
@@ -1001,26 +1266,20 @@
     }
 
     async handleAutofill(isAuto = false) {
+      if (isAuto && !this.autoPilotEnabled) {
+        return;
+      }
       if (!this.selectedIntervention) {
         if (!isAuto) this.showToast("Veuillez d'abord sélectionner une intervention", "warning");
         return;
       }
-
-      // Toujours s'assurer d'avoir les données et photos les plus fraîches possibles directement depuis la BDD terrain
-      try {
-        const freshItem = await this.fetchApi("intervention_get", "POST", { id: String(this.selectedIntervention.id) }, true);
-        if (freshItem && freshItem.id) {
-          this.selectedIntervention = freshItem;
-          if (typeof chrome !== "undefined" && chrome.storage && chrome.storage.local) {
-            chrome.storage.local.set({ activeIntervention: freshItem }).catch(() => {});
-          }
-        }
-      } catch (e) {
-        console.warn("[CelPros Widget] Recharge avant remplissage impossible:", e);
+      if (this.isAutofilling) return;
+      if (isAuto && Date.now() - (this.lastAutofillTime || 0) < this.autofillCooldownMs) {
+        return;
       }
 
-      if (this.isAutofilling) return;
       this.isAutofilling = true;
+      const currentRunId = ++this.autofillAbortId;
 
       const btnAutofill = document.getElementById("chaptech-btn-autofill");
       if (btnAutofill) {
@@ -1029,7 +1288,37 @@
       }
 
       try {
-        const report = await FormFiller.autofillPage(this.selectedIntervention, document);
+        // Recharger les données fraîches si manuel ou si pas rafraîchi depuis >4s ou si photos absentes
+        const hasPhotosLoaded =
+          Array.isArray(this.selectedIntervention.whatsapp_photos) &&
+          this.selectedIntervention.whatsapp_photos.some((p) => p && p.url);
+        const shouldFetchFresh = !isAuto || !hasPhotosLoaded || Date.now() - (this.lastServerFetchTime || 0) > 4000;
+
+        if (shouldFetchFresh && this.selectedIntervention.id) {
+          try {
+            const freshItem = await this.fetchApi("intervention_get", "POST", { id: String(this.selectedIntervention.id) }, true);
+            this.lastServerFetchTime = Date.now();
+            if (freshItem && freshItem.id) {
+              const norm = (typeof FieldMapping !== "undefined" && typeof FieldMapping.normalizeInterventionData === "function")
+                ? FieldMapping.normalizeInterventionData(freshItem)
+                : freshItem;
+              this.setSelectedIntervention(norm, false);
+            }
+          } catch (e) {
+            console.warn("[CelPros Widget] Recharge avant remplissage impossible:", e);
+          }
+        }
+
+        // Vérifier que Super-Pilote n'a pas été coupé pendant la requête réseau
+        const shouldAbort = () => (isAuto && !this.autoPilotEnabled) || this.autofillAbortId !== currentRunId;
+        if (shouldAbort()) {
+          return;
+        }
+
+        const report = await FormFiller.autofillPage(this.selectedIntervention, document, { shouldAbort });
+        if (shouldAbort()) {
+          return;
+        }
         this.lastFillReport = report;
 
         const currentStepNum = report.currentStep || 1;
@@ -1095,6 +1384,7 @@
         this.showToast(`❌ Erreur: ${err.message}`, "error");
       } finally {
         this.isAutofilling = false;
+        this.lastAutofillTime = Date.now();
         if (btnAutofill) {
           btnAutofill.disabled = false;
           btnAutofill.innerHTML = "🚀 Remplir cette étape (Champs &amp; Photos)";
@@ -1346,7 +1636,7 @@
         await this.fetchInterventions(true);
         if (this.selectedIntervention && this.selectedIntervention.id) {
           await this.onInterventionChange(this.selectedIntervention.id, true);
-          if (this.autoPilotEnabled) {
+          if (this.canAutoFill()) {
             this.handleAutofill(true);
           }
         }
@@ -1368,16 +1658,17 @@
       // Toggle Super-Pilote
       const autoPilotToggle = document.getElementById("chaptech-toggle-autopilot");
       if (autoPilotToggle) {
+        autoPilotToggle.checked = Boolean(this.autoPilotEnabled);
         autoPilotToggle.addEventListener("change", (e) => {
-          this.autoPilotEnabled = e.target.checked;
+          this.setAutoPilotState(e.target.checked, true);
           this.showToast(
             this.autoPilotEnabled
               ? "⚡ Mode Super-Pilote activé : pré-remplissage automatique activé !"
-              : "Mode Super-Pilote suspendu : remplissage manuel",
+              : "Mode Super-Pilote suspendu : remplissage manuel uniquement",
             "info",
             2500
           );
-          if (this.autoPilotEnabled && this.selectedIntervention) {
+          if (this.canAutoFill()) {
             this.handleAutofill(true);
           }
         });

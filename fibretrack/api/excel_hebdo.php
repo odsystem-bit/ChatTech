@@ -70,10 +70,14 @@ $action = $params['action'] ?? '';
 $code = $params['code'] ?? '';
 
 function requireExcelAdmin($code) {
-    if ($code !== '9999') {
-        http_response_code(401);
-        exit;
+    if ($code === '9999') return;
+    if (preg_match('/^\d{4}$/', (string)$code)) {
+        $stmtAcc = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
+        $stmtAcc->execute([$code]);
+        if ($stmtAcc->fetch()) return;
     }
+    http_response_code(401);
+    exit;
 }
 
 if (!in_array($action, ['export_hebdo', 'export_mois', 'export_periode', 'export_historique'], true)) {
@@ -108,13 +112,13 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     $weekEnd = date('Y-m-d', strtotime('-1 day', strtotime($finExclusive)));
     $weekEndExclusive = $finExclusive;
     
-    // Récupérer les interventions de la semaine
+    // Récupérer les interventions terminées de la semaine (les non traitées ne consomment pas de matériel)
     $stmt = db()->prepare("
         SELECT id, date, statut, nom_technicien, nom_equipe, nom_client,
           adresse_zone, telephone_ligne, materiel_pose, points_gps,
           nb_poteaux_implantes, nb_poteaux_traverses, nb_poteaux_armes
         FROM interventions
-        WHERE date >= ? AND date < ?
+        WHERE date >= ? AND date < ? AND statut = 'termine'
         ORDER BY date ASC
     ");
     $stmt->execute([$weekStart, $weekEndExclusive]);

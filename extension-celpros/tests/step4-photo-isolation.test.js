@@ -30,6 +30,7 @@ class MockElement {
     this.checked = attrs.checked || false;
     this.innerText = attrs.innerText || '';
     this.innerHTML = attrs.innerHTML || '';
+    this.className = attrs.className || '';
     this.attributes = { ...attrs };
     this.dataset = { ...(attrs.dataset || {}) };
     this.style = {};
@@ -569,4 +570,159 @@ test('Step 4 Photo Isolation - "Image entrée câble interne *" strictly receive
   assert.ok(!badgeCable.innerHTML.includes('fat'));
   assert.ok(!badgeCable.innerHTML.includes('poteau'));
 });
+
+test('Step 4 Pole Alignment & Autres Poteaux - preserves all numbered poles and all distinct autre_poteau photos even with duplicate labels, and is 100% idempotent on repeated runs', async () => {
+  const intervention = {
+    id: 'intv-poles-alignment',
+    points_gps: [
+      { id: 'pt-1', type: 'Poteau', numero: 1, photo: 'data:image/jpeg;base64,' + Buffer.from('POLE_1').toString('base64') },
+      { id: 'pt-2', type: 'Poteau', numero: 2, photo: 'data:image/jpeg;base64,' + Buffer.from('POLE_2').toString('base64') },
+    ],
+    whatsapp_photos: [
+      { id: 'wa-autre-1', slot: 'autre_poteau', type: 'autre_poteau', name: 'autre_poteau_5.jpg', label: 'Autre poteau (5)', url: 'data:image/jpeg;base64,' + Buffer.from('AUTRE_A').toString('base64') },
+      { id: 'wa-autre-2', slot: 'autre_poteau', type: 'autre_poteau', name: 'autre_poteau_5.jpg', label: 'Autre poteau (5)', url: 'data:image/jpeg;base64,' + Buffer.from('AUTRE_B').toString('base64') },
+    ],
+  };
+
+  const allPoles = PhotoFiller.collectAllPoles(intervention);
+  assert.equal(allPoles.length, 4, 'Doit conserver les 2 poteaux numérotés + les 2 autres poteaux même si leur label/nom est identique');
+  assert.equal(allPoles[0].name, 'poteau_1.jpg');
+  assert.equal(allPoles[1].name, 'poteau_2.jpg');
+  assert.equal(allPoles[2].name, 'autre_poteau_1.jpg');
+  assert.equal(allPoles[3].name, 'autre_poteau_2.jpg');
+
+  // Construire une section Poteaux avec 4 slots dynamiques (structure exacte CelPros)
+  const root = new MockElement('div');
+  const section = new MockElement('div', { className: 'col-12' });
+  const headerRow = new MockElement('div', { className: 'd-flex justify-content-between' });
+  const headerPoteaux = new MockElement('span', { innerText: 'Poteaux' });
+  headerRow.appendChild(headerPoteaux);
+  const subtitle = new MockElement('div', { innerText: 'Aucune photo — appuyez sur + pour ajouter (max 10)' });
+  section.appendChild(headerRow);
+  section.appendChild(subtitle);
+  root.appendChild(section);
+
+  const inputs = [];
+  for (let i = 1; i <= 4; i++) {
+    const box = new MockElement('div', { className: 'upload-box', innerText: `Photo Poteau ${i}` });
+    const input = new MockElement('input', { type: 'file', id: `pole_input_${i}` });
+    box.appendChild(input);
+    section.appendChild(box);
+    inputs.push(input);
+  }
+
+  new MockDocument(root);
+
+  // Premier passage d'autofill
+  const report1 = await PhotoFiller.fillPhotosOnPage(intervention, root);
+  assert.equal(report1.injectedCount, 4);
+  assert.equal(inputs[0].files[0].name, 'poteau_1.jpg');
+  assert.equal(inputs[1].files[0].name, 'poteau_2.jpg');
+  assert.equal(inputs[2].files[0].name, 'autre_poteau_1.jpg');
+  assert.equal(inputs[3].files[0].name, 'autre_poteau_2.jpg');
+
+  const eventsAfterFirstRun = inputs.map((inp) => inp.dispatchedEvents.length);
+
+  // Deuxième passage d'autofill sur le même DOM (avec les badges "✅ Photo injectée (autre_poteau_1.jpg)" déjà présents)
+  const report2 = await PhotoFiller.fillPhotosOnPage(intervention, root);
+  assert.equal(report2.injectedCount, 4);
+  // Vérifier que les slots 3 et 4 n'ont PAS été faussement identifiés comme conteneurs statiques autre_poteau
+  // et qu'aucun événement change redondant n'a été déclenché (idempotence stricte)
+  assert.equal(inputs[0].files[0].name, 'poteau_1.jpg');
+  assert.equal(inputs[1].files[0].name, 'poteau_2.jpg');
+  assert.equal(inputs[2].files[0].name, 'autre_poteau_1.jpg');
+  assert.equal(inputs[3].files[0].name, 'autre_poteau_2.jpg');
+  assert.deepEqual(
+    inputs.map((inp) => inp.dispatchedEvents.length),
+    eventsAfterFirstRun,
+    'Aucun événement change/input supplémentaire ne doit être émis lorsque les mêmes photos sont déjà injectées'
+  );
+});
+
+test('CelprosWidget - Super-Pilote OFF strictly blocks all automatic autofill and setSelectedIntervention prevents storage ping-pong', async () => {
+  let storageSetCalls = 0;
+  const mockStorage = {};
+  globalThis.localStorage = {
+    getItem(k) { return mockStorage[k] ?? null; },
+    setItem(k, v) { mockStorage[k] = String(v); },
+  };
+  globalThis.document = {
+    getElementById() { return null; },
+    querySelectorAll() { return []; },
+  };
+  globalThis.chrome = {
+    storage: {
+      local: {
+        set(obj) {
+          if ('activeIntervention' in obj) storageSetCalls++;
+        },
+        get(_keys, cb) {
+          if (cb) cb({});
+        },
+      },
+    },
+    runtime: {
+      sendMessage(_msg, cb) {
+        if (cb) cb({ ok: true });
+      },
+    },
+  };
+
+  await import('../content/ui-widget.js');
+  const CelprosWidget = globalThis.CelprosWidget;
+  assert.ok(CelprosWidget, 'CelprosWidget doit être exposé');
+
+  const widget = new CelprosWidget();
+  // Initialiser avec une intervention complète
+  const intvFull = {
+    id: 'intv-sync-test',
+    nom_client: 'CLIENT TEST',
+    modifie_le: '2026-10-20T12:00:00Z',
+    points_gps: [{ id: 'p1', type: 'Poteau', numero: 1, photo: 'https://fibretrack.mantota.com/api/uploads/photos/1.jpg' }],
+    whatsapp_photos: [{ id: 'w1', slot: 'fat', url: 'https://fibretrack.mantota.com/api/uploads/photos/fat.jpg' }],
+  };
+
+  // 1. Si syncToBackground = false (ex: reçu depuis chrome.storage.onChanged), NE JAMAIS réécrire dans chrome.storage.local
+  const changed1 = widget.setSelectedIntervention(intvFull, false);
+  assert.equal(changed1, true);
+  assert.equal(storageSetCalls, 0, 'setSelectedIntervention(data, false) ne doit jamais écrire dans chrome.storage.local');
+
+  // 2. Si le même payload arrive avec syncToBackground = true, l'empreinte est identique -> 0 écriture
+  const changed2 = widget.setSelectedIntervention({ ...intvFull }, true);
+  assert.equal(changed2, false, 'Une intervention identique doit retourner didChange = false');
+  assert.equal(storageSetCalls, 0, 'Aucune écriture chrome.storage.local si empreinte inchangée');
+
+  // 3. Si un payload "light" (sans URLs de photos) arrive pour la même intervention, les photos existantes sont préservées
+  const intvLight = {
+    id: 'intv-sync-test',
+    nom_client: 'CLIENT TEST',
+    modifie_le: '2026-10-20T12:00:00Z',
+    points_gps: [{ id: 'p1', type: 'Poteau', numero: 1, photo: '' }],
+    whatsapp_photos: [{ id: 'w1', slot: 'fat', url: '' }],
+  };
+  widget.setSelectedIntervention(intvLight, false);
+  assert.equal(widget.selectedIntervention.whatsapp_photos[0].url, 'https://fibretrack.mantota.com/api/uploads/photos/fat.jpg');
+  assert.equal(widget.selectedIntervention.points_gps[0].photo, 'https://fibretrack.mantota.com/api/uploads/photos/1.jpg');
+
+  // 4. Désactiver Super-Pilote (OFF) -> persistance + blocage strict de tout autofill automatique
+  widget.setAutoPilotState(false, true);
+  assert.equal(widget.autoPilotEnabled, false);
+  assert.equal(widget.canAutoFill(), false);
+  assert.equal(globalThis.localStorage.getItem('chaptech_autopilot_enabled'), 'false');
+
+  let fillCalled = false;
+  const origFill = globalThis.FormFiller.fillCurrentStep;
+  globalThis.FormFiller.fillCurrentStep = () => {
+    fillCalled = true;
+    return { success: true, filledCount: 1, totalExpected: 1 };
+  };
+  try {
+    await widget.handleAutofill(true);
+    assert.equal(fillCalled, false, 'handleAutofill(true) ne doit JAMAIS remplir les champs quand Super-Pilote est OFF');
+  } finally {
+    globalThis.FormFiller.fillCurrentStep = origFill;
+  }
+});
+
+
 

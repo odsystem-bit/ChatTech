@@ -117,6 +117,7 @@ export default function StockScreen({ onClose, isAdmin = false }) {
   const [movementType, setMovementType] = useState("entree");
   const [movementQty, setMovementQty] = useState("");
   const [movementMotif, setMovementMotif] = useState("");
+  const [customNewItemName, setCustomNewItemName] = useState("");
   const [movementSaving, setMovementSaving] = useState(false);
 
   // Modale édition directe solde (Admin)
@@ -214,7 +215,18 @@ export default function StockScreen({ onClose, isAdmin = false }) {
   async function handleSaveManualMovement(e) {
     e.preventDefault();
     const qte = Number(movementQty);
-    if (!Number.isInteger(qte) || qte <= 0 || !movementDesignation.trim()) {
+    let targetDesignation = movementDesignation.trim();
+
+    if (targetDesignation === "__NEW__") {
+      const trimmedCustom = customNewItemName.trim();
+      if (!trimmedCustom) {
+        showToast("Veuillez renseigner le nom du nouvel article.", "error");
+        return;
+      }
+      targetDesignation = trimmedCustom.toLowerCase().replace(/[\s'-]+/g, "_");
+    }
+
+    if (!Number.isInteger(qte) || qte <= 0 || !targetDesignation) {
       showToast("Veuillez renseigner un article et une quantité valide.", "error");
       return;
     }
@@ -222,11 +234,12 @@ export default function StockScreen({ onClose, isAdmin = false }) {
     setMovementSaving(true);
     try {
       const motif = movementMotif.trim() || (movementType === "entree" ? "Entrée manuelle magasin" : "Sortie manuelle");
-      const updated = await moveStockItem(movementDesignation, movementType, qte, motif);
+      const updated = await moveStockItem(targetDesignation, movementType, qte, motif);
       setStock({ ...updated });
-      showToast(`${movementType === "entree" ? "Ajout de" : "Retrait de"} ${qte} pour "${getItemMeta(movementDesignation).label}".`);
+      showToast(`${movementType === "entree" ? "Ajout de" : "Retrait de"} ${qte} pour "${getItemMeta(targetDesignation).label}".`);
       setMovementModalOpen(false);
       setMovementDesignation("");
+      setCustomNewItemName("");
       setMovementQty("");
       setMovementMotif("");
     } catch (err) {
@@ -426,6 +439,19 @@ export default function StockScreen({ onClose, isAdmin = false }) {
             }}
           >
             <IconPlus size={16} /> Mouvement manuel
+          </button>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => {
+              setMovementDesignation("__NEW__");
+              setCustomNewItemName("");
+              setMovementType("entree");
+              setMovementModalOpen(true);
+            }}
+            title="Ajouter une nouvelle référence d'équipement ou consommable au catalogue"
+          >
+            <IconPlus size={16} /> Nouvel article
           </button>
           <button
             type="button"
@@ -820,8 +846,26 @@ export default function StockScreen({ onClose, isAdmin = false }) {
                       {getItemMeta(d).label} ({d}) — Actuel: {stock[d] ?? 0}
                     </option>
                   ))}
+                  <option value="__NEW__">➕ Créer un nouvel article / référence…</option>
                 </select>
               </label>
+
+              {movementDesignation === "__NEW__" && (
+                <label className="form-field" style={{ background: "#f8fafc", padding: "10px 12px", borderRadius: 8, border: "1.5px dashed #3b82f6", marginTop: 4 }}>
+                  <span style={{ fontWeight: 700, color: "#1d4ed8" }}>Nom du nouvel article</span>
+                  <input
+                    type="text"
+                    placeholder="Ex: Câble 4FO, Colliers rilsan, Traversée..."
+                    value={customNewItemName}
+                    onChange={(e) => setCustomNewItemName(e.target.value)}
+                    required
+                    autoFocus
+                  />
+                  <small style={{ color: "#64748b", marginTop: 4, display: "block" }}>
+                    L'article sera automatiquement ajouté au catalogue de stock et à l'inventaire.
+                  </small>
+                </label>
+              )}
 
               <label className="form-field">
                 <span>Type d'opération</span>
