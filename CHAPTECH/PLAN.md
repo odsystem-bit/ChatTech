@@ -150,28 +150,18 @@ Codé (backend + console, 12/10/2026). Activable **par entreprise** (`epi_obliga
 - **Bascule automatique en fin de journée** : les dossiers non finalisés ou non traités basculent dans l'onglet des reliquats antérieurs et peuvent être reprogrammés en 1 clic pour aujourd'hui.
 - **Déclaration non traité** avec motif obligatoire : 0 stock déduit.
 
-## 6 ter. Messagerie interne (nouveau, à concevoir)
-Idée du 13/10/2026 : un système de messagerie où **tous les membres d'une même entreprise peuvent échanger**. Isolation stricte : jamais de message entre entreprises.
-
-Règles validées le 13/10/2026 :
-- **Chaque équipe a son groupe**. Y sont : le chef, les techniciens, **les superviseurs, les conformités et l'admin** de l'entreprise.
-- **Le super-admin est dans tous les groupes mais caché** : personne ne voit qu'il est là (ni dans la liste des membres, ni dans les compteurs).
-- **Messages individuels** : tout membre de l'entreprise peut écrire à tout autre membre, y compris d'une équipe à une autre (technicien, chef, admin, conformité, superviseur, coordonnateur, gestionnaire de stock).
-- Tout reste **dans l'entreprise** ; jamais d'échange entre deux entreprises.
-
-Règles ajoutées le 14/10/2026 :
-- **Un groupe par ville** et **un groupe pour toute l'entreprise**, en plus des groupes d'équipe.
-- **Pièces jointes (photos) autorisées.**
-- **Suppression de message : l'auteur et l'admin** seulement.
-
-Proposition (à valider) :
-- **Phase 1** : discussions 1 à 1 et groupes (équipe, ville, entreprise).
-- La suppression garde une trace côté serveur (à confirmer).
-- Messages texte, avec photo en pièce jointe. Envoi possible hors réseau (file locale), comme pour les opérations terrain.
-- Lien possible d'un message vers un dossier ou une intervention.
-- Statuts : envoyé, lu. Notifications poussées plus tard (liées au point de l'alerte 8h30).
-- Données : `conversations`, `conversation_membres`, `messages`, toutes avec `entreprise_id`.
-- **Phase 2** : API temps réel (WebSocket) ; la phase 1 peut se contenter d'un rafraîchissement régulier.
+## 6 ter. Messagerie collaborative interne ChatTech (codé le 26/10/2026)
+Système de messagerie d'entreprise unifié avec isolation stricte par tenant :
+- **Tables** : `conversations`, `conversation_membres`, `messages`.
+- **Canaux automatiques** :
+  - **Canal Général Entreprise** : toutes les annonces et échanges globaux.
+  - **Canal par Ville** : regroupe les intervenants de la ville et les superviseurs de base.
+  - **Canal par Équipe** : le chef, les techniciens, les superviseurs, les conformités et l'admin.
+  - **Discussions privées 1 à 1** : ouverture libre entre n'importe quel membre de l'entreprise.
+- **Super-admin invisible** : présent dans toutes les conversations avec `est_cache = true` (invisible des listes de membres et des compteurs, conformément au §6 ter).
+- **Pièces jointes photos** : prévisualisation, upload, visualisation grand format.
+- **Suppression traçable** : réservée exclusivement à l'auteur du message et à l'admin.
+- **Console Web React** : interface [`Messagerie.jsx`](file:///C:/Users/Davyh/.gemini/antigravity/scratch/ChatTech/CHAPTECH/console/src/pages/Messagerie.jsx) avec rafraîchissement dynamique et compteurs de messages non lus.
 
 ## 7. Application et interfaces
 - **Console web** pour les **entreprises** (admin, gestionnaire de stock, conformité) et pour le **super-admin** : équipes, comptes, stock, attribution, import, inventaires, suivi des poteaux, rapports, abonnements.

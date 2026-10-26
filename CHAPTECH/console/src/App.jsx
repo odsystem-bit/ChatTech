@@ -11,6 +11,7 @@ import Epi from './pages/Epi.jsx';
 import Equipes from './pages/Equipes.jsx';
 import Interventions from './pages/Interventions.jsx';
 import Login from './pages/Login.jsx';
+import Messagerie from './pages/Messagerie.jsx';
 import PlateformeLogin from './pages/PlateformeLogin.jsx';
 import Poteaux from './pages/Poteaux.jsx';
 import Stock from './pages/Stock.jsx';
@@ -54,6 +55,9 @@ export default function App() {
           } />
           <Route path="/dispatching" element={
             <Protege roles={['admin', 'superviseur']}><Dispatching /></Protege>
+          } />
+          <Route path="/messagerie" element={
+            <Protege roles={['admin', 'coordonnateur', 'superviseur', 'gestionnaire', 'conformite', 'chef', 'technicien', 'super_admin']}><Messagerie /></Protege>
           } />
           <Route path="/interventions" element={
             <Protege roles={['admin', 'gestionnaire', 'conformite', 'coordonnateur', 'superviseur']}><Interventions /></Protege>

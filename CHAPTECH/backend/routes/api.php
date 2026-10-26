@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\EquipesController;
 use App\Http\Controllers\Api\V1\ErreursController;
 use App\Http\Controllers\Api\V1\InterventionsController;
 use App\Http\Controllers\Api\V1\MediaController;
+use App\Http\Controllers\Api\V1\MessagerieController;
 use App\Http\Controllers\Api\V1\PoteauxController;
 use App\Http\Controllers\Api\V1\StockController;
 use App\Http\Controllers\Api\V1\SyncController;
@@ -107,6 +108,13 @@ Route::prefix('v1')->group(function () {
             Route::post('dispatching/{id}/reassigner', [DispatchingController::class, 'reassigner']);
             Route::post('dispatching/{id}/declarer-non-traite', [DispatchingController::class, 'declarerNonTraite']);
         });
+
+        // Messagerie collaborative interne ChatTech (§6 ter) — accessible à TOUS les acteurs de l'entreprise
+        Route::get('messagerie/conversations', [MessagerieController::class, 'index']);
+        Route::post('messagerie/conversations/directe', [MessagerieController::class, 'ouvrirDiscussionDirecte']);
+        Route::get('messagerie/conversations/{id}/messages', [MessagerieController::class, 'messages']);
+        Route::post('messagerie/conversations/{id}/messages', [MessagerieController::class, 'envoyerMessage']);
+        Route::delete('messagerie/messages/{id}', [MessagerieController::class, 'supprimerMessage']);
 
         // Console admin — gestion du tenant (§17.3)
         Route::middleware('role:admin')->group(function () {
