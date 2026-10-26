@@ -54,8 +54,12 @@ function canonicalDesignation($designation) {
     'poteau_sbee_arme' => 'poteau_sbee_arme',
     'traverse 13t' => 'traverse_13t',
     'traverse_13t' => 'traverse_13t',
+    'ct 13' => 'traverse_13t',
+    'ct13' => 'traverse_13t',
     'traverse 15t' => 'traverse_15t',
     'traverse_15t' => 'traverse_15t',
+    'ct 15' => 'traverse_15t',
+    'ct15' => 'traverse_15t',
     'cable fibre 1fo' => 'fibre_1fo',
     'fibre 1fo' => 'fibre_1fo',
     'fibre_1fo' => 'fibre_1fo',
@@ -63,13 +67,92 @@ function canonicalDesignation($designation) {
     'closer' => 'closer',
     'piton d\'ancrage' => 'piton',
     'piton' => 'piton',
+    'cheville' => 'cheville',
+    'chevilles' => 'cheville',
     'pince d\'ancrage' => 'pince',
     'pince' => 'pince',
+    'crochet' => 'crochets',
+    'crochets' => 'crochets',
+    'crochets d\'ancrage' => 'crochets',
+    'susp' => 'susp',
+    'suspente' => 'susp',
+    'suspension' => 'susp',
+    'cpc 50' => 'cpc_50',
+    'cpc 50m' => 'cpc_50',
+    'cpc_50' => 'cpc_50',
+    'cpc50' => 'cpc_50',
+    'cpc 100' => 'cpc_100',
+    'cpc 100m' => 'cpc_100',
+    'cpc_100' => 'cpc_100',
+    'cpc100' => 'cpc_100',
+    'cpc 150' => 'cpc_150',
+    'cpc 150m' => 'cpc_150',
+    'cpc_150' => 'cpc_150',
+    'cpc150' => 'cpc_150',
+    'cpc 200' => 'cpc_200',
+    'cpc 200m' => 'cpc_200',
+    'cpc_200' => 'cpc_200',
+    'cpc200' => 'cpc_200',
+    'cpc 250' => 'cpc_250',
+    'cpc 250m' => 'cpc_250',
+    'cpc_250' => 'cpc_250',
+    'cpc250' => 'cpc_250',
+    'cpc 300' => 'cpc_300',
+    'cpc 300m' => 'cpc_300',
+    'cpc_300' => 'cpc_300',
+    'cpc300' => 'cpc_300',
+    'cpc 350' => 'cpc_350',
+    'cpc 350m' => 'cpc_350',
+    'cpc_350' => 'cpc_350',
+    'cpc350' => 'cpc_350',
     'repeteur wifi' => 'repeteur_wifi',
     'repeteur wi-fi' => 'repeteur_wifi',
     'repeteur_wifi' => 'repeteur_wifi',
   ];
   return $aliases[$cleanKey] ?? ($aliases[$normalized] ?? trim((string)$designation));
+}
+
+function determineCpcKeyFromIntervention(array $intervention, array $materials = []): ?string {
+  foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $k) {
+    if (!empty($materials[$k]) && (int)$materials[$k] > 0) return $k;
+  }
+  foreach (['cpc50', 'cpc100', 'cpc150', 'cpc200', 'cpc250', 'cpc300', 'cpc350'] as $k) {
+    if (!empty($materials[$k]) && (int)$materials[$k] > 0) return str_replace('cpc', 'cpc_', $k);
+  }
+  $linear = 0;
+  if (isset($intervention['lineaire_m']) && is_numeric($intervention['lineaire_m']) && (float)$intervention['lineaire_m'] > 0) {
+    $linear = (float)$intervention['lineaire_m'];
+  }
+  if ($linear <= 0 && isset($intervention['arrivee_m'], $intervention['depart_m']) 
+      && is_numeric($intervention['arrivee_m']) && is_numeric($intervention['depart_m'])) {
+    $linear = abs((float)$intervention['arrivee_m'] - (float)$intervention['depart_m']);
+  }
+  if ($linear <= 0 && !empty($intervention['arrivee_m']) && is_numeric($intervention['arrivee_m']) && (float)$intervention['arrivee_m'] > 0) {
+    $linear = (float)$intervention['arrivee_m'];
+  }
+  if ($linear <= 0 && !empty($intervention['depart_m']) && is_numeric($intervention['depart_m']) && (float)$intervention['depart_m'] > 0) {
+    $linear = (float)$intervention['depart_m'];
+  }
+  if ($linear <= 0 && !empty($intervention['type_cable'])) {
+    if (preg_match('/(\d+)/', (string)$intervention['type_cable'], $m)) {
+      $linear = (float)$m[1];
+    }
+  }
+  if ($linear <= 0 && !empty($materials['lineaire']) && is_numeric($materials['lineaire'])) {
+    $linear = (float)$materials['lineaire'];
+  }
+  if ($linear <= 0 && !empty($materials['lineaire_m']) && is_numeric($materials['lineaire_m'])) {
+    $linear = (float)$materials['lineaire_m'];
+  }
+  if ($linear <= 0) return null;
+
+  if ($linear <= 50) return 'cpc_50';
+  if ($linear <= 100) return 'cpc_100';
+  if ($linear <= 150) return 'cpc_150';
+  if ($linear <= 200) return 'cpc_200';
+  if ($linear <= 250) return 'cpc_250';
+  if ($linear <= 300) return 'cpc_300';
+  return 'cpc_350';
 }
 
 function buildTotalMaterielPose(array $d): array {
@@ -104,6 +187,8 @@ function buildTotalMaterielPose(array $d): array {
   $ptoQte = (int)($d['pto_qte'] ?? 0);
   if ($ptoQte > 0 && !isset($total['pto'])) {
     $total['pto'] = $ptoQte;
+  } elseif (!isset($total['pto']) && (($d['statut'] ?? '') === 'termine')) {
+    $total['pto'] = 1;
   }
 
   // Déduction automatique Répéteur WiFi posé
@@ -116,6 +201,28 @@ function buildTotalMaterielPose(array $d): array {
   $jarretiereQte = (int)($d['jarretiere_qte'] ?? 0);
   if ($jarretiereQte > 0 && !isset($total['jarretiere'])) {
     $total['jarretiere'] = $jarretiereQte;
+  }
+
+  // RÈGLE CRUCIALE 1 : Chevilles équivaut aux pitons (1 piton = 1 cheville)
+  $pitonCount = (int)($total['piton'] ?? 0);
+  $chevilleCount = (int)($total['cheville'] ?? 0);
+  if ($chevilleCount <= 0 && $pitonCount > 0) {
+    $total['cheville'] = $pitonCount;
+  }
+
+  // RÈGLE CRUCIALE 2 : Déduction automatique du câble CPC selon le linéaire réel
+  $hasCpc = false;
+  foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $ck) {
+    if (!empty($total[$ck]) && $total[$ck] > 0) {
+      $hasCpc = true;
+      break;
+    }
+  }
+  if (!$hasCpc) {
+    $cpcKey = determineCpcKeyFromIntervention($d, $incomingMat);
+    if ($cpcKey !== null) {
+      $total[$cpcKey] = 1;
+    }
   }
 
   return $total;
@@ -2453,18 +2560,32 @@ try {
 
         $headerRowIdx = null;
         $valueRowIdx = null;
+        $recuRowIdx = null;
+        $restantRowIdx = null;
+        $initialRowIdx = null;
+
         foreach ($rows as $i => $row) {
           $first = trim((string)($row[0] ?? ''));
-          if (strcasecmp($first, 'STOCK RESTANT') === 0) { $valueRowIdx = $i; }
+          if (strcasecmp($first, 'STOCK RECU') === 0 || strcasecmp($first, 'STOCK REÇU') === 0) { $recuRowIdx = $i; }
+          if (strcasecmp($first, 'STOCK RESTANT') === 0) { $restantRowIdx = $i; }
+          if (strcasecmp($first, 'STOCK INITIAL') === 0) { $initialRowIdx = $i; }
           if ($headerRowIdx === null && (strcasecmp($first, 'N°') === 0 || strcasecmp(trim((string)($row[1] ?? '')), 'CLIENTS') === 0)) {
             $headerRowIdx = $i;
           }
         }
         @unlink($tmpFile);
 
+        // Si mode = add (livraison), privilégier STOCK RECU s'il existe
+        if ($mode === 'add') {
+          $valueRowIdx = $recuRowIdx ?? ($restantRowIdx ?? $initialRowIdx);
+        } else {
+          // Si mode = set (inventaire), privilégier STOCK RESTANT
+          $valueRowIdx = $restantRowIdx ?? ($initialRowIdx ?? $recuRowIdx);
+        }
+
         if ($valueRowIdx === null || $headerRowIdx === null) {
           http_response_code(400);
-          echo json_encode(['error' => 'Structure Excel non reconnue (bloc STOCK RESTANT ou en-tete introuvable)']);
+          echo json_encode(['error' => 'Structure Excel non reconnue (lignes STOCK RECU/RESTANT ou en-tête introuvable)']);
           break;
         }
 

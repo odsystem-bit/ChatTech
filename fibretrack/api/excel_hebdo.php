@@ -227,21 +227,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         $stockRemaining[$key] = $stockInitial[$key] + $weekAdd - $weekOut;
     }
 
-    // Référence papier éventuelle
-    $reference = null;
-    $refFile = __DIR__ . '/config/stock_reference.php';
-    if (file_exists($refFile)) {
-        foreach ((require $refFile) as $ref) {
-            if ($ref['debut'] === $weekStart && $ref['fin'] === $weekEnd) { $reference = $ref; break; }
-        }
-    }
-    if ($reference !== null) {
-        foreach ($materialColumns as $key => $_column) {
-            $stockInitial[$key] = (int)($reference['initial'][$key] ?? 0);
-            $stockReceived[$key] = (int)($reference['recu'][$key] ?? 0);
-            $stockRemaining[$key] = $stockInitial[$key] + $stockReceived[$key];
-        }
-    }
+
     
     // === FEUILLE 1: POINT GENERAL ===
     $sheetPoint = $spreadsheet->getSheetByName('POINT GENERAL');
