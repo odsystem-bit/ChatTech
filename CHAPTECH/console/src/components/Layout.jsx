@@ -5,11 +5,14 @@ import { useAuth } from '../auth.jsx';
 // super_admin → console plateforme. Le backend re-vérifie (403) —
 // ce filtre n'est que cosmétique.
 const NAV = [
-  { vers: '/interventions', label: 'Interventions', roles: ['admin', 'gestionnaire', 'conformite'] },
+  { vers: '/dossiers', label: 'Dossiers du jour', roles: ['admin', 'coordonnateur'] },
+  { vers: '/dispatching', label: 'Dispatching', roles: ['admin', 'superviseur'] },
+  { vers: '/interventions', label: 'Interventions', roles: ['admin', 'gestionnaire', 'conformite', 'coordonnateur', 'superviseur'] },
   { vers: '/conformite', label: 'Conformité', roles: ['admin', 'conformite'] },
   { vers: '/epi', label: 'EPI du jour', roles: ['admin', 'conformite'] },
   { vers: '/stock', label: 'Stock', roles: ['admin', 'gestionnaire'] },
   { vers: '/articles', label: 'Articles', roles: ['admin', 'gestionnaire'] },
+  { vers: '/villes', label: 'Villes', roles: ['admin'] },
   { vers: '/equipes', label: 'Équipes', roles: ['admin'] },
   { vers: '/comptes', label: 'Comptes', roles: ['admin'] },
   { vers: '/entreprises', label: 'Entreprises', roles: ['super_admin'] },

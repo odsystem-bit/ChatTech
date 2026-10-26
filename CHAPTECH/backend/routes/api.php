@@ -5,6 +5,8 @@ use App\Http\Controllers\Api\V1\AlertesStockController;
 use App\Http\Controllers\Api\V1\ArticlesController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\ComptesController;
+use App\Http\Controllers\Api\V1\DispatchingController;
+use App\Http\Controllers\Api\V1\DossiersController;
 use App\Http\Controllers\Api\V1\EntreprisesController;
 use App\Http\Controllers\Api\V1\EpiController;
 use App\Http\Controllers\Api\V1\EquipesController;
@@ -14,6 +16,7 @@ use App\Http\Controllers\Api\V1\MediaController;
 use App\Http\Controllers\Api\V1\PoteauxController;
 use App\Http\Controllers\Api\V1\StockController;
 use App\Http\Controllers\Api\V1\SyncController;
+use App\Http\Controllers\Api\V1\VillesController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -77,6 +80,32 @@ Route::prefix('v1')->group(function () {
             Route::post('articles', [ArticlesController::class, 'store']);
             Route::put('articles/{id}', [ArticlesController::class, 'update']);
             Route::delete('articles/{id}', [ArticlesController::class, 'destroy']);
+        });
+
+        // Villes — lecture pour tous les rôles du tenant, gestion par l'admin (§2 PLAN.md)
+        Route::get('villes', [VillesController::class, 'index']);
+        Route::middleware('role:admin')->group(function () {
+            Route::post('villes', [VillesController::class, 'store']);
+            Route::put('villes/{id}', [VillesController::class, 'update']);
+            Route::delete('villes/{id}', [VillesController::class, 'destroy']);
+        });
+
+        // Dossiers du jour (Coordonnateur & Admin) §6 bis
+        Route::middleware('role:admin,coordonnateur,superviseur,conformite')->group(function () {
+            Route::get('dossiers/du-jour', [DossiersController::class, 'duJour']);
+        });
+        Route::middleware('role:admin,coordonnateur')->group(function () {
+            Route::post('dossiers', [DossiersController::class, 'store']);
+            Route::put('dossiers/{id}', [DossiersController::class, 'update']);
+            Route::delete('dossiers/{id}', [DossiersController::class, 'destroy']);
+        });
+
+        // Dispatching (Superviseur & Admin) §6 bis
+        Route::middleware('role:admin,superviseur')->group(function () {
+            Route::get('dispatching', [DispatchingController::class, 'index']);
+            Route::post('dispatching/{id}/assigner', [DispatchingController::class, 'assigner']);
+            Route::post('dispatching/{id}/reassigner', [DispatchingController::class, 'reassigner']);
+            Route::post('dispatching/{id}/declarer-non-traite', [DispatchingController::class, 'declarerNonTraite']);
         });
 
         // Console admin — gestion du tenant (§17.3)

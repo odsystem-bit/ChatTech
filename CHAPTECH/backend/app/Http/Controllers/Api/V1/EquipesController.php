@@ -17,7 +17,7 @@ class EquipesController extends Controller
 {
     public function index()
     {
-        return Equipe::with('chef:id,nom')
+        return Equipe::with(['chef:id,nom', 'ville:id,nom,code'])
             ->withCount('comptes')
             ->orderBy('nom')
             ->get();
@@ -35,6 +35,10 @@ class EquipesController extends Controller
 
         $data = $request->validate([
             'nom' => 'required|string|max:255',
+            'ville_id' => [
+                'nullable', 'integer',
+                Rule::exists('villes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
+            ],
             'chef_compte_id' => [
                 'nullable', 'integer',
                 Rule::exists('comptes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
@@ -46,7 +50,7 @@ class EquipesController extends Controller
         AuditLog::ecrire('creation_equipe', 'equipe', $equipe->id,
             ['nom' => $equipe->nom]);
 
-        return response()->json($equipe, 201);
+        return response()->json($equipe->load('ville:id,nom', 'chef:id,nom'), 201);
     }
 
     public function update(Request $request, string $id)
@@ -55,6 +59,10 @@ class EquipesController extends Controller
 
         $data = $request->validate([
             'nom' => 'sometimes|string|max:255',
+            'ville_id' => [
+                'nullable', 'integer',
+                Rule::exists('villes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
+            ],
             'chef_compte_id' => [
                 'nullable', 'integer',
                 Rule::exists('comptes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
@@ -64,7 +72,7 @@ class EquipesController extends Controller
 
         $equipe->update($data);
 
-        return $equipe;
+        return $equipe->load('ville:id,nom', 'chef:id,nom');
     }
 
     public function destroy(string $id)

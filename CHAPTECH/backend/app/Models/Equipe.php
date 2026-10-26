@@ -9,9 +9,14 @@ class Equipe extends TenantModel
 {
     use SoftDeletes;
 
-    protected $fillable = ['entreprise_id', 'nom', 'chef_compte_id', 'actif'];
+    protected $fillable = ['entreprise_id', 'ville_id', 'nom', 'chef_compte_id', 'actif'];
 
     protected $casts = ['actif' => 'boolean'];
+
+    public function ville()
+    {
+        return $this->belongsTo(Ville::class);
+    }
 
     public function chef()
     {

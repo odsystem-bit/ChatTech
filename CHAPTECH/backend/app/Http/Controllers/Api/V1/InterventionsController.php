@@ -20,17 +20,31 @@ class InterventionsController extends Controller
     public function index(Request $request)
     {
         $compte = Tenant::compte();
-        $query = Intervention::with('equipe:id,nom')
+        $query = Intervention::with(['equipe:id,nom', 'ville:id,nom,code'])
             ->orderByDesc('updated_at')
-            ->select('id', 'entreprise_id', 'equipe_id', 'chef_nom', 'client_nom',
-                     'client_tel', 'adresse', 'statut', 'date', 'revision',
-                     'cree_par', 'modifie_par', 'created_at', 'updated_at');
+            ->select('id', 'entreprise_id', 'ville_id', 'equipe_id', 'chef_nom', 'client_nom',
+                     'client_tel', 'mobile', 'adresse', 'statut', 'statut_distribution',
+                     'date', 'date_dossier', 'revision',
+                     'cree_par', 'modifie_par', 'dispatche_par', 'dispatche_le',
+                     'created_at', 'updated_at');
 
         if (in_array($compte->role, ['chef', 'technicien'], true)) {
             $query->where('equipe_id', $compte->equipe_id);
+        } elseif ($compte->isDeVille()) {
+            $query->where('ville_id', $compte->ville_id);
+        }
+
+        if ($request->filled('ville_id')) {
+            $query->where('ville_id', $request->ville_id);
         }
         if ($request->filled('statut')) {
             $query->where('statut', $request->statut);
+        }
+        if ($request->filled('statut_distribution')) {
+            $query->where('statut_distribution', $request->statut_distribution);
+        }
+        if ($request->filled('date')) {
+            $query->whereDate('date_dossier', $request->date);
         }
 
         return response()->json($query->paginate(50));

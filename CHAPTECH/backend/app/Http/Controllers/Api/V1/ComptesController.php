@@ -17,11 +17,14 @@ use Illuminate\Validation\Rule;
  */
 class ComptesController extends Controller
 {
-    private const ROLES_ASSIGNABLES = ['admin', 'gestionnaire', 'conformite', 'chef', 'technicien'];
+    private const ROLES_ASSIGNABLES = [
+        'admin', 'coordonnateur', 'superviseur', 'gestionnaire',
+        'conformite', 'chef', 'technicien',
+    ];
 
     public function index()
     {
-        return Compte::with('equipe:id,nom')
+        return Compte::with(['equipe:id,nom', 'ville:id,nom,code'])
             ->orderBy('nom')
             ->paginate(50);
     }
@@ -38,6 +41,10 @@ class ComptesController extends Controller
             'nom' => 'required|string|max:255',
             'password' => 'required|string|min:8',
             'role' => ['required', Rule::in(self::ROLES_ASSIGNABLES)],
+            'ville_id' => [
+                'nullable', 'integer',
+                Rule::exists('villes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
+            ],
             'equipe_id' => [
                 'nullable', 'integer',
                 Rule::exists('equipes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
@@ -49,13 +56,14 @@ class ComptesController extends Controller
             'nom' => $data['nom'],
             'password_hash' => password_hash($data['password'], PASSWORD_BCRYPT),
             'role' => $data['role'],
+            'ville_id' => $data['ville_id'] ?? null,
             'equipe_id' => $data['equipe_id'] ?? null,
         ]);
 
         AuditLog::ecrire('creation_compte', 'compte', $compte->id,
             ['identifiant' => $compte->identifiant, 'role' => $compte->role]);
 
-        return response()->json($compte, 201);
+        return response()->json($compte->load('ville:id,nom', 'equipe:id,nom'), 201);
     }
 
     public function update(Request $request, string $id)
@@ -71,6 +79,10 @@ class ComptesController extends Controller
             'nom' => 'sometimes|string|max:255',
             'password' => 'sometimes|string|min:8',
             'role' => ['sometimes', Rule::in(self::ROLES_ASSIGNABLES)],
+            'ville_id' => [
+                'nullable', 'integer',
+                Rule::exists('villes', 'id')->where('entreprise_id', Tenant::entrepriseId()),
+            ],
             'equipe_id' => [
                 'nullable', 'integer',
                 Rule::exists('equipes', 'id')->where('entreprise_id', Tenant::entrepriseId()),

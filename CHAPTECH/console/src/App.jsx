@@ -4,6 +4,8 @@ import Layout from './components/Layout.jsx';
 import Abonnements from './pages/Abonnements.jsx';
 import Articles from './pages/Articles.jsx';
 import Comptes from './pages/Comptes.jsx';
+import Dispatching from './pages/Dispatching.jsx';
+import Dossiers from './pages/Dossiers.jsx';
 import Entreprises from './pages/Entreprises.jsx';
 import Epi from './pages/Epi.jsx';
 import Equipes from './pages/Equipes.jsx';
@@ -12,6 +14,7 @@ import Login from './pages/Login.jsx';
 import PlateformeLogin from './pages/PlateformeLogin.jsx';
 import Poteaux from './pages/Poteaux.jsx';
 import Stock from './pages/Stock.jsx';
+import Villes from './pages/Villes.jsx';
 
 function Protege({ roles, children }) {
   const { connecte, compte } = useAuth();
@@ -29,6 +32,8 @@ function Protege({ roles, children }) {
 const ACCUEIL = {
   super_admin: '/entreprises',
   conformite: '/conformite',
+  coordonnateur: '/dossiers',
+  superviseur: '/dispatching',
 };
 
 function Accueil() {
@@ -44,14 +49,23 @@ export default function App() {
         <Route path="/plateforme" element={<PlateformeLogin />} />
         <Route element={<Protege><Layout /></Protege>}>
           <Route path="/" element={<Accueil />} />
+          <Route path="/dossiers" element={
+            <Protege roles={['admin', 'coordonnateur']}><Dossiers /></Protege>
+          } />
+          <Route path="/dispatching" element={
+            <Protege roles={['admin', 'superviseur']}><Dispatching /></Protege>
+          } />
           <Route path="/interventions" element={
-            <Protege roles={['admin', 'gestionnaire', 'conformite']}><Interventions /></Protege>
+            <Protege roles={['admin', 'gestionnaire', 'conformite', 'coordonnateur', 'superviseur']}><Interventions /></Protege>
           } />
           <Route path="/conformite" element={
             <Protege roles={['admin', 'conformite']}><Poteaux /></Protege>
           } />
           <Route path="/epi" element={
             <Protege roles={['admin', 'conformite']}><Epi /></Protege>
+          } />
+          <Route path="/villes" element={
+            <Protege roles={['admin']}><Villes /></Protege>
           } />
           <Route path="/comptes" element={
             <Protege roles={['admin']}><Comptes /></Protege>

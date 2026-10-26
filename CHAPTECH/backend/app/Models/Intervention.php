@@ -40,9 +40,10 @@ class Intervention extends TenantModel
     ];
 
     protected $fillable = [
-        'id', 'entreprise_id', 'equipe_id', 'cree_par', 'chef_nom',
-        'client_nom', 'client_tel', 'mobile', 'adresse', 'statut',
-        'date', 'notes', 'etat', 'msan', 'fat_ref', 'port',
+        'id', 'entreprise_id', 'ville_id', 'equipe_id', 'cree_par', 'chef_nom',
+        'client_nom', 'client_tel', 'mobile', 'adresse', 'statut', 'statut_distribution',
+        'date', 'date_dossier', 'notes', 'motif_non_traite', 'dispatche_par', 'dispatche_le',
+        'etat', 'msan', 'fat_ref', 'port',
         'ports_disponibles', 'port_disponible', 'type_cable',
         'depart_m', 'arrivee_m', 'lineaire_m', 'puissance_fat_dbm',
         'puissance_pto_dbm', 'mac', 'sn', 'nb_poteaux_traverses',
@@ -59,6 +60,8 @@ class Intervention extends TenantModel
 
     protected $casts = [
         'date' => 'datetime',
+        'date_dossier' => 'date',
+        'dispatche_le' => 'datetime',
         'materiel_deduit' => 'boolean',
         'materiel_pose' => 'array',
         'revision' => 'integer',
@@ -82,9 +85,19 @@ class Intervention extends TenantModel
         'professionnalisme' => 'integer',
     ];
 
+    public function ville()
+    {
+        return $this->belongsTo(Ville::class);
+    }
+
     public function equipe()
     {
         return $this->belongsTo(Equipe::class);
+    }
+
+    public function dispatchePar()
+    {
+        return $this->belongsTo(Compte::class, 'dispatche_par');
     }
 
     public function pointsGps()
@@ -95,6 +108,32 @@ class Intervention extends TenantModel
     public function photos()
     {
         return $this->hasMany(Photo::class);
+    }
+
+    public function scopeDuJour($query, ?string $date = null)
+    {
+        $d = $date ?: now()->toDateString();
+        return $query->whereDate('date_dossier', $d);
+    }
+
+    public function scopeADispatcher($query)
+    {
+        return $query->where('statut_distribution', 'a_dispatcher');
+    }
+
+    public function scopePourVille($query, ?int $villeId)
+    {
+        if ($villeId) {
+            return $query->where('ville_id', $villeId);
+        }
+        return $query;
+    }
+
+    public function scopeAnterieursNonClotures($query, ?string $date = null)
+    {
+        $d = $date ?: now()->toDateString();
+        return $query->whereDate('date_dossier', '<', $d)
+            ->whereNotIn('statut_distribution', ['termine']);
     }
 
     /**

@@ -7,12 +7,15 @@ const ROLES_CHEF = ['admin', 'gestionnaire', 'chef'];
 export default function Equipes() {
   const equipes = useCharge(() => api.get('/equipes'));
   const comptes = useCharge(() => api.get('/comptes'));
-  const [form, setForm] = useState({ nom: '', chef_compte_id: '' });
+  const villes = useCharge(() => api.get('/villes'));
+
+  const [form, setForm] = useState({ nom: '', ville_id: '', chef_compte_id: '' });
   const [erreur, setErreur] = useState(null);
   const [envoi, setEnvoi] = useState(false);
 
   const membres = comptes.data?.data ?? [];
   const eligibles = membres.filter((c) => ROLES_CHEF.includes(c.role));
+  const listeVilles = villes.data ?? [];
 
   async function creer(e) {
     e.preventDefault();
@@ -21,9 +24,10 @@ export default function Equipes() {
     try {
       await api.post('/equipes', {
         nom: form.nom,
+        ville_id: form.ville_id ? Number(form.ville_id) : null,
         chef_compte_id: form.chef_compte_id ? Number(form.chef_compte_id) : null,
       });
-      setForm({ nom: '', chef_compte_id: '' });
+      setForm({ nom: '', ville_id: '', chef_compte_id: '' });
       equipes.recharger();
     } catch (err) {
       setErreur(err.corps?.error ?? err.corps?.message ?? 'Échec de la création.');
@@ -40,12 +44,19 @@ export default function Equipes() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Équipes</h1>
+      <h1 className="text-2xl font-semibold">Équipes terrain</h1>
 
       <form onSubmit={creer}
-        className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:grid-cols-3">
-        <Champ label="Nom" required value={form.nom}
+        className="grid gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:grid-cols-4">
+        <Champ label="Nom de l'équipe *" required value={form.nom}
           onChange={(e) => setForm({ ...form, nom: e.target.value })} />
+        <Select label="Ville d'intervention" value={form.ville_id}
+          onChange={(e) => setForm({ ...form, ville_id: e.target.value })}>
+          <option value="">— Non rattachée —</option>
+          {listeVilles.map((v) => (
+            <option key={v.id} value={v.id}>{v.nom}</option>
+          ))}
+        </Select>
         <Select label="Chef d'équipe (optionnel)" value={form.chef_compte_id}
           onChange={(e) => setForm({ ...form, chef_compte_id: e.target.value })}>
           <option value="">— Aucun —</option>
@@ -56,7 +67,7 @@ export default function Equipes() {
         <div className="flex items-end">
           <Bouton type="submit" disabled={envoi}>Créer l'équipe</Bouton>
         </div>
-        {erreur && <p className="col-span-3 text-sm text-red-400">{erreur}</p>}
+        {erreur && <p className="col-span-full text-sm text-red-400">{erreur}</p>}
       </form>
 
       {equipes.chargement && <p className="text-slate-400">Chargement…</p>}
@@ -66,6 +77,9 @@ export default function Equipes() {
           vide="Aucune équipe — créez la première ci-dessus."
           colonnes={[
             { cle: 'nom', label: 'Nom' },
+            { cle: 'ville', label: 'Ville', rendu: (e) => e.ville ? (
+              <span className="font-medium text-sky-400">{e.ville.nom}</span>
+            ) : '—' },
             { cle: 'chef', label: 'Chef', rendu: (e) => e.chef?.nom ?? '—' },
             { cle: 'comptes_count', label: 'Membres' },
             { cle: 'actif', label: 'Statut', rendu: (e) => <Badge valeur={e.actif ? 'actif' : 'suspendu'} /> },

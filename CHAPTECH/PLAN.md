@@ -141,14 +141,14 @@ Codé (backend + console, 12/10/2026). Activable **par entreprise** (`epi_obliga
 - **Tout se passe dans l'APK** (décision du 13/10/2026) : envoi de la photo, verrouillage, alertes et notifications, sans SMS ni WhatsApp. Le **chef peut renvoyer sa photo sans limite**, y compris après une révocation.
 - Reste à faire : côté APK (envoi de la photo, verrouillage, file locale, gestion du code 423, notification à 8h30 pour la conformité ; pour l'instant : bandeau dans la console).
 
-### Dossiers du jour (à concevoir)
-- **Un dossier est une intervention** (décision du 13/10/2026) : pas d'objet distinct, on garde le modèle `interventions` existant, avec un statut de distribution et une date.
-- Les **coordonnateurs mettent les dossiers** (par ville) et les **superviseurs les dispatchent** aux équipes **de leur ville** (décision du 14/10/2026). Ils voient tous les dossiers et interventions de leur ville ; chaque équipe voit la liste de ses dossiers du jour.
-- **Dispatching par ville** : chaque ville ne voit que ses dossiers (le coordonnateur et le superviseur de Parakou ne voient pas ceux de Cotonou).
-- **Chaque ville a ses dossiers** (décision du 13/10/2026) : un dossier de Parakou ne peut pas être confié à une équipe de Cotonou. Seuls le coordonnateur et le superviseur **de base** peuvent travailler sur n'importe quelle ville. Le serveur refuse toute attribution hors de la ville du dossier pour un rôle de ville.
-- **Fin de journée** : les dossiers non terminés ou non clôturés ne disparaissent pas, ils passent à la **date antérieure** (système de dates) ; le lendemain, une nouvelle liste apparaît.
-- L'**admin voit tout**. Les techniciens voient les dossiers **traités** et **non traités** ; les non traités sont en **lecture seule**, et le lendemain ils peuvent être **réattribués à une autre équipe**.
-- Principe : CHAPTECH doit faciliter la vie à tous.
+### Dossiers du jour et Dispatching (codé le 26/10/2026)
+- **Un dossier est une intervention** : statut de distribution `statut_distribution` (`a_dispatcher`, `dispatche`, `en_cours`, `termine`, `non_traite`) et date `date_dossier`.
+- Les **coordonnateurs créent les dossiers** (par ville, unitaire ou lot de 4-5) : contrôleur `DossiersController` + écran console [`Dossiers.jsx`](file:///C:/Users/Davyh/.gemini/antigravity/scratch/ChatTech/CHAPTECH/console/src/pages/Dossiers.jsx).
+- Les **superviseurs dispatchent** ces dossiers aux équipes **de leur ville** en 1 clic : contrôleur `DispatchingController` + écran console [`Dispatching.jsx`](file:///C:/Users/Davyh/.gemini/antigravity/scratch/ChatTech/CHAPTECH/console/src/pages/Dispatching.jsx).
+- **Indicateur de charge en temps réel** : visualisation du nombre de dossiers déjà assignés à chaque équipe aujourd'hui.
+- **Étanchéité par ville** : le serveur refuse toute attribution hors de la ville du dossier (code 422).
+- **Bascule automatique en fin de journée** : les dossiers non finalisés ou non traités basculent dans l'onglet des reliquats antérieurs et peuvent être reprogrammés en 1 clic pour aujourd'hui.
+- **Déclaration non traité** avec motif obligatoire : 0 stock déduit.
 
 ## 6 ter. Messagerie interne (nouveau, à concevoir)
 Idée du 13/10/2026 : un système de messagerie où **tous les membres d'une même entreprise peuvent échanger**. Isolation stricte : jamais de message entre entreprises.
