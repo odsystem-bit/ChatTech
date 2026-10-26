@@ -948,6 +948,215 @@ function generateMoisPDF($moisDebut, $moisFin = null) {
   return $pdf;
 }
 
+function generatePointMaterielsPDF(string $debut, string $fin): ChaptechPDF {
+  $finExclusive = date('Y-m-d', strtotime('+1 day', strtotime($fin)));
+  
+  $stmt = db()->prepare("SELECT id, date, nom_client, telephone_ligne, adresse_zone, nom_technicien,
+      materiel_pose, lineaire_m, arrivee_m, depart_m, type_cable
+    FROM interventions
+    WHERE date >= ? AND date < ? 
+      AND statut = 'termine' 
+      AND (motif_non_traite IS NULL OR motif_non_traite = '')
+    ORDER BY date ASC");
+  $stmt->execute([$debut . ' 00:00:00', $finExclusive . ' 00:00:00']);
+  $interventions = $stmt->fetchAll();
+
+  $matKeys = [
+    'ont' => 'ONT', 'pto' => 'PTO', 'jarretiere' => 'Jarretiere', 'piton' => 'Piton',
+    'cheville' => 'Cheville', 'connecteur' => 'Connecteur', 'closer' => 'Closer',
+    'fibre_1fo' => 'Cable 1FO', 'cpc_50' => 'CPC 50', 'cpc_100' => 'CPC 100',
+    'cpc_150' => 'CPC 150', 'cpc_200' => 'CPC 200', 'cpc_250' => 'CPC 250',
+    'cpc_300' => 'CPC 300', 'cpc_350' => 'CPC 350', 'crochets' => 'Crochets',
+    'pince' => 'Pince', 'susp' => 'Suspente', 'traverse_13t' => 'Traverse 13T', 'traverse_15t' => 'Traverse 15T'
+  ];
+
+  $totals = array_fill_keys(array_keys($matKeys), 0);
+  $parsedClients = [];
+
+  foreach ($interventions as $iv) {
+    $mp = json_decode($iv['materiel_pose'] ?? '{}', true) ?: [];
+    $piton = (int)($mp['piton'] ?? 0);
+    $cheville = (int)($mp['cheville'] ?? 0);
+    if ($cheville <= 0 && $piton > 0) {
+      $cheville = $piton;
+      $mp['cheville'] = $cheville;
+    }
+    
+    $cpc = null;
+    foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $ck) {
+      if (!empty($mp[$ck])) { $cpc = $ck; break; }
+    }
+    if (!$cpc) {
+      $lin = (float)($iv['lineaire_m'] ?? 0);
+      if ($lin <= 0 && !empty($iv['arrivee_m'])) $lin = (float)$iv['arrivee_m'];
+      if ($lin <= 0 && !empty($iv['type_cable']) && preg_match('/(\d+)/', $iv['type_cable'], $m)) $lin = (float)$m[1];
+      if ($lin > 0) {
+        if ($lin <= 50) $cpc = 'cpc_50';
+        elseif ($lin <= 100) $cpc = 'cpc_100';
+        elseif ($lin <= 150) $cpc = 'cpc_150';
+        elseif ($lin <= 200) $cpc = 'cpc_200';
+        elseif ($lin <= 250) $cpc = 'cpc_250';
+        elseif ($lin <= 300) $cpc = 'cpc_300';
+        else $cpc = 'cpc_350';
+      }
+    }
+    foreach (['cpc_50', 'cpc_100', 'cpc_150', 'cpc_200', 'cpc_250', 'cpc_300', 'cpc_350'] as $ck) {
+      unset($mp[$ck]);
+    }
+    if ($cpc) $mp[$cpc] = 1;
+
+    foreach ($matKeys as $k => $lbl) {
+      $totals[$k] += (int)($mp[$k] ?? 0);
+    }
+    $shortCodes = [
+      'ont' => 'ONT', 'pto' => 'PTO', 'jarretiere' => 'JAR', 'piton' => 'PIT', 'cheville' => 'CHE',
+      'connecteur' => 'CON', 'closer' => 'CLO', 'fibre_1fo' => '1FO', 'cpc_50' => 'CPC 50',
+      'cpc_100' => 'CPC 100', 'cpc_150' => 'CPC 150', 'cpc_200' => 'CPC 200', 'cpc_250' => 'CPC 250',
+      'cpc_300' => 'CPC 300', 'cpc_350' => 'CPC 350', 'crochets' => 'CRO', 'pince' => 'PINCE',
+      'susp' => 'SUS', 'traverse_13t' => 'CT 13', 'traverse_15t' => 'CT 15'
+    ];
+    $parsedClients[] = [
+      'date' => date('d/m/Y', strtotime($iv['date'])),
+      'client' => trim($iv['nom_client'] ?? ''),
+      'tel' => trim($iv['telephone_ligne'] ?? ''),
+      'cpc' => $cpc ? strtoupper(str_replace('_', ' ', $cpc)) : '-',
+      'piton' => (int)($mp['piton'] ?? 0),
+      'cheville' => (int)($mp['cheville'] ?? 0),
+      'crochets' => (int)($mp['crochets'] ?? 0),
+      'ont' => (int)($mp['ont'] ?? 0),
+      'pto' => (int)($mp['pto'] ?? 0),
+      'autres' => array_filter($mp, fn($v, $k) => $v > 0 && !in_array($k, ['piton', 'cheville', 'crochets', 'ont', 'pto', $cpc], true), ARRAY_FILTER_USE_BOTH)
+    ];
+  }
+
+  $pdf = new ChaptechPDF();
+  $pdf->SetAutoPageBreak(true, 15);
+
+  // PAGE 1 : SYNTHÈSE GLOBALE DES MATÉRIELS
+  $pdf->AddPage();
+  $pdf->SetFillColor(13, 25, 90);
+  $pdf->Rect(10, 10, 190, 18, 'F');
+  $pdf->SetTextColor(255, 255, 255);
+  $pdf->SetFont('Helvetica', 'B', 13);
+  $pdf->SetXY(10, 13);
+  $pdf->Cell(190, 6, pdfT('POINT DES MATERIELS — GS BTP FIBRE'), 0, 1, 'C');
+  $pdf->SetFont('Helvetica', '', 10);
+  $pdf->Cell(190, 5, pdfT('Periode du ' . date('d/m/Y', strtotime($debut)) . ' au ' . date('d/m/Y', strtotime($fin))), 0, 1, 'C');
+
+  $pdf->SetTextColor(0, 0, 0);
+  $pdf->SetY(32);
+
+  // Cadre infos
+  $pdf->SetFont('Helvetica', 'B', 9.5);
+  $pdf->SetFillColor(240, 244, 250);
+  $pdf->Cell(95, 7, pdfT(' Equipe : BTP Telecom Services'), 1, 0, 'L', true);
+  $pdf->Cell(95, 7, pdfT(' Interventions terminees : ' . count($interventions)), 1, 1, 'L', true);
+  $pdf->Ln(3);
+
+  // Tableau récapitulatif des 20 matériels
+  $pdf->SetFont('Helvetica', 'B', 9.5);
+  $pdf->SetFillColor(220, 230, 245);
+  $pdf->Cell(20, 7.5, pdfT('Code'), 1, 0, 'C', true);
+  $pdf->Cell(90, 7.5, pdfT('Designation Materiel'), 1, 0, 'L', true);
+  $pdf->Cell(35, 7.5, pdfT('Quantite Totale'), 1, 0, 'C', true);
+  $pdf->Cell(45, 7.5, pdfT('Observations'), 1, 1, 'L', true);
+
+  $pdf->SetFont('Helvetica', '', 9);
+  $fill = false;
+  $pdf->SetFillColor(248, 250, 252);
+
+  $shortCodes = [
+    'ont' => 'ONT', 'pto' => 'PTO', 'jarretiere' => 'JAR', 'piton' => 'PIT', 'cheville' => 'CHE',
+    'connecteur' => 'CON', 'closer' => 'CLO', 'fibre_1fo' => '1FO', 'cpc_50' => 'CPC 50',
+    'cpc_100' => 'CPC 100', 'cpc_150' => 'CPC 150', 'cpc_200' => 'CPC 200', 'cpc_250' => 'CPC 250',
+    'cpc_300' => 'CPC 300', 'cpc_350' => 'CPC 350', 'crochets' => 'CRO', 'pince' => 'PINCE',
+    'susp' => 'SUS', 'traverse_13t' => 'CT 13', 'traverse_15t' => 'CT 15'
+  ];
+
+  foreach ($matKeys as $k => $lbl) {
+    $qty = $totals[$k];
+    $obs = '-';
+    if (str_starts_with($k, 'cpc_')) {
+      $obs = $qty > 0 ? $qty . ' touret(s)' : '-';
+    } elseif ($k === 'cheville') {
+      $obs = 'Equivaut pitons';
+    } elseif ($k === 'ont' || $k === 'pto') {
+      $obs = 'Raccordements OK';
+    }
+    $pdf->SetFont('Helvetica', $qty > 0 ? 'B' : '', 9);
+    $pdf->Cell(20, 6, $shortCodes[$k], 1, 0, 'C', $fill);
+    $pdf->SetFont('Helvetica', '', 9);
+    $pdf->Cell(90, 6, pdfT($lbl), 1, 0, 'L', $fill);
+    $pdf->SetFont('Helvetica', $qty > 0 ? 'B' : '', 9);
+    $pdf->Cell(35, 6, $qty, 1, 0, 'C', $fill);
+    $pdf->SetFont('Helvetica', 'I', 8.5);
+    $pdf->Cell(45, 6, pdfT($obs), 1, 1, 'L', $fill);
+    $fill = !$fill;
+  }
+
+  // Bas de page
+  $pdf->SetY(265);
+  $pdf->SetFont('Helvetica', 'I', 8.5);
+  $pdf->Cell(95, 5, pdfT('FibreTrack Platform — Rapport officiel GS BTP'), 0, 0, 'L');
+  $pdf->Cell(95, 5, pdfT('Edite le ' . date('d/m/Y H:i')), 0, 1, 'R');
+
+  // PAGE 2 & SUIVANTES : BORDEREAU DES INTERVENTIONS
+  $pdf->AddPage();
+  $pdf->SetFont('Helvetica', 'B', 11);
+  $pdf->Cell(0, 8, pdfT('Bordereau Detaille des 30 Interventions — Materiels Poses'), 0, 1, 'C');
+  $pdf->Ln(2);
+
+  $pdf->SetFont('Helvetica', 'B', 8);
+  $pdf->SetFillColor(220, 230, 245);
+  $pdf->Cell(8, 7, pdfT('N°'), 1, 0, 'C', true);
+  $pdf->Cell(18, 7, 'Date', 1, 0, 'C', true);
+  $pdf->Cell(52, 7, 'Client', 1, 0, 'L', true);
+  $pdf->Cell(22, 7, 'N° Ligne', 1, 0, 'C', true);
+  $pdf->Cell(18, 7, 'Cable', 1, 0, 'C', true);
+  $pdf->Cell(12, 7, 'Pit/Che', 1, 0, 'C', true);
+  $pdf->Cell(12, 7, 'Croch.', 1, 0, 'C', true);
+  $pdf->Cell(16, 7, 'ONT/PTO', 1, 0, 'C', true);
+  $pdf->Cell(32, 7, 'Autres Mat.', 1, 1, 'L', true);
+
+  $pdf->SetFont('Helvetica', '', 7.5);
+  $fill = false;
+  $pdf->SetFillColor(248, 250, 252);
+  $idx = 1;
+  foreach ($parsedClients as $c) {
+    if ($pdf->GetY() > 270) {
+      $pdf->AddPage();
+      $pdf->SetFont('Helvetica', 'B', 8);
+      $pdf->SetFillColor(220, 230, 245);
+      $pdf->Cell(8, 7, pdfT('N°'), 1, 0, 'C', true);
+      $pdf->Cell(18, 7, 'Date', 1, 0, 'C', true);
+      $pdf->Cell(52, 7, 'Client', 1, 0, 'L', true);
+      $pdf->Cell(22, 7, 'N° Ligne', 1, 0, 'C', true);
+      $pdf->Cell(18, 7, 'Cable', 1, 0, 'C', true);
+      $pdf->Cell(12, 7, 'Pit/Che', 1, 0, 'C', true);
+      $pdf->Cell(12, 7, 'Croch.', 1, 0, 'C', true);
+      $pdf->Cell(16, 7, 'ONT/PTO', 1, 0, 'C', true);
+      $pdf->Cell(32, 7, 'Autres Mat.', 1, 1, 'L', true);
+      $pdf->SetFont('Helvetica', '', 7.5);
+    }
+    $autresText = [];
+    foreach ($c['autres'] as $ak => $av) {
+      $autresText[] = ($shortCodes[$ak] ?? $ak) . ':' . $av;
+    }
+    $pdf->Cell(8, 5.5, $idx++, 1, 0, 'C', $fill);
+    $pdf->Cell(18, 5.5, $c['date'], 1, 0, 'C', $fill);
+    $pdf->Cell(52, 5.5, pdfT(mb_strimwidth($c['client'], 0, 27, '..')), 1, 0, 'L', $fill);
+    $pdf->Cell(22, 5.5, pdfT(mb_strimwidth($c['tel'], 0, 12, '')), 1, 0, 'C', $fill);
+    $pdf->Cell(18, 5.5, $c['cpc'], 1, 0, 'C', $fill);
+    $pdf->Cell(12, 5.5, $c['piton'] . '/' . $c['cheville'], 1, 0, 'C', $fill);
+    $pdf->Cell(12, 5.5, $c['crochets'] ?: '-', 1, 0, 'C', $fill);
+    $pdf->Cell(16, 5.5, ($c['ont'] ?: 0) . '/' . ($c['pto'] ?: 0), 1, 0, 'C', $fill);
+    $pdf->Cell(32, 5.5, pdfT(implode(', ', $autresText) ?: '-'), 1, 1, 'L', $fill);
+    $fill = !$fill;
+  }
+
+  return $pdf;
+}
+
 /** Tableau HTML copiable (collage direct dans Excel / WhatsApp). */
 function renderListeMoisHTML($moisDebut, $moisFin = null) {
   $lignes = generateListeMois($moisDebut, $moisFin);
@@ -975,7 +1184,25 @@ $__t0 = microtime(true);
 
 try {
   requirePdfAuth();
-  if ($action === 'liste_mois') {
+  if ($action === 'pdf_point_materiels') {
+    $debut = trim($_GET['debut'] ?? '2026-10-12');
+    $fin = trim($_GET['fin'] ?? '2026-10-24');
+    $pdf = generatePointMaterielsPDF($debut, $fin);
+    $filename = 'Point_Materiels_' . $debut . '_au_' . $fin . '.pdf';
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Access-Control-Allow-Origin: *');
+    $pdf->Output('D', $filename);
+    exit;
+  } elseif ($action === 'pdf_point_materiels_view') {
+    $debut = trim($_GET['debut'] ?? '2026-10-12');
+    $fin = trim($_GET['fin'] ?? '2026-10-24');
+    $pdf = generatePointMaterielsPDF($debut, $fin);
+    header('Content-Type: application/pdf');
+    header('Access-Control-Allow-Origin: *');
+    $pdf->Output('I');
+    exit;
+  } elseif ($action === 'liste_mois') {
     // Tableau HTML copiable : collage direct dans Excel/WhatsApp
     renderListeMoisHTML(trim($_GET['mois'] ?? date('Y-m')));
   } elseif ($action === 'pdf_mois') {
