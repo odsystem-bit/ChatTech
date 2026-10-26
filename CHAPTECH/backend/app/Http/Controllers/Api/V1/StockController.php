@@ -29,6 +29,7 @@ class StockController extends Controller
     {
         $request->validate([
             'equipe' => 'nullable|integer',
+            'ville' => 'nullable|integer',
             'central' => 'nullable|boolean',
         ]);
 
@@ -42,6 +43,10 @@ class StockController extends Controller
             Equipe::findOrFail($request->equipe); // TenantScope → 404 si étranger
             $query->where('proprietaire_type', 'equipe')
                 ->where('proprietaire_id', $request->equipe);
+        } elseif ($request->filled('ville')) {
+            Ville::findOrFail($request->ville);
+            $query->where('proprietaire_type', 'ville')
+                ->where('proprietaire_id', $request->ville);
         } elseif ($request->boolean('central')) {
             $query->where('proprietaire_type', 'central')
                 ->where('proprietaire_id', Stock::CENTRAL);
@@ -59,20 +64,41 @@ class StockController extends Controller
         $data = $request->validate([
             'uuid' => 'required|uuid',
             'article_id' => 'required|integer',
-            'de_type' => 'required|in:central,equipe,exterieur',
+            'de_type' => 'required|in:central,ville,equipe,exterieur',
             'de_id' => 'required|integer|min:0',
-            'vers_type' => 'required|in:central,equipe,exterieur',
+            'vers_type' => 'required|in:central,ville,equipe,exterieur',
             'vers_id' => 'required|integer|min:0',
             'quantite' => 'required|integer|min:1',
             'motif' => 'required|string|max:50',
             'intervention_id' => 'nullable|uuid',
         ]);
 
+        $compte = Tenant::compte();
+
+        // Règle de stock multi-villes (§3, §5 PLAN.md) :
+        // Le gestionnaire de base est le SEUL à alimenter les villes (central -> ville)
+        // et tout transfert entre villes passe obligatoirement par lui.
+        // Le gestionnaire de ville ne peut distribuer que depuis sa ville vers ses équipes.
+        if ($compte->isDeVille()) {
+            if ($data['de_type'] === 'central') {
+                return response()->json(['error' => 'Seul le gestionnaire de base peut sortir du matériel du stock central.'], 403);
+            }
+            if ($data['de_type'] === 'ville' && (int) $data['de_id'] !== (int) $compte->ville_id) {
+                return response()->json(['error' => 'Action non autorisée sur un dépôt d\'une autre ville.'], 403);
+            }
+            if ($data['vers_type'] === 'ville' && (int) $data['vers_id'] !== (int) $compte->ville_id) {
+                return response()->json(['error' => 'Transfert inter-villes réservé au gestionnaire de base.'], 403);
+            }
+        }
+
         $article = Article::findOrFail($data['article_id']);
-        // §17.4.1 : les IDs de la requête sont vérifiés contre le tenant
+        // Vérification des propriétaires
         foreach ([$data['de_type'], $data['vers_type']] as $i => $type) {
+            $id = $i === 0 ? $data['de_id'] : $data['vers_id'];
             if ($type === 'equipe') {
-                Equipe::findOrFail($i === 0 ? $data['de_id'] : $data['vers_id']);
+                Equipe::findOrFail($id);
+            } elseif ($type === 'ville') {
+                Ville::findOrFail($id);
             }
         }
 

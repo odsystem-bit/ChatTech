@@ -99,7 +99,7 @@ class StockService
      */
     private function suivreAlerte(int $articleId, string $type, int $id, int $solde, ?int $entrepriseId): void
     {
-        if (!in_array($type, ['equipe', 'central'], true)) {
+        if (!in_array($type, ['equipe', 'central', 'ville'], true)) {
             return;
         }
 
