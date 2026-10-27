@@ -504,6 +504,8 @@ export function ensureInterventionDefaults(data) {
     remarque_aucune: data.remarque_aucune !== undefined ? Boolean(data.remarque_aucune) : (!data.remarque_libre),
     remarque_libre: String(data.remarque_libre ?? ""),
     videos_terrain: Array.isArray(data.videos_terrain) ? data.videos_terrain : [],
+    client_gps_recu: Boolean(data.client_gps_recu),
+    client_repere: String(data.client_repere ?? ""),
     tournee_du_jour: String(data.tournee_du_jour || ""),
     tournee_ordre: Number(data.tournee_ordre || 0),
     tournee_verrouille: Boolean(data.tournee_verrouille),
@@ -515,12 +517,22 @@ export function toLightIntervention(intv) {
   if (!intv || typeof intv !== "object") return intv;
   const {
     whatsapp_photos,
-    points_gps,
     signature_client,
     signature_technicien,
     videos_terrain,
     ...light
   } = intv;
+
+  // Conserver les points GPS sans photos base64 lourdes pour la cartographie instantanée
+  if (Array.isArray(intv.points_gps)) {
+    light.points_gps = intv.points_gps.map((pt) => {
+      if (!pt) return pt;
+      const { photo, photo_base64, ...cleanPt } = pt;
+      return cleanPt;
+    });
+  } else {
+    light.points_gps = [];
+  }
 
   // Conserver les vidéos terrain dans l'objet léger en allégeant seulement les data: URLs base64 lourdes
   if (Array.isArray(videos_terrain)) {

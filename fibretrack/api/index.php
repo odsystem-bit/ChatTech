@@ -489,6 +489,30 @@ function db() {
           ADD COLUMN tournee_verrouille TINYINT(1) DEFAULT 0, 
           ADD COLUMN motif_non_traite VARCHAR(255) NULL");
       }
+      try {
+        $hasClientGpsCol = $pdo->query("SHOW COLUMNS FROM interventions LIKE 'client_gps_recu'")->fetch();
+        if (!$hasClientGpsCol) {
+          $pdo->exec("ALTER TABLE interventions ADD COLUMN client_gps_recu TINYINT(1) DEFAULT 0");
+        }
+      } catch (Exception $e) {}
+      try {
+        $hasRepereCol = $pdo->query("SHOW COLUMNS FROM interventions LIKE 'client_repere'")->fetch();
+        if (!$hasRepereCol) {
+          $pdo->exec("ALTER TABLE interventions ADD COLUMN client_repere VARCHAR(255) NULL");
+        }
+      } catch (Exception $e) {}
+      try {
+        $hasLatCol = $pdo->query("SHOW COLUMNS FROM interventions LIKE 'latitude'")->fetch();
+        if (!$hasLatCol) {
+          $pdo->exec("ALTER TABLE interventions ADD COLUMN latitude DECIMAL(10, 7) NULL");
+        }
+      } catch (Exception $e) {}
+      try {
+        $hasLngCol = $pdo->query("SHOW COLUMNS FROM interventions LIKE 'longitude'")->fetch();
+        if (!$hasLngCol) {
+          $pdo->exec("ALTER TABLE interventions ADD COLUMN longitude DECIMAL(10, 7) NULL");
+        }
+      } catch (Exception $e) {}
       // Correction rétroactive du bug d'addition ONT/OTP (1+1=2) sur les interventions récentes créées sans matériel posé
       $pdo->exec("UPDATE interventions SET materiel_pose = JSON_SET(materiel_pose, '$.ont', 1) 
                   WHERE JSON_EXTRACT(materiel_pose, '$.ont') = 2 
@@ -1060,6 +1084,142 @@ try {
     return;
   }
   switch ($action) {
+    case 'client_gps_get':
+      $intvId = trim((string)($_GET['id'] ?? ($input['id'] ?? '')));
+      if ($intvId === '') {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'Identifiant d\'intervention requis']);
+        break;
+      }
+      $stmt = db()->prepare('SELECT id, nom_client, nom_dossier, adresse_zone, statut, latitude, longitude, client_gps_recu, client_repere, points_gps FROM interventions WHERE id = ?');
+      $stmt->execute([$intvId]);
+      $row = $stmt->fetch();
+      if (!$row) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'error' => 'Intervention introuvable ou archivée']);
+        break;
+      }
+      $clientName = trim((string)($row['nom_client'] ?: $row['nom_dossier']));
+      $pts = json_decode($row['points_gps'] ?? '[]', true) ?: [];
+      $clientPt = null;
+      foreach ($pts as $p) {
+        if (is_array($p) && in_array(strtolower(trim($p['type'] ?? '')), ['client', 'abonné', 'abonne'], true)) {
+          $clientPt = $p;
+          break;
+        }
+      }
+      $lat = $row['latitude'] !== null ? (float)$row['latitude'] : ($clientPt['lat'] ?? null);
+      $lng = $row['longitude'] !== null ? (float)$row['longitude'] : ($clientPt['lng'] ?? null);
+      $repere = $row['client_repere'] ?: ($clientPt['repere'] ?? '');
+
+      echo json_encode([
+        'ok' => true,
+        'id' => $row['id'],
+        'client_name' => $clientName ?: 'Cher Client',
+        'adresse_zone' => $row['adresse_zone'] ?: '',
+        'statut' => $row['statut'] ?: '',
+        'already_sent' => (bool)($row['client_gps_recu'] || ($lat !== null && $lng !== null)),
+        'lat' => $lat,
+        'lng' => $lng,
+        'repere' => $repere,
+      ]);
+      break;
+
+    case 'client_gps_submit':
+      $intvId = trim((string)($input['id'] ?? ($_POST['id'] ?? '')));
+      $lat = isset($input['lat']) ? (float)$input['lat'] : (isset($_POST['lat']) ? (float)$_POST['lat'] : null);
+      $lng = isset($input['lng']) ? (float)$input['lng'] : (isset($_POST['lng']) ? (float)$_POST['lng'] : null);
+      $precision = isset($input['precision_m']) ? (float)$input['precision_m'] : (isset($input['accuracy']) ? (float)$input['accuracy'] : 10.0);
+      $repere = trim((string)($input['repere'] ?? ($_POST['repere'] ?? '')));
+
+      if ($intvId === '') {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'Identifiant d\'intervention requis']);
+        break;
+      }
+      if ($lat === null || $lng === null || $lat < -90 || $lat > 90 || $lng < -180 || $lng > 180 || ($lat == 0 && $lng == 0)) {
+        http_response_code(400);
+        echo json_encode(['ok' => false, 'error' => 'Coordonnées GPS invalides']);
+        break;
+      }
+
+      $pdo = db();
+      $stmt = $pdo->prepare('SELECT id, points_gps, adresse_zone, nom_client, nom_dossier FROM interventions WHERE id = ? FOR UPDATE');
+      $pdo->beginTransaction();
+      try {
+        $stmt->execute([$intvId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+          $pdo->rollBack();
+          http_response_code(404);
+          echo json_encode(['ok' => false, 'error' => 'Intervention introuvable']);
+          break;
+        }
+
+        $pts = json_decode($row['points_gps'] ?? '[]', true);
+        if (!is_array($pts)) $pts = [];
+
+        $found = false;
+        foreach ($pts as &$p) {
+          if (is_array($p) && in_array(strtolower(trim($p['type'] ?? '')), ['client', 'abonné', 'abonne'], true)) {
+            $p['lat'] = $lat;
+            $p['lng'] = $lng;
+            $p['precision_m'] = $precision;
+            $p['repere'] = $repere;
+            $p['source'] = 'client_link';
+            $p['date'] = date('Y-m-d H:i:s');
+            $found = true;
+            break;
+          }
+        }
+        unset($p);
+
+        if (!$found) {
+          $pts[] = [
+            'id' => 'client_loc_' . substr(md5(uniqid()), 0, 8),
+            'type' => 'Client',
+            'label' => 'Position Client (Lien)',
+            'lat' => $lat,
+            'lng' => $lng,
+            'precision_m' => $precision,
+            'repere' => $repere,
+            'source' => 'client_link',
+            'date' => date('Y-m-d H:i:s'),
+          ];
+        }
+
+        $upStmt = $pdo->prepare('UPDATE interventions SET 
+          latitude = :lat, 
+          longitude = :lng, 
+          client_gps_recu = 1, 
+          client_repere = :repere, 
+          points_gps = :points_gps, 
+          modifie_le = NOW() 
+          WHERE id = :id');
+        $upStmt->execute([
+          ':lat' => $lat,
+          ':lng' => $lng,
+          ':repere' => $repere,
+          ':points_gps' => json_encode($pts),
+          ':id' => $intvId,
+        ]);
+        $pdo->commit();
+
+        echo json_encode([
+          'ok' => true,
+          'message' => 'Position enregistrée avec succès',
+          'lat' => $lat,
+          'lng' => $lng,
+          'precision_m' => $precision,
+          'repere' => $repere,
+        ]);
+      } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+      }
+      break;
+
     case 'deleted_interventions_list':
       $stmt = db()->query('SELECT id FROM deleted_interventions WHERE deleted_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)');
       echo json_encode($stmt->fetchAll(PDO::FETCH_COLUMN));
@@ -1074,10 +1234,16 @@ try {
         puissance_fat_dbm, puissance_pto_dbm, debit_descendant, debit_montant, debit_ping,
         mac, sn, nb_poteaux_traverses, nb_poteaux_implantes, nb_poteaux_armes,
         ont_sn, pto_qte, repeteur_wifi_qte, offre_souscrite, videos_terrain,
+        latitude, longitude, client_gps_recu, client_repere, points_gps,
         tournee_du_jour, tournee_ordre, tournee_verrouille, motif_non_traite,
         modifie_par, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
       $lightRows = $stmt->fetchAll();
       foreach ($lightRows as &$lr) {
+        $gps = json_decode($lr['points_gps'] ?? '[]', true) ?? [];
+        foreach ($gps as &$pt) { unset($pt['photo']); }
+        unset($pt);
+        $lr['points_gps'] = $gps;
+
         $vids = json_decode($lr['videos_terrain'] ?? '[]', true);
         if (!is_array($vids)) $vids = [];
         $cleanVids = [];
@@ -1615,6 +1781,7 @@ try {
         'qualite', 'delais', 'professionnalisme',
         'nom_client_declaration', 'remarque_libre',
         'signature_client', 'signature_technicien',
+        'latitude', 'longitude', 'client_gps_recu', 'client_repere',
         'tournee_du_jour', 'tournee_ordre', 'tournee_verrouille', 'motif_non_traite',
         'modifie_par', 'modifie_le'
       ];

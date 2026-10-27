@@ -10,6 +10,7 @@ import {
   formatDistance,
   formatEstimatedDuration,
 } from "../lib/routeOptimizer.js";
+import { buildClientLocationWhatsAppLink } from "../lib/whatsapp.js";
 import { getCurrentPositionHighAccuracy, reverseGeocodeZone } from "../lib/geo.js";
 import {
   IconMap,
@@ -267,6 +268,7 @@ export default function TourneeMapView({
 
       const navUrl = buildNavigationUrl(lat, lng, dossier.nom_client);
       const phone = dossier.mobile || dossier.telephone_ligne || "";
+      const repere = dossier.client_repere || (Array.isArray(dossier.points_gps) ? dossier.points_gps.find((p) => p?.repere)?.repere : "");
 
       const popupHtml = `
         <div class="map-popup-card">
@@ -274,6 +276,7 @@ export default function TourneeMapView({
           <h4 class="popup-title">${escapeHtml(dossier.nom_client || "Client")}</h4>
           <div class="popup-zone">${escapeHtml(dossier.adresse_zone || "Zone non spécifiée")}</div>
           ${dossier.fat_ref ? `<div class="popup-detail">FAT : <strong>${escapeHtml(dossier.fat_ref)}</strong></div>` : ""}
+          ${repere ? `<div class="popup-detail" style="color: #166534;">🏠 Repère : <strong>${escapeHtml(repere)}</strong></div>` : ""}
           <div class="popup-actions">
             ${phone ? `<a href="tel:${escapeHtml(phone)}" class="popup-btn btn-call">📞 Appeler</a>` : ""}
             <a href="${navUrl}" target="_blank" rel="noopener noreferrer" class="popup-btn btn-nav">🧭 Naviguer (Maps)</a>
@@ -773,6 +776,12 @@ export default function TourneeMapView({
                       </span>
                     )}
                   </div>
+
+                  {dossier.client_repere && (
+                    <div style={{ fontSize: 12, color: "#166534", marginTop: 4, background: "#f0fdf4", padding: "2px 8px", borderRadius: 4, display: "inline-block" }}>
+                      🏠 <strong>Repère :</strong> {dossier.client_repere}
+                    </div>
+                  )}
                 </div>
 
                 <div className="step-card-actions" onClick={(e) => e.stopPropagation()}>
@@ -817,25 +826,38 @@ export default function TourneeMapView({
               Dossiers en attente de coordonnées GPS ({unlocatedDossiers.length})
             </h4>
             <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--text-muted)" }}>
-              Ces clients n&apos;ont pas encore de position GPS enregistrée. Sélectionnez un dossier et tapez la rue ou cliquez sur la carte pour l&apos;ajouter au trajet :
+              Ces clients n&apos;ont pas encore de position GPS enregistrée. Demandez leur position par WhatsApp ou cliquez pour pointer sur la carte :
             </p>
             <div className="unlocated-list">
               {unlocatedDossiers.map((d) => (
                 <div key={d.id} className="unlocated-item">
-                  <span className="unlocated-name">{d.nom_client || "Dossier"}</span>
-                  <span className="unlocated-phone">{d.mobile || d.telephone_ligne || "--"}</span>
-                  <button
-                    type="button"
-                    className="btn-locate-client"
-                    onClick={() => {
-                      setSelectedDossierId(d.id);
-                      setSearchOpen(true);
-                      setSearchQuery(d.adresse_zone || d.nom_client || "");
-                    }}
-                  >
-                    <IconMapPin size={13} />
-                    <span>Localiser sur la carte</span>
-                  </button>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span className="unlocated-name">{d.nom_client || "Dossier"}</span>
+                    <span className="unlocated-phone">{d.mobile || d.telephone_ligne || "--"}</span>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    <a
+                      href={buildClientLocationWhatsAppLink(d)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-locate-wa"
+                      title="Envoyer le lien WhatsApp de capture de position au client"
+                    >
+                      <span>📲 Demander position WhatsApp</span>
+                    </a>
+                    <button
+                      type="button"
+                      className="btn-locate-client"
+                      onClick={() => {
+                        setSelectedDossierId(d.id);
+                        setSearchOpen(true);
+                        setSearchQuery(d.adresse_zone || d.nom_client || "");
+                      }}
+                    >
+                      <IconMapPin size={13} />
+                      <span>Pointer sur la carte</span>
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1608,6 +1630,25 @@ export default function TourneeMapView({
           font-size: 11px;
           font-weight: 700;
           cursor: pointer;
+        }
+
+        .btn-locate-wa {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          background: #25d366;
+          color: #ffffff !important;
+          text-decoration: none;
+          padding: 5px 10px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.15s;
+        }
+
+        .btn-locate-wa:hover {
+          background: #1ebc59;
         }
 
         @media (max-width: 640px) {

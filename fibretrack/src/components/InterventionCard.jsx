@@ -1,6 +1,7 @@
 import { formatDateFR } from "../lib/date.js";
 import { getInterventionBadge, isInterventionTerminee, isInterventionNonTraitee } from "../lib/interventionFilters.js";
 import { IconWifi, IconCamera, IconFileText, IconRefresh } from "./Icons.jsx";
+import { buildClientLocationWhatsAppLink } from "../lib/whatsapp.js";
 
 /**
  * Carte d'intervention compacte, professionnelle et responsive.
@@ -91,6 +92,35 @@ export default function InterventionCard({ intervention, onOpen, onOpenReport, o
               <span>{offer}</span>
             </span>
           ) : null}
+
+          {/* Statut GPS / Bouton WhatsApp */}
+          {!isDone && (
+            (intervention.client_gps_recu || (intervention.latitude && intervention.longitude)) ? (
+              <span
+                className="intv-chip"
+                style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", fontWeight: 700, display: "inline-flex", alignItems: "center" }}
+                title={`Position client validée ${intervention.client_repere ? `(Repère : ${intervention.client_repere})` : ""}`}
+              >
+                <span style={{ marginRight: 3, fontSize: 11 }}>📍</span>
+                <span>GPS validé</span>
+              </span>
+            ) : (
+              phone ? (
+                <a
+                  href={buildClientLocationWhatsAppLink(intervention)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="intv-chip"
+                  style={{ background: "#25d366", color: "#ffffff", fontWeight: 700, display: "inline-flex", alignItems: "center", textDecoration: "none" }}
+                  title="Demander la position exacte au client par WhatsApp"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span style={{ marginRight: 3, fontSize: 11 }}>📲</span>
+                  <span>Demander GPS</span>
+                </a>
+              ) : null
+            )
+          )}
 
           {(intervention.debit_descendant || intervention.debit_montant) ? (
             <span

@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d9488">
+  <title>Localisation Client - Raccordement Fibre Optique</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    :root {
+      --primary: #0d9488;
+      --primary-dark: #0f766e;
+      --primary-light: #ccfbf1;
+      --accent: #2563eb;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --success: #16a34a;
+      --success-light: #dcfce7;
+      --warning: #d97706;
+      --warning-light: #fef3c7;
+      --danger: #dc2626;
+      --danger-light: #fee2e2;
+      --radius: 16px;
+      --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 480px;
+      margin: auto 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* En-tête officiel */
+    .header-card {
+      background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%);
+      color: white;
+      padding: 24px 20px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .header-card::before {
+      content: "";
+      position: absolute;
+      top: -30px;
+      right: -30px;
+      width: 120px;
+      height: 120px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 50%;
+    }
+
+    .brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(8px);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 10px;
+    }
+
+    .header-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .header-subtitle {
+      font-size: 14px;
+      opacity: 0.92;
+      line-height: 1.4;
+    }
+
+    /* Carte principale */
+    .main-card {
+      background: var(--card-bg);
+      border-radius: var(--radius);
+      padding: 22px 18px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .client-greeting {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+    }
+
+    .client-greeting h2 {
+      font-size: 17px;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .client-greeting p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Bouton principal géant */
+    .btn-giant {
+      width: 100%;
+      padding: 16px 20px;
+      border-radius: 12px;
+      border: none;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s ease;
+      background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+      color: white;
+      box-shadow: 0 4px 14px rgba(13, 148, 136, 0.4);
+    }
+
+    .btn-giant:active {
+      transform: scale(0.98);
+      filter: brightness(0.95);
+    }
+
+    .btn-giant.pulsing {
+      animation: pulseBtn 2s infinite;
+    }
+
+    @keyframes pulseBtn {
+      0% { box-shadow: 0 0 0 0 rgba(13, 148, 136, 0.5); }
+      70% { box-shadow: 0 0 0 14px rgba(13, 148, 136, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(13, 148, 136, 0); }
+    }
+
+    /* État de chargement / Satellite */
+    .locating-box {
+      background: #f0fdfa;
+      border: 1px solid #99f6e4;
+      border-radius: 12px;
+      padding: 18px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .satellite-radar {
+      width: 48px;
+      height: 48px;
+      border: 3px solid #0d9488;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Étape Confirmation */
+    .gps-success-box {
+      background: var(--success-light);
+      border: 1px solid #86efac;
+      border-radius: 12px;
+      padding: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .gps-success-icon {
+      font-size: 24px;
+      line-height: 1;
+    }
+
+    .gps-success-text strong {
+      font-size: 14px;
+      color: #14532d;
+      display: block;
+    }
+
+    .gps-success-text span {
+      font-size: 12px;
+      color: #166534;
+    }
+
+    /* Formulaire repère visuel */
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .field-input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      background: #ffffff;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .field-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
+    }
+
+    .field-hint {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .btn-submit {
+      width: 100%;
+      padding: 15px;
+      background: #16a34a;
+      color: white;
+      font-weight: 700;
+      font-size: 15px;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(22, 163, 74, 0.3);
+      transition: all 0.2s;
+    }
+
+    .btn-submit:active {
+      transform: scale(0.98);
+      filter: brightness(0.92);
+    }
+
+    /* Message succès final */
+    .final-success-card {
+      text-align: center;
+      padding: 24px 16px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .check-animation {
+      width: 68px;
+      height: 68px;
+      background: var(--success);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      box-shadow: 0 8px 20px rgba(22, 163, 74, 0.35);
+      animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    @keyframes popIn {
+      0% { transform: scale(0); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+    /* Message d'erreur & aide permission */
+    .error-card {
+      background: var(--danger-light);
+      border: 1px solid #fca5a5;
+      border-radius: 12px;
+      padding: 14px;
+      color: #991b1b;
+      font-size: 13px;
+    }
+
+    .error-card strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .btn-retry {
+      margin-top: 10px;
+      padding: 8px 14px;
+      background: #dc2626;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* Footer */
+    .footer-note {
+      text-align: center;
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 10px;
+    }
+
+    .badge-secure {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #0f766e;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <div class="header-card">
+      <div class="brand-badge">⚡ Raccordement Fibre Optique</div>
+      <h1 class="header-title">Guidage Technicien</h1>
+      <p class="header-subtitle">Partagez votre localisation pour guider notre équipe directement à votre domicile</p>
+    </div>
+
+    <!-- Carte principale -->
+    <div class="main-card">
+      <!-- Accueil Client -->
+      <div class="client-greeting">
+        <h2>
+          <span>👋</span>
+          <span id="client-name">Chargement...</span>
+        </h2>
+        <p id="client-zone">Préparation de votre raccordement aujourd'hui</p>
+      </div>
+
+      <!-- Zone d'erreur éventuelle -->
+      <div id="error-box" class="error-card" style="display: none;">
+        <strong id="error-title">Signal satellite indisponible</strong>
+        <div id="error-desc">Veuillez vérifier que le GPS est activé sur votre téléphone et appuyer sur "Autoriser" pour partager votre position.</div>
+        <button type="button" class="btn-retry" onclick="startAcquisition()">Réessayer</button>
+      </div>
+
+      <!-- Étape 1 : Bouton d'action initial -->
+      <div id="step-initial">
+        <p style="font-size: 14px; color: #475569; margin-bottom: 14px;">
+          Pour éviter les appels téléphoniques et les retards, cliquez sur le bouton ci-dessous pour nous envoyer votre position GPS exacte :
+        </p>
+        <button type="button" id="btn-start-loc" class="btn-giant pulsing" onclick="startAcquisition()">
+          <span style="font-size: 20px;">📍</span>
+          <span>Partager ma position en 1 clic</span>
+        </button>
+      </div>
+
+      <!-- Étape 2 : Acquisition satellite en cours -->
+      <div id="step-locating" style="display: none;">
+        <div class="locating-box">
+          <div class="satellite-radar"></div>
+          <strong style="color: #0f766e; font-size: 15px;">Acquisition satellite GPS en cours...</strong>
+          <span style="font-size: 13px; color: #64748b;">
+            Appuyez sur <strong>« Autoriser »</strong> si votre smartphone affiche une demande d'autorisation.
+          </span>
+        </div>
+      </div>
+
+      <!-- Étape 3 : Position captée & repère visuel -->
+      <div id="step-confirm" style="display: none;">
+        <div class="gps-success-box">
+          <div class="gps-success-icon">🎯</div>
+          <div class="gps-success-text">
+            <strong>Position captée avec succès !</strong>
+            <span id="gps-accuracy-label">Précision satellite : ±8 mètres</span>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="client-repere">
+            <span>🏠</span>
+            <span>Repère visuel (facultatif mais recommandé) :</span>
+          </label>
+          <input
+            type="text"
+            id="client-repere"
+            class="field-input"
+            placeholder="Ex : Portail bleu face à la pharmacie, 2e maison après le grand carrefour..."
+            autocomplete="off"
+          >
+          <span class="field-hint">Aide nos techniciens à repérer immédiatement votre portail.</span>
+        </div>
+
+        <button type="button" id="btn-submit-loc" class="btn-submit" onclick="submitPosition()">
+          <span>🚀 Confirmer et envoyer à l'équipe</span>
+        </button>
+      </div>
+
+      <!-- Étape 4 : Succès final -->
+      <div id="step-success" style="display: none;">
+        <div class="final-success-card">
+          <div class="check-animation">✓</div>
+          <h3 style="font-size: 20px; font-weight: 700; color: #166534;">Position bien transmise !</h3>
+          <p style="font-size: 14px; color: #475569; line-height: 1.5;">
+            Merci beaucoup ! Nos techniciens ont reçu votre position GPS exacte et se dirigent vers votre domicile.
+          </p>
+          <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 10px; padding: 12px; width: 100%; font-size: 13px; color: #334155; text-align: left;">
+            <div id="recap-name" style="font-weight: 600; margin-bottom: 4px;">Client : -</div>
+            <div id="recap-repere" style="margin-bottom: 4px;">Repère : <em>Aucun</em></div>
+            <div id="recap-coords" style="color: #64748b; font-size: 12px;">Coordonnées : -</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pied de page rassurant -->
+    <div class="footer-note">
+      <span class="badge-secure">🔒 Connexion sécurisée</span> • Vos coordonnées sont exclusivement utilisées pour l'intervention de raccordement d'aujourd'hui.
+    </div>
+  </div>
+
+  <script>
+    // Configuration & État
+    const API_BASE = "https://fibretrack.mantota.com/api/index.php";
+    const urlParams = new URLSearchParams(window.location.search);
+    const interventionId = urlParams.get("id") || "";
+
+    let currentCoords = null;
+    let dossierData = null;
+
+    // Éléments du DOM
+    const elClientName = document.getElementById("client-name");
+    const elClientZone = document.getElementById("client-zone");
+    const elStepInitial = document.getElementById("step-initial");
+    const elStepLocating = document.getElementById("step-locating");
+    const elStepConfirm = document.getElementById("step-confirm");
+    const elStepSuccess = document.getElementById("step-success");
+    const elErrorBox = document.getElementById("error-box");
+    const elErrorTitle = document.getElementById("error-title");
+    const elErrorDesc = document.getElementById("error-desc");
+    const elAccuracyLabel = document.getElementById("gps-accuracy-label");
+    const elInputRepere = document.getElementById("client-repere");
+
+    // 1. Initialisation : Charger les informations du dossier
+    async function init() {
+      if (!interventionId) {
+        showError("Lien invalide", "Ce lien d'intervention ne comporte pas d'identifiant valide. Veuillez contacter votre technicien.");
+        elStepInitial.style.display = "none";
+        elClientName.textContent = "Client Fibre";
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}?action=client_gps_get&id=${encodeURIComponent(interventionId)}`);
+        if (!res.ok) throw new Error("Dossier introuvable ou expiré");
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "Impossible de charger le dossier");
+
+        dossierData = data;
+        const name = (data.client_name || "Cher Client").trim();
+        elClientName.textContent = name;
+        if (data.adresse_zone) {
+          elClientZone.textContent = "Secteur : " + data.adresse_zone;
+        }
+
+        // Si la position a déjà été envoyée
+        if (data.already_sent && data.lat && data.lng) {
+          showSuccessScreen(data.client_name, data.repere || "", data.lat, data.lng, "Position déjà transmise précédemment");
+        }
+      } catch (err) {
+        console.warn("Erreur chargement dossier :", err);
+        elClientName.textContent = "Cher Client";
+      }
+    }
+
+    // 2. Démarrer l'acquisition GPS haute précision
+    function startAcquisition() {
+      hideError();
+      elStepInitial.style.display = "none";
+      elStepLocating.style.display = "block";
+
+      if (!navigator.geolocation) {
+        showError("Navigateur incompatible", "Votre navigateur ne supporte pas la géolocalisation. Veuillez ouvrir ce lien dans Chrome ou Safari.");
+        elStepLocating.style.display = "none";
+        elStepInitial.style.display = "block";
+        return;
+      }
+
+      const geoOptions = {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0,
+      };
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const accuracy = Math.round(position.coords.accuracy || 10);
+
+          currentCoords = { lat, lng, accuracy };
+
+          elStepLocating.style.display = "none";
+          elStepConfirm.style.display = "block";
+          elAccuracyLabel.textContent = `Précision satellite : ±${accuracy} mètres`;
+        },
+        (err) => {
+          elStepLocating.style.display = "none";
+          elStepInitial.style.display = "block";
+
+          let msgTitle = "Autorisation de localisation refusée";
+          let msgDesc = "Veuillez autoriser l'accès à la position dans votre navigateur pour que nos techniciens puissent vous localiser.";
+
+          if (err.code === 2) { // POSITION_UNAVAILABLE
+            msgTitle = "Signal satellite GPS indisponible";
+            msgDesc = "Vérifiez que la localisation (GPS) est bien activée dans le volet déroulant en haut de votre téléphone, puis réessayez.";
+          } else if (err.code === 3) { // TIMEOUT
+            msgTitle = "Délai satellite dépassé";
+            msgDesc = "Le signal GPS met trop de temps à répondre. Sortez à l'extérieur ou rapprochez-vous d'une fenêtre et réessayez.";
+          }
+
+          showError(msgTitle, msgDesc);
+        },
+        geoOptions
+      );
+    }
+
+    // 3. Soumettre la position et le repère visuel à FibreTrack
+    async function submitPosition() {
+      if (!currentCoords || !interventionId) return;
+
+      const btnSubmit = document.getElementById("btn-submit-loc");
+      btnSubmit.disabled = true;
+      btnSubmit.innerHTML = "<span>Envoi en cours...</span>";
+
+      const repere = (elInputRepere.value || "").trim();
+
+      try {
+        const payload = {
+          id: interventionId,
+          lat: currentCoords.lat,
+          lng: currentCoords.lng,
+          precision_m: currentCoords.accuracy,
+          repere: repere,
+        };
+
+        const res = await fetch(`${API_BASE}?action=client_gps_submit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        const result = await res.json();
+        if (!result.ok) throw new Error(result.error || "Erreur lors de l'enregistrement de la position");
+
+        showSuccessScreen(
+          dossierData?.client_name || elClientName.textContent,
+          repere,
+          currentCoords.lat,
+          currentCoords.lng,
+          `Précision : ±${currentCoords.accuracy}m`
+        );
+      } catch (err) {
+        alert("Erreur lors de l'envoi de votre position : " + err.message);
+        btnSubmit.disabled = false;
+        btnSubmit.innerHTML = "<span>🚀 Confirmer et envoyer à l'équipe</span>";
+      }
+    }
+
+    // 4. Afficher l'écran de succès
+    function showSuccessScreen(name, repere, lat, lng, extraInfo) {
+      elStepInitial.style.display = "none";
+      elStepLocating.style.display = "none";
+      elStepConfirm.style.display = "none";
+      elStepSuccess.style.display = "block";
+
+      document.getElementById("recap-name").textContent = "Client : " + (name || "Client");
+      document.getElementById("recap-repere").innerHTML = "Repère : <strong>" + (repere || "Aucun spécifié") + "</strong>";
+      document.getElementById("recap-coords").textContent = `Position GPS : ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)} (${extraInfo || ""})`;
+    }
+
+    function showError(title, desc) {
+      elErrorTitle.textContent = title;
+      elErrorDesc.textContent = desc;
+      elErrorBox.style.display = "block";
+    }
+
+    function hideError() {
+      elErrorBox.style.display = "none";
+    }
+
+    // Lancer au chargement
+    init();
+  </script>
+</body>
+</html>

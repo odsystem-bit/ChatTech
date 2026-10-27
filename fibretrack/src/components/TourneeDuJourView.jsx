@@ -1,6 +1,12 @@
 import { useState, useMemo } from "react";
 import { parseTourneeListing } from "../lib/tourneeParser.js";
 import TourneeMapView from "./TourneeMapView.jsx";
+import { extractClientCoordinates } from "../lib/routeOptimizer.js";
+import {
+  buildClientLocationUrl,
+  buildClientLocationWhatsAppLink,
+  buildClientLocationRequestMessage,
+} from "../lib/whatsapp.js";
 import {
   isInterventionTerminee,
   isInterventionNonTraitee,
@@ -29,6 +35,7 @@ import {
   IconTrash,
   IconAlertTriangle,
   IconMap,
+  IconMapPin,
 } from "./Icons.jsx";
 
 /**
@@ -121,6 +128,30 @@ export default function TourneeDuJourView({
     const percent = total > 0 ? Math.round(((traites + nonTraites) / total) * 100) : 0;
     return { total, traites, enCours, verrouilles, nonTraites, percent };
   }, [allDayDossiers, selectedDate]);
+
+  // Toast pour feedback utilisateur (ex: lien copié)
+  const [toastMessage, setToastMessage] = useState("");
+
+  const copyClientLink = (dossier) => {
+    const url = buildClientLocationUrl(dossier?.id || "");
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        setToastMessage(`Lien copié pour ${dossier.nom_client || "le client"} !`);
+        setTimeout(() => setToastMessage(""), 3500);
+      }).catch(() => {
+        prompt("Copiez ce lien pour le client :", url);
+      });
+    } else {
+      prompt("Copiez ce lien pour le client :", url);
+    }
+  };
+
+  const dossiersSansGps = useMemo(() => {
+    return tourneeDossiers.filter((d) => {
+      const coords = extractClientCoordinates(d);
+      return !coords && !d.client_gps_recu && !(d.latitude && d.longitude);
+    });
+  }, [tourneeDossiers]);
 
   // Déverrouillage effectif d'un dossier et passage en cours
   function handleUnlockDossier(dossier, e) {
@@ -454,6 +485,21 @@ export default function TourneeDuJourView({
         </div>
       ) : (
         <div className="tournee-dossiers-list">
+          {dossiersSansGps.length > 0 && (
+            <div className="tournee-gps-bulk-banner">
+              <span className="text">
+                📍 {dossiersSansGps.length} dossier{dossiersSansGps.length > 1 ? "s" : ""} en attente de position client
+              </span>
+              <button
+                type="button"
+                className="btn-tournee-map"
+                onClick={() => setMapViewOpen(true)}
+                style={{ padding: "4px 10px", fontSize: 12 }}
+              >
+                Ouvrir la carte
+              </button>
+            </div>
+          )}
           {tourneeDossiers.map((dossier, idx) => {
             const ordreNum = dossier.tournee_ordre || idx + 1;
 
@@ -535,6 +581,53 @@ export default function TourneeDuJourView({
                     </span>
                   )}
                 </div>
+
+                {/* Statut GPS & Demande de localisation WhatsApp */}
+                {(() => {
+                  const coords = extractClientCoordinates(dossier);
+                  const hasGps = Boolean(coords || dossier.client_gps_recu || (dossier.latitude && dossier.longitude));
+                  const repere = dossier.client_repere || (Array.isArray(dossier.points_gps) ? dossier.points_gps.find((p) => p?.repere)?.repere : "");
+                  const waLink = buildClientLocationWhatsAppLink(dossier);
+
+                  if (hasGps) {
+                    return (
+                      <div className="tournee-gps-badge-row" onClick={(e) => e.stopPropagation()}>
+                        <span className="tournee-gps-pill received" title="Coordonnées GPS client enregistrées">
+                          <IconMapPin size={13} color="#16a34a" />
+                          <span>Position client validée</span>
+                        </span>
+                        {repere && (
+                          <span className="tournee-gps-repere" title={`Repère visuel : ${repere}`}>
+                            🏠 {repere}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="tournee-gps-action-row" onClick={(e) => e.stopPropagation()}>
+                      <a
+                        href={waLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn-tournee-wa-loc"
+                        title="Envoyer le lien WhatsApp au client pour capter sa position"
+                      >
+                        <span style={{ fontSize: 13 }}>📲</span>
+                        <span>Demander position WhatsApp</span>
+                      </a>
+                      <button
+                        type="button"
+                        className="btn-tournee-copy-link"
+                        title="Copier le lien direct pour le client"
+                        onClick={() => copyClientLink(dossier)}
+                      >
+                        📋 Copier lien
+                      </button>
+                    </div>
+                  );
+                })()}
 
                 {/* Actions de la carte */}
                 <div className="tournee-card-actions" onClick={(e) => e.stopPropagation()}>
@@ -1060,6 +1153,27 @@ export default function TourneeDuJourView({
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Toast de confirmation (ex: lien copié) */}
+      {toastMessage && (
+        <div style={{
+          position: "fixed",
+          bottom: 24,
+          left: "50%",
+          transform: "translateX(-50%)",
+          background: "#0f172a",
+          color: "#ffffff",
+          padding: "10px 18px",
+          borderRadius: 8,
+          fontSize: 13,
+          fontWeight: 600,
+          boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
+          zIndex: 9999,
+          pointerEvents: "none",
+        }}>
+          {toastMessage}
         </div>
       )}
     </div>

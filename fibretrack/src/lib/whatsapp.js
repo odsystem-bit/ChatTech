@@ -802,3 +802,49 @@ export function computeDailyCount(interventions) {
     recus: interventions.length,
   };
 }
+
+/**
+ * Génère le lien public unique pour la capture GPS du client
+ * @param {string} interventionId
+ * @returns {string}
+ */
+export function buildClientLocationUrl(interventionId) {
+  const base = typeof window !== "undefined" && window.location?.origin
+    ? window.location.origin
+    : "https://fibretrack.mantota.com";
+  return `${base}/loc.html?id=${encodeURIComponent(interventionId || "")}`;
+}
+
+/**
+ * Prépare le message WhatsApp pré-rempli pour demander la position exacte au client
+ * @param {object} dossier
+ * @returns {string}
+ */
+export function buildClientLocationRequestMessage(dossier) {
+  const clientName = cleanStr(dossier?.nom_client || dossier?.nom_dossier || "Cher Client");
+  const url = buildClientLocationUrl(dossier?.id || "");
+  return `Bonjour ${clientName},\n\nNous sommes l'équipe technique Fibre Optique Celtiis en charge de votre raccordement aujourd'hui.\n\nAfin de faciliter notre arrivée à votre domicile sans vous déranger, merci de cliquer sur ce lien sécurisé pour nous partager votre position exacte en 1 clic :\n👉 ${url}\n\nMerci et à très vite !`;
+}
+
+/**
+ * Construit l'URL wa.me complète pour ouvrir WhatsApp directement
+ * @param {object} dossier
+ * @returns {string}
+ */
+export function buildClientLocationWhatsAppLink(dossier) {
+  const rawPhone = String(dossier?.mobile || dossier?.telephone_ligne || "").replace(/\s+/g, "").replace(/^00/, "+").split("/")[0].trim();
+  const cleanPhone = rawPhone.replace(/[^0-9+]/g, "");
+  const text = buildClientLocationRequestMessage(dossier);
+  if (!cleanPhone) {
+    return `https://wa.me/?text=${encodeURIComponent(text)}`;
+  }
+  let finalPhone = cleanPhone;
+  // Numéro béninois 8 chiffres
+  if (/^[4-9]\d{7}$/.test(finalPhone)) {
+    finalPhone = `229${finalPhone}`;
+  } else if (/^01[4-9]\d{7}$/.test(finalPhone)) { // Nouveau format béninois 10 chiffres (01...)
+    finalPhone = `229${finalPhone.slice(2)}`;
+  }
+  return `https://wa.me/${finalPhone.replace("+", "")}?text=${encodeURIComponent(text)}`;
+}
+

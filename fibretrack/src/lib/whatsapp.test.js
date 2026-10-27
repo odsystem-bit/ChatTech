@@ -1,6 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateGlobalReport, generateConformiteReport, generateRapportDuJour, fmt2 } from "./whatsapp.js";
+import {
+  generateGlobalReport,
+  generateConformiteReport,
+  generateRapportDuJour,
+  fmt2,
+  buildClientLocationUrl,
+  buildClientLocationRequestMessage,
+  buildClientLocationWhatsAppLink,
+} from "./whatsapp.js";
 
 test("Rapport Global - génère la structure exacte avec puces en gras (*...*)", () => {
   const mockIntervention = {
@@ -334,6 +342,30 @@ test("Poteau Petit Jean implanté - formatage exact sans dispatching ni doublon"
   assert.ok(conformite.includes("GPS poteau Petit jean implanté : 6.386744444444445, 2.5437944444444445"));
   assert.ok(!conformite.includes("GPS poteaux implantés :"));
 });
+
+test("buildClientLocationUrl - génère l'URL publique de géolocalisation pour un dossier", () => {
+  const url = buildClientLocationUrl("intv-uuid-12345");
+  assert.ok(url.includes("/loc.html?id=intv-uuid-12345"));
+});
+
+test("buildClientLocationRequestMessage & buildClientLocationWhatsAppLink - formate le message et le lien wa.me", () => {
+  const dossier = {
+    id: "abc-987-xyz",
+    nom_client: "KOFFI AGBESSI",
+    mobile: "97 12 34 56",
+  };
+
+  const msg = buildClientLocationRequestMessage(dossier);
+  assert.ok(msg.includes("Bonjour KOFFI AGBESSI"));
+  assert.ok(msg.includes("Fibre Optique Celtiis"));
+  assert.ok(msg.includes("loc.html?id=abc-987-xyz"));
+
+  const waLink = buildClientLocationWhatsAppLink(dossier);
+  // Doit préfixer par 229 pour un numéro béninois à 8 chiffres (97123456)
+  assert.ok(waLink.startsWith("https://wa.me/22997123456?text="));
+  assert.ok(waLink.includes(encodeURIComponent("loc.html?id=abc-987-xyz")));
+});
+
 
 
 
