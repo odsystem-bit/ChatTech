@@ -195,42 +195,62 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     ");
     $stmt->execute([$weekStart, $weekEndExclusive]);
     $interventions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $sheetPoint = $spreadsheet->getSheetByName('POINT GENERAL');
 
-    // Mouvements de stock sur la période
-    $movementStmt = db()->prepare('SELECT date_mouvement, type, designation, quantite, nom_client, nom_technicien, motif
-        FROM stock_movements WHERE date_mouvement >= ? AND date_mouvement < ? ORDER BY date_mouvement ASC');
-    $movementStmt->execute([$weekStart, $weekEndExclusive]);
-    $weekMovements = $movementStmt->fetchAll(PDO::FETCH_ASSOC);
+    // Mouvements explicites de stock pour la semaine (Initial et Réception)
+    $initStmt = db()->prepare("SELECT designation, SUM(quantite) as qte FROM stock_movements 
+        WHERE date_mouvement >= ? AND date_mouvement < ? 
+          AND (motif LIKE '%Stock Initial%' OR motif LIKE '%initial%')
+        GROUP BY designation");
+    $initStmt->execute([$weekStart, $weekEndExclusive]);
+    $explicitInit = $initStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-    $afterStmt = db()->prepare('SELECT type, designation, quantite FROM stock_movements WHERE date_mouvement >= ?');
-    $afterStmt->execute([$weekEndExclusive]);
-    $afterMovements = $afterStmt->fetchAll(PDO::FETCH_ASSOC);
+    $recuStmt = db()->prepare("SELECT designation, SUM(quantite) as qte FROM stock_movements 
+        WHERE date_mouvement >= ? AND date_mouvement < ? 
+          AND (motif LIKE '%Réception%' OR motif LIKE '%reception%' OR motif LIKE '%livraison%')
+        GROUP BY designation");
+    $recuStmt->execute([$weekStart, $weekEndExclusive]);
+    $explicitRecu = $recuStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
-    $stockRows = db()->query('SELECT designation, quantite FROM stock')->fetchAll(PDO::FETCH_KEY_PAIR);
-    $stockInitial = $stockReceived = $stockUsed = $stockRemaining = [];
-    foreach ($materialColumns as $key => $_column) {
-        $weekAdd = $weekOut = $afterNet = 0;
-        foreach ($weekMovements as $movement) {
-            if ($movement['designation'] !== $key) continue;
-            if (in_array($movement['type'], ['entree', 'ajustement'], true)) $weekAdd += (int)$movement['quantite'];
-            if ($movement['type'] === 'sortie') $weekOut += (int)$movement['quantite'];
-        }
-        foreach ($afterMovements as $movement) {
-            if ($movement['designation'] !== $key) continue;
-            $afterNet += in_array($movement['type'], ['entree', 'ajustement'], true)
-                ? (int)$movement['quantite'] : -(int)$movement['quantite'];
-        }
-        $current = (int)($stockRows[$key] ?? 0);
-        $stockInitial[$key] = $current - ($weekAdd - $weekOut) - $afterNet;
-        $stockReceived[$key] = $weekAdd;
-        $stockUsed[$key] = $weekOut;
-        $stockRemaining[$key] = $stockInitial[$key] + $weekAdd - $weekOut;
+    // Fallback réceptions générales si pas de motif explicite
+    if (empty($explicitRecu)) {
+        $entreeStmt = db()->prepare("SELECT designation, SUM(quantite) as qte FROM stock_movements 
+            WHERE date_mouvement >= ? AND date_mouvement < ? 
+              AND type = 'entree' 
+              AND motif NOT LIKE '%Stock Initial%' AND motif NOT LIKE '%initial%'
+            GROUP BY designation");
+        $entreeStmt->execute([$weekStart, $weekEndExclusive]);
+        $explicitRecu = $entreeStmt->fetchAll(PDO::FETCH_KEY_PAIR);
     }
 
+    $hasExplicitInit = !empty($explicitInit);
+    $hasExplicitRecu = !empty($explicitRecu);
 
-    
+    $stockInitial = [];
+    $stockReceived = [];
+    foreach ($materialColumns as $key => $column) {
+        // Stock initial
+        if ($hasExplicitInit) {
+            $stockInitial[$key] = (int)($explicitInit[$key] ?? 0);
+        } elseif ($sheetPoint) {
+            $existingInit = $sheetPoint->getCell($column . '7')->getValue();
+            $stockInitial[$key] = (is_numeric($existingInit) && (int)$existingInit > 0) ? (int)$existingInit : 0;
+        } else {
+            $stockInitial[$key] = 0;
+        }
+
+        // Stock reçu
+        if ($hasExplicitRecu) {
+            $stockReceived[$key] = (int)($explicitRecu[$key] ?? 0);
+        } elseif ($sheetPoint) {
+            $existingRecu = $sheetPoint->getCell($column . '8')->getValue();
+            $stockReceived[$key] = (is_numeric($existingRecu) && (int)$existingRecu > 0) ? (int)$existingRecu : 0;
+        } else {
+            $stockReceived[$key] = 0;
+        }
+    }
+
     // === FEUILLE 1: POINT GENERAL ===
-    $sheetPoint = $spreadsheet->getSheetByName('POINT GENERAL');
     if ($sheetPoint) {
         // En-têtes conformes au canevas
         $sheetPoint->setCellValue('A1', 'DATE DE RECEPTION : ' . date('d/m/Y', strtotime($weekStart)));
@@ -240,24 +260,11 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         $sheetPoint->setCellValue('A8', 'STOCK RECU');
         $sheetPoint->setCellValue('A9', 'STOCK RESTANT');
 
-        // Ligne 7 : STOCK INITIAL (valeurs réelles ou conservation si modèle)
+        // Ligne 7 : STOCK INITIAL
         // Ligne 8 : STOCK RECU
         foreach ($materialColumns as $key => $column) {
-            // Si référence ou mouvements calculés, inscrire le stock initial et reçu
-            $initVal = $stockInitial[$key] ?? 0;
-            $recuVal = $stockReceived[$key] ?? 0;
-            // Ne pas écraser par 0 si le canevas d'origine contient déjà les stocks de cette semaine
-            $existingInit = $sheetPoint->getCell($column . '7')->getValue();
-            if ($initVal === 0 && is_numeric($existingInit) && (int)$existingInit > 0) {
-                $initVal = (int)$existingInit;
-            }
-            $existingRecu = $sheetPoint->getCell($column . '8')->getValue();
-            if ($recuVal === 0 && is_numeric($existingRecu) && (int)$existingRecu > 0) {
-                $recuVal = (int)$existingRecu;
-            }
-
-            $sheetPoint->setCellValue($column . '7', $initVal);
-            $sheetPoint->setCellValue($column . '8', $recuVal);
+            $sheetPoint->setCellValue($column . '7', $stockInitial[$key] ?? 0);
+            $sheetPoint->setCellValue($column . '8', $stockReceived[$key] ?? 0);
         }
 
         $maxTemplateClients = 41; // Le canevas standard comporte 41 lignes clients (11 à 51)
