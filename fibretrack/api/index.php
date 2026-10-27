@@ -437,10 +437,11 @@ function sanitizeAndValidatePhotos(array $photos, ?PDO $pdo = null): array {
 }
 
 function lockStockQuantity(PDO $pdo, string $designation): int {
+  $canonical = canonicalDesignation($designation);
   $ensure = $pdo->prepare('INSERT INTO stock (designation, quantite) VALUES (?, 0) ON DUPLICATE KEY UPDATE designation = VALUES(designation)');
-  $ensure->execute([$designation]);
+  $ensure->execute([$canonical]);
   $stmt = $pdo->prepare('SELECT quantite FROM stock WHERE designation = ? FOR UPDATE');
-  $stmt->execute([$designation]);
+  $stmt->execute([$canonical]);
   return (int)$stmt->fetchColumn();
 }
 
@@ -464,8 +465,9 @@ function changeStockQuantity(PDO $pdo, string $designation, int $delta, array $d
 
 function setStockQuantity(PDO $pdo, string $designation, int $quantity, array $details = []): int {
   if ($quantity < 0) throw new Exception('La quantité ne peut pas être négative');
-  $current = lockStockQuantity($pdo, trim($designation));
-  return changeStockQuantity($pdo, trim($designation), $quantity - $current, $details, false);
+  $canon = canonicalDesignation($designation);
+  $current = lockStockQuantity($pdo, $canon);
+  return changeStockQuantity($pdo, $canon, $quantity - $current, $details, false);
 }
 
 function db() {

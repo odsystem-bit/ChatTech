@@ -1,9 +1,9 @@
 {
-  "version": "3.6.0",
-  "buildTime": "2026-10-21T14:10:00Z",
+  "version": "3.6.2",
+  "buildTime": "2026-10-27T22:30:00Z",
   "features": [
-    "Upload vidéo ultra-rapide en flux direct avec suivi de progression temps réel",
-    "Téléversement automatique et synchronisation instantanée des photos pour tous les techniciens",
-    "Réconciliation temps réel de la galerie et des médias d'intervention"
+    "Gestion de stock 20 articles canevas officiel GS BTP sans doublon",
+    "Import Excel sécurisé avec mode inventaire (stock restant) par défaut",
+    "Canonicalisation stricte et assainissement des désignations héritées"
   ]
 }

@@ -55,14 +55,51 @@ function setCached(stock) {
   } catch {}
 }
 
-const DEFAULT_DESIGNATIONS = [
-  "rue", "pince", "crochets", "susp", "piton", "closer", "rp1",
-  "traverse_13t", "traverse_15t", "semelle_eq",
-  "poteau_sbee_non_arme", "poteau_sbee_arme",
-  "ont", "pto", "repeteur_wifi", "jarretiere",
-  "cpc_50", "cpc_100", "cpc_150", "cpc_200", "cpc_300", "cpc_350",
-  "connecteur", "boulon", "bouchon_feuillard",
+export const DEFAULT_DESIGNATIONS = [
+  "ont",
+  "pto",
+  "jarretiere",
+  "piton",
+  "cheville",
+  "connecteur",
+  "closer",
+  "fibre_1fo",
+  "cpc_50",
+  "cpc_100",
+  "cpc_150",
+  "cpc_200",
+  "cpc_250",
+  "cpc_300",
+  "cpc_350",
+  "crochets",
+  "pince",
+  "susp",
+  "traverse_13t",
+  "traverse_15t",
 ];
+
+const CANONICAL_ALIASES = {
+  "ont": "ont", "otp": "ont", "box ont": "ont", "routeur ont": "ont", "box": "ont", "modem": "ont",
+  "pto": "pto", "prise pto": "pto", "pto fibre": "pto",
+  "jarretiere": "jarretiere", "jar": "jarretiere", "jarretieres": "jarretiere",
+  "piton": "piton", "pit": "piton", "piton d'ancrage": "piton", "pitons": "piton",
+  "cheville": "cheville", "che": "cheville", "chevilles": "cheville",
+  "connecteur": "connecteur", "con": "connecteur", "connecteur mecanique": "connecteur",
+  "closer": "closer", "clo": "closer", "boitier closer": "closer",
+  "fibre_1fo": "fibre_1fo", "1fo": "fibre_1fo", "fibre 1fo": "fibre_1fo", "cable fibre 1fo": "fibre_1fo",
+  "cpc_50": "cpc_50", "cpc 50": "cpc_50", "cpc50": "cpc_50", "cpc 50m": "cpc_50",
+  "cpc_100": "cpc_100", "cpc 100": "cpc_100", "cpc100": "cpc_100", "cpc 100m": "cpc_100",
+  "cpc_150": "cpc_150", "cpc 150": "cpc_150", "cpc150": "cpc_150", "cpc 150m": "cpc_150",
+  "cpc_200": "cpc_200", "cpc 200": "cpc_200", "cpc200": "cpc_200", "cpc 200m": "cpc_200",
+  "cpc_250": "cpc_250", "cpc 250": "cpc_250", "cpc250": "cpc_250", "cpc 250m": "cpc_250",
+  "cpc_300": "cpc_300", "cpc 300": "cpc_300", "cpc300": "cpc_300", "cpc 300m": "cpc_300",
+  "cpc_350": "cpc_350", "cpc 350": "cpc_350", "cpc350": "cpc_350", "cpc 350m": "cpc_350",
+  "crochets": "crochets", "cro": "crochets", "crochet": "crochets", "crochets d'ancrage": "crochets",
+  "pince": "pince", "pinces": "pince", "pince d'ancrage": "pince",
+  "susp": "susp", "sus": "susp", "suspente": "susp", "suspension": "susp",
+  "traverse_13t": "traverse_13t", "ct 13": "traverse_13t", "ct13": "traverse_13t", "traverse 13t": "traverse_13t",
+  "traverse_15t": "traverse_15t", "ct 15": "traverse_15t", "ct15": "traverse_15t", "traverse 15t": "traverse_15t",
+};
 
 function normalize(name) {
   return name.trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -71,7 +108,7 @@ function normalize(name) {
 let _stockPromise = null;
 
 /**
- * Charge le stock depuis le backend (avec cache local fallback).
+ * Charge le stock depuis le backend (avec assainissement strict des doublons/héritages).
  * @returns {Promise<Record<string, number>>}
  */
 export async function fetchStock() {
@@ -79,18 +116,26 @@ export async function fetchStock() {
   _stockPromise = (async () => {
     try {
       const stock = await apiGet("stock_list");
-      // Ensure default designations exist
+      const sanitized = {};
       for (const d of DEFAULT_DESIGNATIONS) {
-        if (!(d in stock)) stock[d] = 0;
+        sanitized[d] = typeof stock[d] === "number" ? stock[d] : 0;
       }
-      setCached(stock);
-      return stock;
+      // Ignorer les anciens éléments fictifs hérités
+      const legacyIgnored = new Set(["rue", "rp1", "semelle_eq", "poteau_sbee_non_arme", "poteau_sbee_arme", "boulon", "bouchon_feuillard", "error"]);
+      for (const [k, v] of Object.entries(stock)) {
+        if (!DEFAULT_DESIGNATIONS.includes(k) && !legacyIgnored.has(k)) {
+          sanitized[k] = v;
+        }
+      }
+      setCached(sanitized);
+      return sanitized;
     } catch {
       const cached = getCached();
-      if (Object.keys(cached).length === 0) {
-        return Object.fromEntries(DEFAULT_DESIGNATIONS.map((d) => [d, 0]));
+      const sanitized = {};
+      for (const d of DEFAULT_DESIGNATIONS) {
+        sanitized[d] = typeof cached[d] === "number" ? cached[d] : 0;
       }
-      return cached;
+      return sanitized;
     }
   })();
   setTimeout(() => { _stockPromise = null; }, 5000);
@@ -101,9 +146,10 @@ export async function fetchStock() {
  * Sauvegarde une désignation sur le backend.
  */
 export async function saveStockItem(designation, quantite) {
-  await apiPost("stock_save", { designation, quantite });
+  const canon = resolveOrCreateDesignation(designation);
+  await apiPost("stock_save", { designation: canon, quantite });
   const stock = getCached();
-  stock[designation] = quantite;
+  stock[canon] = quantite;
   setCached(stock);
   _stockPromise = null;
   return stock;
@@ -167,9 +213,7 @@ export function getDesignations() {
  */
 export function findExistingDesignation(nameInput) {
   const target = normalize(nameInput);
-  if (target === "otp" || target === "otp / ont" || target === "ont / otp" || target === "box" || target === "modem") {
-    return "ont";
-  }
+  if (CANONICAL_ALIASES[target]) return CANONICAL_ALIASES[target];
   return getDesignations().find((d) => normalize(d) === target) ?? null;
 }
 
@@ -179,7 +223,7 @@ export function findExistingDesignation(nameInput) {
 export function resolveOrCreateDesignation(nameInput) {
   const trimmed = nameInput.trim();
   const existing = findExistingDesignation(trimmed);
-  return existing || trimmed;
+  return existing || trimmed.toLowerCase().replace(/[\s'-]+/g, "_");
 }
 
 /**

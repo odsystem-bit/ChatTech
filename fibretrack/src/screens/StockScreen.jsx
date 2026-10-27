@@ -66,10 +66,6 @@ const LABELS_MATERIEL = {
   susp: { label: "Suspente (SUS)", iconType: "tool", cat: "Armement" },
   traverse_13t: { label: "Traverse 13T", iconType: "ladder", cat: "Poteaux" },
   traverse_15t: { label: "Traverse 15T", iconType: "ladder", cat: "Poteaux" },
-  semelle_eq: { label: "Semelle Eq", iconType: "shield", cat: "Poteaux" },
-  poteau_sbee_non_arme: { label: "Poteau SBEE non armé", iconType: "pole", cat: "Poteaux" },
-  poteau_sbee_arme: { label: "Poteau SBEE armé", iconType: "pole", cat: "Poteaux" },
-  repeteur_wifi: { label: "Répéteur Wi-Fi", iconType: "wifi", cat: "Équipement actif" },
 };
 
 function renderItemIcon(iconType, size = 20) {
@@ -133,7 +129,7 @@ export default function StockScreen({ onClose, isAdmin = false }) {
 
   // Section Admin
   const [adminSectionOpen, setAdminSectionOpen] = useState(false);
-  const [importMode, setImportMode] = useState("add");
+  const [importMode, setImportMode] = useState("set"); // 'set' par défaut pour mise à jour exacte du stock restant
   const [importFile, setImportFile] = useState(null);
   const [importLoading, setImportLoading] = useState(false);
   const [moisExport, setMoisExport] = useState(new Date().toISOString().slice(0, 7));
@@ -536,8 +532,8 @@ export default function StockScreen({ onClose, isAdmin = false }) {
                 <label className="form-field">
                   <span>Mode de traitement des quantités</span>
                   <select value={importMode} onChange={(e) => setImportMode(e.target.value)}>
-                    <option value="add">Ajouter la livraison au stock actuel</option>
-                    <option value="set">Définir le stock restant exact (Inventaire)</option>
+                    <option value="set">Définir le stock restant exact (Inventaire canevas - Recommandé)</option>
+                    <option value="add">Ajouter la livraison reçue au stock actuel</option>
                   </select>
                 </label>
                 <label className="form-field">
