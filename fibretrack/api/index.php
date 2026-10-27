@@ -681,7 +681,7 @@ function requireAuth($adminOnly = false) {
   return $user;
 }
 
-$publicActions = ['account_validate', 'app_version'];
+$publicActions = ['account_validate', 'app_version', 'client_gps_get', 'client_gps_submit'];
 $adminActions = ['accounts_list', 'account_add', 'account_delete', 'stock_save', 'stock_import', 'stock_import_excel'];
 if (!in_array($action, $publicActions, true)) {
   requireAuth(in_array($action, $adminActions, true));
