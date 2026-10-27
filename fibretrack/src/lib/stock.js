@@ -132,11 +132,18 @@ export async function fetchStockMovements(limit = 100) {
 }
 
 export async function importStockExcel(file, mode) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      const base64Str = typeof dataUrl === "string" ? dataUrl.split(",")[1] || "" : "";
+      resolve(base64Str);
+    };
+    reader.onerror = () => reject(new Error("Erreur de lecture du fichier Excel"));
+    reader.readAsDataURL(file);
+  });
   const result = await apiPost("stock_import_excel", {
-    file_base64: btoa(binary),
+    file_base64: base64,
     mode,
   });
   const stock = await apiGet("stock_list");

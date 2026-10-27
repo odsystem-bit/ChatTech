@@ -293,9 +293,11 @@ export default function StockScreen({ onClose, isAdmin = false }) {
     try {
       const { result, stock: updated } = await importStockExcel(importFile, importMode);
       setStock(updated);
-      showToast(
-        `${importMode === "add" ? "Livraison ajoutée" : "Inventaire mis à jour"} : ${result.count} articles traités.`
-      );
+      let msg = `${importMode === "add" ? "Livraison ajoutée" : "Inventaire mis à jour"} : ${result.count} articles traités.`;
+      if (result.warnings && result.warnings.length > 0) {
+        msg += ` (${result.warnings.length} quantité(s) négative(s) ajustée(s) à 0)`;
+      }
+      showToast(msg, "success");
       setImportFile(null);
       e.currentTarget.reset();
     } catch (err) {

@@ -2607,10 +2607,12 @@ try {
       try {
         $count = 0;
         foreach ($items as $item) {
-          $desig = trim((string)($item['designation'] ?? ''));
+          $desig = canonicalDesignation(trim((string)($item['designation'] ?? '')));
           $qty = (int)($item['quantite'] ?? 0);
           if (!$desig) continue;
-          if ($qty < 0) throw new Exception("Quantité négative interdite pour $desig");
+          if ($qty < 0) {
+            $qty = 0;
+          }
           if ($mode === 'add') {
             if ($qty === 0) continue;
             changeStockQuantity($pdo, $desig, $qty, ['motif' => 'Import hebdomadaire - ajout']);
@@ -2709,38 +2711,107 @@ try {
       break;
 
     case 'stock_import_excel':
-      // Import strict depuis la feuille "POINT GENERAL", bloc "STOCK RESTANT".
+      // Import robuste depuis la feuille "POINT GENERAL" (ou feuille d'inventaire),
+      // supporte les modes "set" (stock restant) et "add" (stock reçu / livraison).
       $fileBase64 = $input['file_base64'] ?? '';
       $mode = $input['mode'] ?? 'set';
       if (!in_array($mode, ['add', 'set'], true)) { http_response_code(400); echo json_encode(['error' => 'Mode d’import invalide']); break; }
       if (!$fileBase64) { http_response_code(400); echo json_encode(['error' => 'Fichier requis']); break; }
+      
+      // Nettoyer l'éventuel préfixe data:...;base64,
+      if (preg_match('#^data:[^;]+;base64,(.+)$#si', $fileBase64, $m)) {
+        $fileBase64 = $m[1];
+      }
       $fileData = base64_decode($fileBase64);
-      if (!$fileData) { http_response_code(400); echo json_encode(['error' => 'Fichier invalide']); break; }
+      if (!$fileData) { http_response_code(400); echo json_encode(['error' => 'Fichier invalide ou corrompu']); break; }
 
       $tmpFile = tempnam(sys_get_temp_dir(), 'stock') . '.xlsx';
       file_put_contents($tmpFile, $fileData);
 
       try {
         $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($tmpFile);
-        $sheet = $spreadsheet->getSheetByName('POINT GENERAL') ?? $spreadsheet->getSheet(0);
-        $rows = $sheet->toArray(null, true, false, false);
+        
+        // 1. Détection intelligente de la feuille contenant le stock / point général
+        $sheet = null;
+        foreach ($spreadsheet->getAllSheets() as $s) {
+          $sTitle = strtoupper(trim($s->getTitle()));
+          $cleanTitle = preg_replace('/[^A-Z0-9]/', '', iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $sTitle) ?: $sTitle);
+          if ($cleanTitle === 'POINTGENERAL' || str_contains($cleanTitle, 'POINTGENERAL')) {
+            $sheet = $s;
+            break;
+          }
+        }
+        // Si non trouvé par nom, chercher la feuille contenant STOCK RESTANT ou STOCK RECU ou STOCK INITIAL
+        if (!$sheet) {
+          foreach ($spreadsheet->getAllSheets() as $s) {
+            try {
+              $checkRows = $s->toArray(null, false, false, false);
+              foreach (array_slice($checkRows, 0, 20) as $r) {
+                if (!is_array($r)) continue;
+                foreach (array_slice($r, 0, 5) as $c) {
+                  $cClean = strtoupper(trim((string)$c));
+                  if (str_contains($cClean, 'STOCK RESTANT') || str_contains($cClean, 'STOCK RECU') || str_contains($cClean, 'STOCK INITIAL')) {
+                    $sheet = $s;
+                    break 3;
+                  }
+                }
+              }
+            } catch (\Throwable $t) {}
+          }
+        }
+        if (!$sheet) {
+          $sheet = $spreadsheet->getSheet(0);
+        }
+
+        // 2. Lecture des lignes (avec calcul des formules, ou fallback si formule invalide)
+        try {
+          $rows = $sheet->toArray(null, true, false, false);
+        } catch (\Throwable $e) {
+          $rows = $sheet->toArray(null, false, false, false);
+        }
+
+        @unlink($tmpFile);
 
         $headerRowIdx = null;
-        $valueRowIdx = null;
         $recuRowIdx = null;
         $restantRowIdx = null;
         $initialRowIdx = null;
 
         foreach ($rows as $i => $row) {
-          $first = trim((string)($row[0] ?? ''));
-          if (strcasecmp($first, 'STOCK RECU') === 0 || strcasecmp($first, 'STOCK REÇU') === 0) { $recuRowIdx = $i; }
-          if (strcasecmp($first, 'STOCK RESTANT') === 0) { $restantRowIdx = $i; }
-          if (strcasecmp($first, 'STOCK INITIAL') === 0) { $initialRowIdx = $i; }
-          if ($headerRowIdx === null && (strcasecmp($first, 'N°') === 0 || strcasecmp(trim((string)($row[1] ?? '')), 'CLIENTS') === 0)) {
-            $headerRowIdx = $i;
+          if (!is_array($row)) continue;
+          for ($col = 0; $col <= min(4, count($row) - 1); $col++) {
+            $cellText = strtoupper(trim((string)($row[$col] ?? '')));
+            $clean = preg_replace('/[^A-Z]/', '', iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $cellText) ?: $cellText);
+            if (str_starts_with($clean, 'STOCKRECU')) {
+              if ($recuRowIdx === null) $recuRowIdx = $i;
+            }
+            if (str_starts_with($clean, 'STOCKRESTANT')) {
+              if ($restantRowIdx === null) $restantRowIdx = $i;
+            }
+            if (str_starts_with($clean, 'STOCKINITIAL')) {
+              if ($initialRowIdx === null) $initialRowIdx = $i;
+            }
+          }
+
+          if ($headerRowIdx === null) {
+            $first = strtoupper(trim((string)($row[0] ?? '')));
+            $second = strtoupper(trim((string)($row[1] ?? '')));
+            if ($first === 'N°' || $first === 'NO' || $first === 'N' || str_contains($second, 'CLIENT')) {
+              $headerRowIdx = $i;
+            } else {
+              $matchCount = 0;
+              foreach ($row as $cell) {
+                $cVal = strtoupper(trim((string)$cell));
+                if (in_array($cVal, ['ONT', 'PTO', 'JAR', 'PIT', 'CHE', 'CON', 'CLO', '1FO', 'CPC 50', 'CRO', 'PINCE', 'SUS', 'CT 13', 'CT 15'], true)) {
+                  $matchCount++;
+                }
+              }
+              if ($matchCount >= 3) {
+                $headerRowIdx = $i;
+              }
+            }
           }
         }
-        @unlink($tmpFile);
 
         // Si mode = add (livraison), privilégier STOCK RECU s'il existe
         if ($mode === 'add') {
@@ -2752,33 +2823,103 @@ try {
 
         if ($valueRowIdx === null || $headerRowIdx === null) {
           http_response_code(400);
-          echo json_encode(['error' => 'Structure Excel non reconnue (lignes STOCK RECU/RESTANT ou en-tête introuvable)']);
+          echo json_encode(['error' => 'Structure Excel non reconnue : ligne STOCK RECU/RESTANT ou en-têtes de matériel introuvables.']);
           break;
         }
 
         $headerRow = $rows[$headerRowIdx];
         $valueRow = $rows[$valueRowIdx];
 
-        // Normalise les en-tetes (trim, uppercase) -> index de colonne
-        $colByHeader = [];
+        // Dictionnaire des en-têtes et leurs alias
+        $headerAliases = [
+          'ont'          => ['ONT', 'OTP', 'BOX ONT', 'ROUTEUR ONT'],
+          'pto'          => ['PTO', 'PRISE PTO', 'PTO FIBRE'],
+          'jarretiere'   => ['JAR', 'JARRETIERE', 'JARRETIÈRE', 'JARRETIERES'],
+          'piton'        => ['PIT', 'PITON', 'PITONS', 'PITON D\'ANCRAGE', 'PITON DANCRAGE'],
+          'cheville'     => ['CHE', 'CHEVILLE', 'CHEVILLES'],
+          'connecteur'   => ['CON', 'CONNECTEUR', 'CONNECTEURS', 'CONNECTEUR MECANIQUE'],
+          'closer'       => ['CLO', 'CLOSER', 'CLOSERS', 'BOITIER CLOSER'],
+          'fibre_1fo'    => ['1FO', 'FIBRE 1FO', 'FIBRE_1FO', 'CABLE FIBRE 1FO'],
+          'cpc_50'       => ['CPC 50', 'CPC50', 'CPC 50M', 'CPC 50 M'],
+          'cpc_100'      => ['CPC 100', 'CPC100', 'CPC 100M', 'CPC 100 M'],
+          'cpc_150'      => ['CPC 150', 'CPC150', 'CPC 150M', 'CPC 150 M'],
+          'cpc_200'      => ['CPC 200', 'CPC200', 'CPC 200M', 'CPC 200 M'],
+          'cpc_250'      => ['CPC 250', 'CPC250', 'CPC 250M', 'CPC 250 M'],
+          'cpc_300'      => ['CPC 300', 'CPC300', 'CPC 300M', 'CPC 300 M'],
+          'cpc_350'      => ['CPC 350', 'CPC350', 'CPC 350M', 'CPC 350 M'],
+          'crochets'     => ['CRO', 'CROCHET', 'CROCHETS', 'CROCHETS D\'ANCRAGE', 'CROCHETS DANCRAGE'],
+          'pince'        => ['PINCE', 'PINCES', 'PINCE D\'ANCRAGE', 'PINCE DANCRAGE'],
+          'susp'         => ['SUS', 'SUSP', 'SUSPENTE', 'SUSPENSION'],
+          'traverse_13t' => ['CT 13', 'CT13', 'TRAVERSE 13T', 'TRAVERSE 13', 'CT_13'],
+          'traverse_15t' => ['CT 15', 'CT15', 'TRAVERSE 15T', 'TRAVERSE 15', 'CT_15'],
+        ];
+
+        // Normalise les en-têtes de colonnes trouvées
+        $colByNormalizedHeader = [];
         foreach ($headerRow as $colIdx => $h) {
-          $h = strtoupper(trim((string)$h));
-          if ($h !== '') $colByHeader[$h] = $colIdx;
+          $norm = strtoupper(trim((string)$h));
+          $norm = preg_replace('/\s+/', ' ', $norm);
+          if ($norm !== '') {
+            $colByNormalizedHeader[$norm] = $colIdx;
+          }
         }
 
         $items = [];
         $notFound = [];
+        $warnings = [];
+
         foreach (STOCK_EXCEL_MAP as $designation => $meta) {
-          $colIdx = $colByHeader[$meta['excel_header']] ?? null;
-          if ($colIdx === null) { $notFound[] = $meta['excel_header']; continue; }
-          $qty = (int)($valueRow[$colIdx] ?? 0);
-          if ($qty < 0) throw new Exception("Quantité négative interdite pour $designation");
-          $items[] = ['designation' => $designation, 'label' => $meta['label'], 'quantite' => $qty];
+          $foundColIdx = null;
+          $primary = strtoupper(trim($meta['excel_header']));
+          if (isset($colByNormalizedHeader[$primary])) {
+            $foundColIdx = $colByNormalizedHeader[$primary];
+          } else {
+            $aliases = $headerAliases[$designation] ?? [];
+            foreach ($aliases as $alt) {
+              $altNorm = strtoupper(trim($alt));
+              if (isset($colByNormalizedHeader[$altNorm])) {
+                $foundColIdx = $colByNormalizedHeader[$altNorm];
+                break;
+              }
+            }
+          }
+
+          if ($foundColIdx === null) {
+            $notFound[] = $meta['excel_header'];
+            continue;
+          }
+
+          $rawVal = $valueRow[$foundColIdx] ?? 0;
+          $qty = 0;
+          if (is_numeric($rawVal)) {
+            $qty = (int)round((float)$rawVal);
+          } elseif (is_string($rawVal)) {
+            $cleaned = preg_replace('/[^\d\.\-\+]/', '', trim($rawVal));
+            if (is_numeric($cleaned)) {
+              $qty = (int)round((float)$cleaned);
+            }
+          }
+
+          // Protection contre les quantités négatives :
+          // Dans les fichiers Excel réels, si la consommation dépasse le stock initial/reçu de la feuille,
+          // la formule Excel (ex: =E7+E8-E52) affiche une valeur négative (ex: -1).
+          // Un stock physique magasin ne pouvant être négatif, nous ajustons à 0 et notifions l'utilisateur.
+          if ($qty < 0) {
+            $rawQty = $qty;
+            $qty = 0;
+            $warnings[] = $meta['label'] . " : quantité négative dans Excel ($rawQty), ajustée à 0.";
+          }
+
+          $items[] = [
+            'designation' => $designation,
+            'label' => $meta['label'],
+            'quantite' => $qty,
+          ];
         }
 
         if (empty($items)) {
           http_response_code(400);
-          echo json_encode(['error' => 'Aucune colonne reconnue dans le fichier Excel']);
+          echo json_encode(['error' => 'Aucune colonne de matériel reconnue dans le fichier Excel']);
           break;
         }
 
@@ -2787,14 +2928,20 @@ try {
         try {
           foreach ($items as $item) {
             if ($mode === 'add') {
-              if ($item['quantite'] === 0) continue;
-              changeStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Import Excel hebdomadaire - ajout']);
+              if ($item['quantite'] <= 0) continue;
+              changeStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Import Excel hebdomadaire - ajout livraison']);
             } else {
               setStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Inventaire Excel - stock restant']);
             }
           }
           $pdo->commit();
-          echo json_encode(['ok' => true, 'count' => count($items), 'not_found' => $notFound, 'mode' => $mode]);
+          echo json_encode([
+            'ok' => true,
+            'count' => count($items),
+            'not_found' => $notFound,
+            'warnings' => $warnings,
+            'mode' => $mode,
+          ]);
         } catch (Exception $e) {
           $pdo->rollBack();
           http_response_code(500);
