@@ -65,17 +65,80 @@ if (empty($params)) {
 }
 
 $action = $params['action'] ?? '';
-$code = $params['code'] ?? '';
+$code = $params['code'] ?? ($_SERVER['HTTP_X_USER_CODE'] ?? '');
 
-function requireExcelAdmin($code) {
-    if ($code === '9999') return;
-    if (preg_match('/^\d{4}$/', (string)$code)) {
-        $stmtAcc = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
-        $stmtAcc->execute([$code]);
-        if ($stmtAcc->fetch()) return;
+$GLOBALS['excelAuth'] = [
+    'team_id' => 'team_telecom_btp_001',
+    'nom_equipe' => 'TELECOM BTP Services',
+    'role' => 'chef_equipe',
+];
+
+function requireExcelAdmin($code, $params) {
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+    $token = trim($params['token'] ?? '');
+    if (!$token && preg_match('/^Bearer\s+([a-f0-9]{32,128})$/i', trim($authHeader), $m)) {
+        $token = $m[1];
     }
-    http_response_code(401);
-    exit;
+    $requestedTeamId = trim($params['team_id'] ?? ($_SERVER['HTTP_X_TEAM_ID'] ?? ''));
+
+    $row = null;
+    if ($token !== '' && preg_match('/^[a-f0-9]{32,128}$/i', $token)) {
+        $stmtAcc = db()->prepare('SELECT a.id, a.nom, a.code, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.session_token = ? LIMIT 1');
+        $stmtAcc->execute([$token]);
+        $row = $stmtAcc->fetch();
+    }
+
+    if (!$row && $code === '9999') {
+        $targetTeam = $requestedTeamId ?: 'team_telecom_btp_001';
+        $tStmt = db()->prepare('SELECT id, nom_equipe FROM teams WHERE id = ? LIMIT 1');
+        $tStmt->execute([$targetTeam]);
+        $tRow = $tStmt->fetch();
+        $GLOBALS['excelAuth'] = [
+            'team_id' => $tRow['id'] ?? 'team_telecom_btp_001',
+            'nom_equipe' => $tRow['nom_equipe'] ?? 'TELECOM BTP Services',
+            'role' => 'chef_equipe',
+        ];
+        return;
+    }
+
+    if (!$row && preg_match('/^\d{4}$/', (string)$code)) {
+        if ($requestedTeamId !== '') {
+            $stmtAcc = db()->prepare('SELECT a.id, a.nom, a.code, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? AND a.team_id = ? LIMIT 1');
+            $stmtAcc->execute([$code, $requestedTeamId]);
+            $row = $stmtAcc->fetch();
+        }
+        if (!$row) {
+            $stmtAcc = db()->prepare('SELECT a.id, a.nom, a.code, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? ORDER BY (a.team_id = "team_telecom_btp_001") DESC LIMIT 1');
+            $stmtAcc->execute([$code]);
+            $row = $stmtAcc->fetch();
+        }
+    }
+
+    if (!$row || (isset($row['actif']) && !(int)$row['actif'])) {
+        http_response_code(401);
+        exit;
+    }
+
+    if ($requestedTeamId !== '' && $requestedTeamId !== $row['team_id']) {
+        if ($row['role'] === 'super_admin') {
+            $tStmt = db()->prepare('SELECT id, nom_equipe FROM teams WHERE id = ? LIMIT 1');
+            $tStmt->execute([$requestedTeamId]);
+            $tRow = $tStmt->fetch();
+            if ($tRow) {
+                $row['team_id'] = $tRow['id'];
+                $row['nom_equipe'] = $tRow['nom_equipe'];
+            }
+        } else {
+            http_response_code(403);
+            exit;
+        }
+    }
+
+    $GLOBALS['excelAuth'] = [
+        'team_id' => $row['team_id'] ?: 'team_telecom_btp_001',
+        'nom_equipe' => $row['nom_equipe'] ?: 'TELECOM BTP Services',
+        'role' => $row['role'] ?: 'technicien',
+    ];
 }
 
 if (!in_array($action, ['export_hebdo', 'export_mois', 'export_periode', 'export_historique'], true)) {
@@ -84,7 +147,7 @@ if (!in_array($action, ['export_hebdo', 'export_mois', 'export_periode', 'export
     exit;
 }
 
-requireExcelAdmin($code);
+requireExcelAdmin($code, $params);
 
 function trouverTemplate(): ?string {
     $candidates = [
@@ -169,6 +232,9 @@ function determineCpcKey(array $intervention, array $materials): ?string {
  */
 function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     global $materialColumns;
+    $teamId = $GLOBALS['excelAuth']['team_id'] ?? 'team_telecom_btp_001';
+    $teamName = $GLOBALS['excelAuth']['nom_equipe'] ?? 'BTP';
+    $isHistoricalTeam1 = ($teamId === 'team_telecom_btp_001');
 
     $templateFile = trouverTemplate();
     if ($templateFile === null) {
@@ -180,46 +246,49 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
     $weekEnd = date('Y-m-d', strtotime('-1 day', strtotime($finExclusive)));
     $weekEndExclusive = $finExclusive;
     
-    // Récupérer les interventions terminées de la semaine
-    // Les interventions non traitées / annulées ne doivent pas consommer de matériel
+    // Récupérer les interventions terminées de la semaine pour cette équipe
     $stmt = db()->prepare("
         SELECT id, date, statut, nom_technicien, nom_equipe, nom_client,
           adresse_zone, telephone_ligne, materiel_pose, points_gps,
           nb_poteaux_implantes, nb_poteaux_traverses, nb_poteaux_armes,
           lineaire_m, arrivee_m, depart_m, type_cable
         FROM interventions
-        WHERE date >= ? AND date < ? 
+        WHERE team_id = ?
+          AND date >= ? AND date < ? 
           AND statut = 'termine'
           AND (motif_non_traite IS NULL OR motif_non_traite = '')
         ORDER BY date ASC
     ");
-    $stmt->execute([$weekStart, $weekEndExclusive]);
+    $stmt->execute([$teamId, $weekStart, $weekEndExclusive]);
     $interventions = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $sheetPoint = $spreadsheet->getSheetByName('POINT GENERAL');
 
     // Mouvements explicites de stock pour la semaine (Initial et Réception)
     $initStmt = db()->prepare("SELECT designation, SUM(quantite) as qte FROM stock_movements 
-        WHERE date_mouvement >= ? AND date_mouvement < ? 
+        WHERE team_id = ?
+          AND date_mouvement >= ? AND date_mouvement < ? 
           AND (motif LIKE '%Stock Initial%' OR motif LIKE '%initial%')
         GROUP BY designation");
-    $initStmt->execute([$weekStart, $weekEndExclusive]);
+    $initStmt->execute([$teamId, $weekStart, $weekEndExclusive]);
     $explicitInit = $initStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
     $recuStmt = db()->prepare("SELECT designation, SUM(quantite) as qte FROM stock_movements 
-        WHERE date_mouvement >= ? AND date_mouvement < ? 
+        WHERE team_id = ?
+          AND date_mouvement >= ? AND date_mouvement < ? 
           AND (motif LIKE '%Réception%' OR motif LIKE '%reception%' OR motif LIKE '%livraison%')
         GROUP BY designation");
-    $recuStmt->execute([$weekStart, $weekEndExclusive]);
+    $recuStmt->execute([$teamId, $weekStart, $weekEndExclusive]);
     $explicitRecu = $recuStmt->fetchAll(PDO::FETCH_KEY_PAIR);
 
     // Fallback réceptions générales si pas de motif explicite
     if (empty($explicitRecu)) {
         $entreeStmt = db()->prepare("SELECT designation, SUM(quantite) as qte FROM stock_movements 
-            WHERE date_mouvement >= ? AND date_mouvement < ? 
+            WHERE team_id = ?
+              AND date_mouvement >= ? AND date_mouvement < ? 
               AND type = 'entree' 
               AND motif NOT LIKE '%Stock Initial%' AND motif NOT LIKE '%initial%'
             GROUP BY designation");
-        $entreeStmt->execute([$weekStart, $weekEndExclusive]);
+        $entreeStmt->execute([$teamId, $weekStart, $weekEndExclusive]);
         $explicitRecu = $entreeStmt->fetchAll(PDO::FETCH_KEY_PAIR);
     }
 
@@ -232,7 +301,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         // Stock initial
         if ($hasExplicitInit) {
             $stockInitial[$key] = (int)($explicitInit[$key] ?? 0);
-        } elseif ($sheetPoint) {
+        } elseif ($isHistoricalTeam1 && $sheetPoint) {
             $existingInit = $sheetPoint->getCell($column . '7')->getValue();
             $stockInitial[$key] = (is_numeric($existingInit) && (int)$existingInit > 0) ? (int)$existingInit : 0;
         } else {
@@ -242,7 +311,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         // Stock reçu
         if ($hasExplicitRecu) {
             $stockReceived[$key] = (int)($explicitRecu[$key] ?? 0);
-        } elseif ($sheetPoint) {
+        } elseif ($isHistoricalTeam1 && $sheetPoint) {
             $existingRecu = $sheetPoint->getCell($column . '8')->getValue();
             $stockReceived[$key] = (is_numeric($existingRecu) && (int)$existingRecu > 0) ? (int)$existingRecu : 0;
         } else {
@@ -255,7 +324,7 @@ function construireClasseur(string $debut, string $finExclusive): Spreadsheet {
         // En-têtes conformes au canevas
         $sheetPoint->setCellValue('A1', 'DATE DE RECEPTION : ' . date('d/m/Y', strtotime($weekStart)));
         $sheetPoint->setCellValue('A3', 'DATE DE RETOUR : ' . date('d/m/Y', strtotime($weekEnd)));
-        $sheetPoint->setCellValue('A5', 'EQUIPE : BTP');
+        $sheetPoint->setCellValue('A5', 'EQUIPE : ' . ($isHistoricalTeam1 ? 'BTP' : $teamName));
         $sheetPoint->setCellValue('A7', 'STOCK INITIAL');
         $sheetPoint->setCellValue('A8', 'STOCK RECU');
         $sheetPoint->setCellValue('A9', 'STOCK RESTANT');
@@ -555,7 +624,9 @@ try {
     }
 
     // export_historique : un classeur par mois dans un ZIP
-    $premiere = db()->query('SELECT MIN(date) FROM interventions')->fetchColumn();
+    $minStmt = db()->prepare('SELECT MIN(date) FROM interventions WHERE team_id = ?');
+    $minStmt->execute([$GLOBALS['excelAuth']['team_id'] ?? 'team_telecom_btp_001']);
+    $premiere = $minStmt->fetchColumn();
     if (!$premiere) {
         http_response_code(404);
         header('Content-Type: application/json');

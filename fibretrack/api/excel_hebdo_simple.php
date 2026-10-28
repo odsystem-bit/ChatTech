@@ -25,12 +25,13 @@ header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetm
 header('Access-Control-Allow-Origin: *');
 
 $action = $_GET['action'] ?? '';
-$code = $_GET['code'] ?? '';
-
-if ($code !== '9999') {
-    http_response_code(401);
-    exit;
+$code = $_GET['code'] ?? ($_SERVER['HTTP_X_USER_CODE'] ?? '');
+$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+$token = trim($_GET['token'] ?? '');
+if (!$token && preg_match('/^Bearer\s+([a-f0-9]{32,128})$/i', trim($authHeader), $m)) {
+    $token = $m[1];
 }
+$requestedTeamId = trim($_GET['team_id'] ?? ($_SERVER['HTTP_X_TEAM_ID'] ?? ''));
 
 if ($action !== 'export_hebdo') {
     http_response_code(400);
@@ -40,11 +41,30 @@ if ($action !== 'export_hebdo') {
 }
 
 $pdoAuth = db();
-$stmtAuth = $pdoAuth->prepare('SELECT id FROM accounts WHERE code = ?');
-if ($code !== '9999') {
-    $stmtAuth->execute([$code]);
-    if (!$stmtAuth->fetch()) { http_response_code(401); exit; }
+$authRow = null;
+if ($token !== '' && preg_match('/^[a-f0-9]{32,128}$/i', $token)) {
+    $stmtAuth = $pdoAuth->prepare('SELECT a.id, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.session_token = ? LIMIT 1');
+    $stmtAuth->execute([$token]);
+    $authRow = $stmtAuth->fetch();
 }
+if (!$authRow && $code === '9999') {
+    $authRow = ['id' => 'admin-9999', 'role' => 'chef_equipe', 'team_id' => $requestedTeamId ?: 'team_telecom_btp_001', 'actif' => 1, 'nom_equipe' => 'BTP'];
+}
+if (!$authRow && preg_match('/^\d{4}$/', (string)$code)) {
+    $stmtAuth = $pdoAuth->prepare('SELECT a.id, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? ORDER BY (a.team_id = "team_telecom_btp_001") DESC LIMIT 1');
+    $stmtAuth->execute([$code]);
+    $authRow = $stmtAuth->fetch();
+}
+if (!$authRow || (isset($authRow['actif']) && !(int)$authRow['actif'])) {
+    http_response_code(401);
+    exit;
+}
+if ($requestedTeamId !== '' && $requestedTeamId !== $authRow['team_id'] && ($authRow['role'] ?? '') !== 'super_admin') {
+    http_response_code(403);
+    exit;
+}
+$teamId = ($requestedTeamId !== '' && ($authRow['role'] ?? '') === 'super_admin') ? $requestedTeamId : ($authRow['team_id'] ?: 'team_telecom_btp_001');
+$teamName = $authRow['nom_equipe'] ?: 'BTP';
 
 try {
     // Déterminer la semaine courante (lundi-dimanche)
@@ -56,13 +76,13 @@ try {
     $weekEnd = date('Y-m-d', strtotime('sunday this week', strtotime($requestedDate)));
     $weekEndExclusive = date('Y-m-d', strtotime('+1 day', strtotime($weekEnd)));
     
-    // Récupérer les interventions de la semaine
+    // Récupérer les interventions de la semaine pour cette équipe
     $stmt = db()->prepare("
         SELECT * FROM interventions 
-        WHERE date >= ? AND date < ?
+        WHERE team_id = ? AND date >= ? AND date < ?
         ORDER BY date ASC
     ");
-    $stmt->execute([$weekStart, $weekEndExclusive]);
+    $stmt->execute([$teamId, $weekStart, $weekEndExclusive]);
     $interventions = $stmt->fetchAll(PDO::FETCH_ASSOC);
     
     // Créer un nouveau fichier Excel
@@ -76,7 +96,7 @@ try {
     $sheetPoint->setCellValue('A3', 'DATE DE RETOUR :');
     $sheetPoint->setCellValue('B3', date('d/m/y', strtotime($weekEnd)));
     $sheetPoint->setCellValue('A5', 'EQUIPE :');
-    $sheetPoint->setCellValue('B5', 'BTP');
+    $sheetPoint->setCellValue('B5', $teamName);
     $sheetPoint->setCellValue('A7', 'Nombre d\'interventions :');
     $sheetPoint->setCellValue('B7', count($interventions));
     

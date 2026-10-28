@@ -29,13 +29,83 @@ function db() {
   return $pdo;
 }
 
+$GLOBALS['pdfAuth'] = [
+  'team_id' => 'team_telecom_btp_001',
+  'nom_equipe' => 'TELECOM BTP Services',
+  'role' => 'technicien',
+];
+
+function getPdfAuth() {
+  return $GLOBALS['pdfAuth'];
+}
+
 function requirePdfAuth() {
+  $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+  $token = trim($_GET['token'] ?? '');
+  if (!$token && preg_match('/^Bearer\s+([a-f0-9]{32,128})$/i', trim($authHeader), $m)) {
+    $token = $m[1];
+  }
   $code = trim($_GET['code'] ?? ($_SERVER['HTTP_X_USER_CODE'] ?? ''));
-  if ($code === '9999') return;
-  if (!preg_match('/^\d{4}$/', $code)) { http_response_code(401); exit; }
-  $stmt = db()->prepare('SELECT id FROM accounts WHERE code = ?');
-  $stmt->execute([$code]);
-  if (!$stmt->fetch()) { http_response_code(401); exit; }
+  $requestedTeamId = trim($_GET['team_id'] ?? ($_SERVER['HTTP_X_TEAM_ID'] ?? ''));
+
+  $row = null;
+  if ($token !== '' && preg_match('/^[a-f0-9]{32,128}$/i', $token)) {
+    $stmt = db()->prepare('SELECT a.id, a.nom, a.code, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.session_token = ? LIMIT 1');
+    $stmt->execute([$token]);
+    $row = $stmt->fetch();
+  }
+
+  if (!$row && $code !== '') {
+    if ($code === '9999') {
+      $targetTeam = $requestedTeamId ?: 'team_telecom_btp_001';
+      $tStmt = db()->prepare('SELECT id, nom_equipe FROM teams WHERE id = ? LIMIT 1');
+      $tStmt->execute([$targetTeam]);
+      $tRow = $tStmt->fetch();
+      $GLOBALS['pdfAuth'] = [
+        'team_id' => $tRow['id'] ?? 'team_telecom_btp_001',
+        'nom_equipe' => $tRow['nom_equipe'] ?? 'TELECOM BTP Services',
+        'role' => 'chef_equipe',
+      ];
+      return;
+    }
+    if (!preg_match('/^\d{4}$/', $code)) { http_response_code(401); exit; }
+    if ($requestedTeamId !== '') {
+      $stmt = db()->prepare('SELECT a.id, a.nom, a.code, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? AND a.team_id = ? LIMIT 1');
+      $stmt->execute([$code, $requestedTeamId]);
+      $row = $stmt->fetch();
+    }
+    if (!$row) {
+      $stmt = db()->prepare('SELECT a.id, a.nom, a.code, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? ORDER BY (a.team_id = "team_telecom_btp_001") DESC LIMIT 1');
+      $stmt->execute([$code]);
+      $row = $stmt->fetch();
+    }
+  }
+
+  if (!$row || (isset($row['actif']) && !(int)$row['actif'])) {
+    http_response_code(401);
+    exit;
+  }
+
+  if ($requestedTeamId !== '' && $requestedTeamId !== $row['team_id']) {
+    if ($row['role'] === 'super_admin') {
+      $tStmt = db()->prepare('SELECT id, nom_equipe FROM teams WHERE id = ? LIMIT 1');
+      $tStmt->execute([$requestedTeamId]);
+      $tRow = $tStmt->fetch();
+      if ($tRow) {
+        $row['team_id'] = $tRow['id'];
+        $row['nom_equipe'] = $tRow['nom_equipe'];
+      }
+    } else {
+      http_response_code(403);
+      exit;
+    }
+  }
+
+  $GLOBALS['pdfAuth'] = [
+    'team_id' => $row['team_id'] ?: 'team_telecom_btp_001',
+    'nom_equipe' => $row['nom_equipe'] ?: 'TELECOM BTP Services',
+    'role' => $row['role'] ?: 'technicien',
+  ];
 }
 
 function compressJpeg($imgData, $maxW, $maxH, $quality = 75) {
@@ -76,8 +146,9 @@ function mmToPxAtDpi($mm, $dpi) {
 }
 
 function getIntervention($id) {
-  $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ?');
-  $stmt->execute([$id]);
+  $auth = getPdfAuth();
+  $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ? AND team_id = ?');
+  $stmt->execute([$id, $auth['team_id']]);
   $r = $stmt->fetch();
   if (!$r) return null;
   $r['materiel_pose'] = json_decode($r['materiel_pose'] ?? '{}', true);
@@ -488,6 +559,8 @@ function generateFichesPDF($d) {
 }
 
 function generateRapportPDF($d) {
+  $auth = getPdfAuth();
+  $teamName = $auth['nom_equipe'] ?? 'TELECOM BTP Services';
   $pdf = new ChaptechPDF();
   $pdf->SetAutoPageBreak(true, 20);
   $margin = 15;
@@ -502,7 +575,7 @@ function generateRapportPDF($d) {
   if (file_exists($logoPath)) {
     $pdf->Image($logoPath, $margin, $y, 25);
   }
-  $pdf->drawText($margin + 30, $y + 4, 'Rapport d\'intervention - TELECOM BTP Services', 12, 'Helvetica-Bold', '', [13, 25, 90]);
+  $pdf->drawText($margin + 30, $y + 4, 'Rapport d\'intervention - ' . $teamName, 12, 'Helvetica-Bold', '', [13, 25, 90]);
   $y += 12;
   $pdf->drawLine($margin, $y, $margin + $contentW, $y);
   $y += 6;
@@ -653,6 +726,9 @@ function generateRapportPDF($d) {
 // ===== Stock PDF =====
 
 function generateStockPDF() {
+  $auth = getPdfAuth();
+  $teamId = $auth['team_id'];
+  $teamName = $auth['nom_equipe'] ?? 'CHAPTECH';
   $labels = [
     'ont' => 'ONT', 'pto' => 'PTO', 'jarretiere' => 'Jarretière',
     'piton' => 'Piton', 'cheville' => 'Cheville', 'connecteur' => 'Connecteur',
@@ -665,7 +741,8 @@ function generateStockPDF() {
     'traverse_13t' => 'Traverse 13T', 'traverse_15t' => 'Traverse 15T'
   ];
 
-  $stmt = db()->query('SELECT designation, quantite FROM stock ORDER BY designation');
+  $stmt = db()->prepare('SELECT designation, quantite FROM stock WHERE team_id = ? ORDER BY designation');
+  $stmt->execute([$teamId]);
   $items = $stmt->fetchAll();
 
   $pdf = new ChaptechPDF();
@@ -681,7 +758,7 @@ function generateStockPDF() {
   if (file_exists($logoPath)) {
     $pdf->Image($logoPath, $margin, $y, 25);
   }
-  $pdf->drawText($margin + 30, $y + 4, 'Inventaire de Stock - CHAPTECH', 14, 'Helvetica-Bold', '', [13, 25, 90]);
+  $pdf->drawText($margin + 30, $y + 4, 'Inventaire de Stock - ' . $teamName, 14, 'Helvetica-Bold', '', [13, 25, 90]);
   $y += 14;
   $pdf->drawLine($margin, $y, $margin + $contentW, $y);
   $y += 6;
@@ -724,10 +801,11 @@ function generateStockPDF() {
   // Mouvements récents
   $stmt = db()->prepare('SELECT sm.*, i.nom_client as int_nom_client
     FROM stock_movements sm
-    LEFT JOIN interventions i ON sm.intervention_id COLLATE utf8mb4_unicode_ci = i.id COLLATE utf8mb4_unicode_ci
+    LEFT JOIN interventions i ON sm.intervention_id = i.id AND i.team_id = sm.team_id
+    WHERE sm.team_id = ?
     ORDER BY sm.date_mouvement DESC
     LIMIT 30');
-  $stmt->execute();
+  $stmt->execute([$teamId]);
   $movements = $stmt->fetchAll();
 
   if (!empty($movements)) {
@@ -762,8 +840,10 @@ function generateStockPDF() {
 }
 
 function generateStockUsagePDF($interventionId) {
-  $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ?');
-  $stmt->execute([$interventionId]);
+  $auth = getPdfAuth();
+  $teamId = $auth['team_id'];
+  $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ? AND team_id = ?');
+  $stmt->execute([$interventionId, $teamId]);
   $d = $stmt->fetch();
   if (!$d) return null;
 
@@ -771,9 +851,9 @@ function generateStockUsagePDF($interventionId) {
 
   $stmt = db()->prepare('SELECT designation, type, quantite, date_mouvement, motif
     FROM stock_movements
-    WHERE intervention_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+    WHERE intervention_id = ? AND team_id = ?
     ORDER BY designation');
-  $stmt->execute([$interventionId]);
+  $stmt->execute([$interventionId, $teamId]);
   $movements = $stmt->fetchAll();
 
   $labels = [
@@ -850,7 +930,8 @@ function generateStockUsagePDF($interventionId) {
   $y += 10;
 
   // Stock restant
-  $stmt = db()->query('SELECT designation, quantite FROM stock ORDER BY designation');
+  $stmt = db()->prepare('SELECT designation, quantite FROM stock WHERE team_id = ? ORDER BY designation');
+  $stmt->execute([$teamId]);
   $stockItems = $stmt->fetchAll();
   $stockMap = [];
   foreach ($stockItems as $s) { $stockMap[$s['designation']] = (int)$s['quantite']; }
@@ -890,15 +971,17 @@ function generateStockUsagePDF($interventionId) {
  * Colonnes : N° | Date | Nom client | N° de ligne.
  */
 function generateListeMois($moisDebut, $moisFin = null) {
+  $auth = getPdfAuth();
+  $teamId = $auth['team_id'];
   if (!preg_match('/^\d{4}-\d{2}$/', $moisDebut) || strtotime($moisDebut . '-01') === false) return null;
   if ($moisFin === null || $moisFin === '') $moisFin = $moisDebut;
   if (!preg_match('/^\d{4}-\d{2}$/', $moisFin) || strtotime($moisFin . '-01') === false) return null;
   if ($moisFin < $moisDebut) { $t = $moisDebut; $moisDebut = $moisFin; $moisFin = $t; }
   $stmt = db()->prepare("SELECT date, nom_client, telephone_ligne, nom_technicien
     FROM interventions
-    WHERE date >= ? AND date < ?
+    WHERE team_id = ? AND date >= ? AND date < ?
     ORDER BY date ASC, nom_client ASC");
-  $stmt->execute([$moisDebut . '-01', date('Y-m-d', strtotime('first day of next month', strtotime($moisFin . '-01')))]);
+  $stmt->execute([$teamId, $moisDebut . '-01', date('Y-m-d', strtotime('first day of next month', strtotime($moisFin . '-01')))]);
   return $stmt->fetchAll();
 }
 
@@ -949,16 +1032,20 @@ function generateMoisPDF($moisDebut, $moisFin = null) {
 }
 
 function generatePointMaterielsPDF(string $debut, string $fin): ChaptechPDF {
+  $auth = getPdfAuth();
+  $teamId = $auth['team_id'];
+  $teamName = $auth['nom_equipe'] ?? 'TELECOM BTP Services';
   $finExclusive = date('Y-m-d', strtotime('+1 day', strtotime($fin)));
   
   $stmt = db()->prepare("SELECT id, date, nom_client, telephone_ligne, adresse_zone, nom_technicien,
       materiel_pose, lineaire_m, arrivee_m, depart_m, type_cable
     FROM interventions
-    WHERE date >= ? AND date < ? 
+    WHERE team_id = ?
+      AND date >= ? AND date < ? 
       AND statut = 'termine' 
       AND (motif_non_traite IS NULL OR motif_non_traite = '')
     ORDER BY date ASC");
-  $stmt->execute([$debut . ' 00:00:00', $finExclusive . ' 00:00:00']);
+  $stmt->execute([$teamId, $debut . ' 00:00:00', $finExclusive . ' 00:00:00']);
   $interventions = $stmt->fetchAll();
 
   $matKeys = [
@@ -1039,7 +1126,7 @@ function generatePointMaterielsPDF(string $debut, string $fin): ChaptechPDF {
   $pdf->SetTextColor(255, 255, 255);
   $pdf->SetFont('Helvetica', 'B', 13);
   $pdf->SetXY(10, 13);
-  $pdf->Cell(190, 6, pdfT('POINT DES MATERIELS — GS BTP FIBRE'), 0, 1, 'C');
+  $pdf->Cell(190, 6, pdfT('POINT DES MATERIELS — ' . strtoupper($teamName)), 0, 1, 'C');
   $pdf->SetFont('Helvetica', '', 10);
   $pdf->Cell(190, 5, pdfT('Periode du ' . date('d/m/Y', strtotime($debut)) . ' au ' . date('d/m/Y', strtotime($fin))), 0, 1, 'C');
 
@@ -1049,7 +1136,7 @@ function generatePointMaterielsPDF(string $debut, string $fin): ChaptechPDF {
   // Cadre infos
   $pdf->SetFont('Helvetica', 'B', 9.5);
   $pdf->SetFillColor(240, 244, 250);
-  $pdf->Cell(95, 7, pdfT(' Equipe : BTP Telecom Services'), 1, 0, 'L', true);
+  $pdf->Cell(95, 7, pdfT(' Equipe : ' . $teamName), 1, 0, 'L', true);
   $pdf->Cell(95, 7, pdfT(' Interventions terminees : ' . count($interventions)), 1, 1, 'L', true);
   $pdf->Ln(3);
 

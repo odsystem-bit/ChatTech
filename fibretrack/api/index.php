@@ -436,38 +436,44 @@ function sanitizeAndValidatePhotos(array $photos, ?PDO $pdo = null): array {
   return $clean;
 }
 
-function lockStockQuantity(PDO $pdo, string $designation): int {
+function lockStockQuantity(PDO $pdo, string $designation, string $teamId = 'team_telecom_btp_001'): int {
   $canonical = canonicalDesignation($designation);
-  $ensure = $pdo->prepare('INSERT INTO stock (designation, quantite) VALUES (?, 0) ON DUPLICATE KEY UPDATE designation = VALUES(designation)');
-  $ensure->execute([$canonical]);
-  $stmt = $pdo->prepare('SELECT quantite FROM stock WHERE designation = ? FOR UPDATE');
-  $stmt->execute([$canonical]);
+  $ensure = $pdo->prepare('INSERT INTO stock (team_id, designation, quantite) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE designation = VALUES(designation)');
+  $ensure->execute([$teamId, $canonical]);
+  $stmt = $pdo->prepare('SELECT quantite FROM stock WHERE team_id = ? AND designation = ? FOR UPDATE');
+  $stmt->execute([$teamId, $canonical]);
   return (int)$stmt->fetchColumn();
 }
 
-function changeStockQuantity(PDO $pdo, string $designation, int $delta, array $details = [], bool $allowNegative = false): int {
+function changeStockQuantity(PDO $pdo, string $designation, int $delta, array $details = [], bool $allowNegative = false, string $teamId = 'team_telecom_btp_001'): int {
+  if (!empty($details['team_id'])) {
+    $teamId = (string)$details['team_id'];
+  }
   $designation = canonicalDesignation($designation);
   if ($designation === '') throw new Exception('Désignation requise');
-  $current = lockStockQuantity($pdo, $designation);
+  $current = lockStockQuantity($pdo, $designation, $teamId);
   $next = $current + $delta;
   if (!$allowNegative && $next < 0) {
     throw new Exception("Stock insuffisant pour $designation (actuel: $current, demandé: " . abs($delta) . ")");
   }
-  $stmt = $pdo->prepare('UPDATE stock SET quantite = ? WHERE designation = ?');
-  $stmt->execute([$next, $designation]);
+  $stmt = $pdo->prepare('UPDATE stock SET quantite = ? WHERE team_id = ? AND designation = ?');
+  $stmt->execute([$next, $teamId, $designation]);
   if ($delta !== 0) {
     $type = $delta > 0 ? 'entree' : 'sortie';
-    $stmt = $pdo->prepare('INSERT INTO stock_movements (designation, type, quantite, intervention_id, nom_client, nom_technicien, motif) VALUES (?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$designation, $type, abs($delta), $details['intervention_id'] ?? null, $details['nom_client'] ?? null, $details['nom_technicien'] ?? null, $details['motif'] ?? null]);
+    $stmt = $pdo->prepare('INSERT INTO stock_movements (team_id, designation, type, quantite, intervention_id, nom_client, nom_technicien, motif) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$teamId, $designation, $type, abs($delta), $details['intervention_id'] ?? null, $details['nom_client'] ?? null, $details['nom_technicien'] ?? null, $details['motif'] ?? null]);
   }
   return $next;
 }
 
-function setStockQuantity(PDO $pdo, string $designation, int $quantity, array $details = []): int {
+function setStockQuantity(PDO $pdo, string $designation, int $quantity, array $details = [], string $teamId = 'team_telecom_btp_001'): int {
+  if (!empty($details['team_id'])) {
+    $teamId = (string)$details['team_id'];
+  }
   if ($quantity < 0) throw new Exception('La quantité ne peut pas être négative');
   $canon = canonicalDesignation($designation);
-  $current = lockStockQuantity($pdo, $canon);
-  return changeStockQuantity($pdo, $canon, $quantity - $current, $details, false);
+  $current = lockStockQuantity($pdo, $canon, $teamId);
+  return changeStockQuantity($pdo, $canon, $quantity - $current, $details, false, $teamId);
 }
 
 function db() {
@@ -540,7 +546,7 @@ function normalizeMaterielPose(&$mp) {
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, X-User-Code, x-user-code, Authorization');
+header('Access-Control-Allow-Headers: Content-Type, X-User-Code, x-user-code, X-Team-Id, x-team-id, Authorization, authorization');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
   http_response_code(204);
@@ -633,18 +639,62 @@ function authenticatedUser() {
   static $checked = false;
   if ($checked) return $user;
   $checked = true;
+
   $headerCode = '';
+  $headerTeamId = '';
+  $headerAuth = '';
   if (function_exists('apache_request_headers')) {
     $headers = apache_request_headers();
     foreach ($headers as $k => $v) {
       if (strcasecmp($k, 'X-User-Code') === 0) {
-        $headerCode = trim($v);
-        break;
+        $headerCode = trim((string)$v);
+      } elseif (strcasecmp($k, 'X-Team-Id') === 0) {
+        $headerTeamId = trim((string)$v);
+      } elseif (strcasecmp($k, 'Authorization') === 0) {
+        $headerAuth = trim((string)$v);
       }
     }
   }
+
   global $input;
-  $candidates = [
+  $authCandidates = [
+    $_SERVER['HTTP_AUTHORIZATION'] ?? null,
+    $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null,
+    $headerAuth,
+    $_GET['token'] ?? null,
+    $_POST['token'] ?? null,
+    $input['token'] ?? null,
+  ];
+  $bearerToken = '';
+  foreach ($authCandidates as $ac) {
+    if ($ac !== null && trim((string)$ac) !== '') {
+      $rawAuth = trim((string)$ac);
+      if (stripos($rawAuth, 'Bearer ') === 0) {
+        $bearerToken = trim(substr($rawAuth, 7));
+      } else {
+        $bearerToken = $rawAuth;
+      }
+      if ($bearerToken !== '') break;
+    }
+  }
+
+  $teamCandidates = [
+    $_SERVER['HTTP_X_TEAM_ID'] ?? null,
+    $_SERVER['REDIRECT_HTTP_X_TEAM_ID'] ?? null,
+    $headerTeamId,
+    $_GET['team_id'] ?? null,
+    $_POST['team_id'] ?? null,
+    $input['team_id'] ?? null,
+  ];
+  $requestedTeamId = '';
+  foreach ($teamCandidates as $tc) {
+    if ($tc !== null && trim((string)$tc) !== '') {
+      $requestedTeamId = trim((string)$tc);
+      break;
+    }
+  }
+
+  $codeCandidates = [
     $_SERVER['HTTP_X_USER_CODE'] ?? null,
     $_SERVER['REDIRECT_HTTP_X_USER_CODE'] ?? null,
     $headerCode,
@@ -656,7 +706,7 @@ function authenticatedUser() {
     $input['code'] ?? null,
   ];
   $code = '';
-  foreach ($candidates as $c) {
+  foreach ($codeCandidates as $c) {
     if ($c !== null) {
       $val = trim((string)$c);
       if ($val !== '') {
@@ -665,26 +715,114 @@ function authenticatedUser() {
       }
     }
   }
-  if ($code === '9999') return $user = ['id' => 'admin', 'nom' => 'ADMIN', 'is_admin' => true];
-  if ($code === '' || !preg_match('/^\d{4}$/', $code)) return null;
-  $stmt = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
-  $stmt->execute([$code]);
-  $row = $stmt->fetch();
-  return $user = $row ? ['id' => $row['id'], 'nom' => $row['nom'], 'is_admin' => false] : null;
+
+  $pdo = db();
+  $row = null;
+
+  if ($bearerToken !== '') {
+    $stmt = $pdo->prepare('SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.role, a.api_token, a.actif, t.nom_equipe, t.chef_nom FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.api_token = ? AND a.actif = 1 LIMIT 1');
+    $stmt->execute([$bearerToken]);
+    $row = $stmt->fetch() ?: null;
+  }
+
+  if (!$row && $code !== '') {
+    if ($requestedTeamId !== '') {
+      $stmt = $pdo->prepare('SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.role, a.api_token, a.actif, t.nom_equipe, t.chef_nom FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? AND a.team_id = ? AND a.actif = 1 LIMIT 1');
+      $stmt->execute([$code, $requestedTeamId]);
+      $row = $stmt->fetch() ?: null;
+      if (!$row) {
+        // Vérifier si ce code appartient à une autre équipe (tentative d'accès inter-équipe)
+        $chkOther = $pdo->prepare('SELECT team_id, role FROM accounts WHERE code = ? AND actif = 1 LIMIT 1');
+        $chkOther->execute([$code]);
+        $otherRow = $chkOther->fetch();
+        if ($otherRow && $otherRow['role'] === 'super_admin') {
+          $stmtSa = $pdo->prepare('SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.role, a.api_token, a.actif, t.nom_equipe, t.chef_nom FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? AND a.actif = 1 LIMIT 1');
+          $stmtSa->execute([$code]);
+          $row = $stmtSa->fetch() ?: null;
+        } elseif ($otherRow && $otherRow['team_id'] !== $requestedTeamId) {
+          return $user = ['__forbidden_team' => true, 'error' => 'Accès refusé : ce compte n\'appartient pas à l\'équipe demandée.'];
+        }
+      }
+    } else {
+      $stmt = $pdo->prepare("SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.role, a.api_token, a.actif, t.nom_equipe, t.chef_nom FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? AND a.actif = 1 ORDER BY (a.team_id = 'team_telecom_btp_001') DESC LIMIT 1");
+      $stmt->execute([$code]);
+      $row = $stmt->fetch() ?: null;
+    }
+
+    if (!$row && $code === '9999' && ($requestedTeamId === '' || $requestedTeamId === 'team_telecom_btp_001')) {
+      return $user = [
+        'id' => 'admin_telecom_btp_001',
+        'team_id' => 'team_telecom_btp_001',
+        'nom' => 'ADMIN TELECOM BTP',
+        'identifiant' => 'admin',
+        'code' => '9999',
+        'role' => 'chef_equipe',
+        'nom_equipe' => 'TELECOM BTP Services',
+        'is_admin' => true,
+        'is_super_admin' => false,
+      ];
+    }
+  }
+
+  if (!$row) return null;
+
+  $role = (string)($row['role'] ?? 'technicien');
+  $isSuperAdmin = ($role === 'super_admin');
+  $accountTeamId = (string)($row['team_id'] ?: 'team_telecom_btp_001');
+
+  // Isolation stricte : un utilisateur non super_admin ne peut JAMAIS agir sur un autre team_id
+  if (!$isSuperAdmin && $requestedTeamId !== '' && $requestedTeamId !== $accountTeamId) {
+    return $user = ['__forbidden_team' => true, 'error' => 'Accès refusé : isolation multi-équipes (team_id non autorisé).'];
+  }
+
+  $effectiveTeamId = ($isSuperAdmin && $requestedTeamId !== '') ? $requestedTeamId : $accountTeamId;
+  $effectiveTeamName = (string)($row['nom_equipe'] ?: 'TELECOM BTP Services');
+  if ($isSuperAdmin && $effectiveTeamId !== $accountTeamId) {
+    $tStmt = $pdo->prepare('SELECT nom_equipe FROM teams WHERE id = ? LIMIT 1');
+    $tStmt->execute([$effectiveTeamId]);
+    $tName = $tStmt->fetchColumn();
+    if ($tName) $effectiveTeamName = (string)$tName;
+  }
+
+  $isAdmin = in_array($role, ['chef_equipe', 'admin', 'super_admin'], true) || ((string)($row['code'] ?? '') === '9999');
+
+  return $user = [
+    'id' => (string)$row['id'],
+    'team_id' => $effectiveTeamId,
+    'nom' => (string)$row['nom'],
+    'identifiant' => (string)($row['identifiant'] ?? ''),
+    'telephone' => (string)($row['telephone'] ?? ''),
+    'code' => (string)($row['code'] ?? ''),
+    'role' => $role,
+    'token' => (string)($row['api_token'] ?? ''),
+    'nom_equipe' => $effectiveTeamName,
+    'is_admin' => $isAdmin,
+    'is_super_admin' => $isSuperAdmin,
+  ];
 }
 
 function requireAuth($adminOnly = false) {
   $user = authenticatedUser();
-  if (!$user || ($adminOnly && !$user['is_admin'])) {
+  if (is_array($user) && !empty($user['__forbidden_team'])) {
+    http_response_code(403);
+    echo json_encode(['error' => $user['error'] ?? 'Accès inter-équipes interdit']);
+    exit;
+  }
+  if (!$user) {
     http_response_code(401);
-    echo json_encode(['error' => $adminOnly ? 'Droits administrateur requis' : 'Authentification requise']);
+    echo json_encode(['error' => 'Authentification requise']);
+    exit;
+  }
+  if ($adminOnly && !$user['is_admin']) {
+    http_response_code(403);
+    echo json_encode(['error' => 'Droits chef d\'équipe requis']);
     exit;
   }
   return $user;
 }
 
-$publicActions = ['account_validate', 'app_version', 'client_gps_get', 'client_gps_submit'];
-$adminActions = ['accounts_list', 'account_add', 'account_delete', 'stock_save', 'stock_import', 'stock_import_excel'];
+$publicActions = ['account_validate', 'auth_login', 'team_register', 'app_version', 'client_gps_get', 'client_gps_submit'];
+$adminActions = ['account_add', 'account_update', 'account_delete', 'team_update', 'stock_save', 'stock_import', 'stock_import_excel'];
 if (!in_array($action, $publicActions, true)) {
   requireAuth(in_array($action, $adminActions, true));
 }
@@ -692,12 +830,22 @@ if (!in_array($action, $publicActions, true)) {
 try {
   if ($action === 'media_upload') {
     $user = requireAuth();
+    $teamId = $user['team_id'];
     $interventionId = trim($_POST['intervention_id'] ?? '');
     $interventionId = preg_replace('/[^a-zA-Z0-9_-]/', '', $interventionId);
     $type = $_POST['type'] ?? '';
     if (!$interventionId || !in_array($type, ['photo', 'video', 'fiche'], true) || empty($_FILES['file']['tmp_name'])) {
       http_response_code(400);
       echo json_encode(['error' => 'Intervention, type et fichier requis']);
+      return;
+    }
+    // Vérifier qu'on n'écrit pas sur l'intervention d'une autre équipe
+    $chkTeam = db()->prepare('SELECT team_id FROM interventions WHERE id = ? LIMIT 1');
+    $chkTeam->execute([$interventionId]);
+    $existingIntvTeam = $chkTeam->fetchColumn();
+    if ($existingIntvTeam && $existingIntvTeam !== $teamId && empty($user['is_super_admin'])) {
+      http_response_code(403);
+      echo json_encode(['error' => 'Accès refusé : cette intervention appartient à une autre équipe']);
       return;
     }
     // Ne pas exiger que la fiche existe déjà : sur terrain à réseau
@@ -771,8 +919,8 @@ try {
     }
 
     $capturedAt = !empty($_POST['captured_at']) ? date('Y-m-d H:i:s', strtotime($_POST['captured_at'])) : date('Y-m-d H:i:s');
-    $stmt = db()->prepare('INSERT INTO intervention_media (id, intervention_id, type, file_path, latitude, longitude, precision_m, captured_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-    $stmt->execute([$mediaId, $interventionId, $type, $relativePath, $_POST['latitude'] ?? null, $_POST['longitude'] ?? null, $_POST['precision_m'] ?? null, $capturedAt, $user['nom']]);
+    $stmt = db()->prepare('INSERT INTO intervention_media (id, team_id, intervention_id, type, file_path, latitude, longitude, precision_m, captured_at, added_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([$mediaId, $teamId, $interventionId, $type, $relativePath, $_POST['latitude'] ?? null, $_POST['longitude'] ?? null, $_POST['precision_m'] ?? null, $capturedAt, $user['nom']]);
 
     $fullUrl = 'https://fibretrack.mantota.com/api/' . $relativePath;
     $fileSize = (int)@filesize(__DIR__ . '/' . $relativePath);
@@ -780,8 +928,8 @@ try {
     // Mettre à jour immédiatement la colonne videos_terrain ou whatsapp_photos + points_gps dans interventions pour zéro perte
     if ($type === 'video') {
       try {
-        $vStmt = db()->prepare('SELECT videos_terrain FROM interventions WHERE id = ? FOR UPDATE');
-        $vStmt->execute([$interventionId]);
+        $vStmt = db()->prepare('SELECT videos_terrain FROM interventions WHERE id = ? AND team_id = ? FOR UPDATE');
+        $vStmt->execute([$interventionId, $teamId]);
         $row = $vStmt->fetch();
         if ($row) {
           $currVideos = json_decode($row['videos_terrain'] ?? '[]', true);
@@ -822,16 +970,16 @@ try {
               'status' => 'synced',
             ];
           }
-          $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ?');
-          $upStmt->execute([json_encode($currVideos), $interventionId]);
+          $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, modifie_le = NOW() WHERE id = ? AND team_id = ?');
+          $upStmt->execute([json_encode($currVideos), $interventionId, $teamId]);
         }
       } catch (Exception $e) {
         error_log("media_upload videos_terrain sync error: " . $e->getMessage());
       }
     } else {
       try {
-        $wStmt = db()->prepare('SELECT whatsapp_photos, points_gps FROM interventions WHERE id = ? FOR UPDATE');
-        $wStmt->execute([$interventionId]);
+        $wStmt = db()->prepare('SELECT whatsapp_photos, points_gps FROM interventions WHERE id = ? AND team_id = ? FOR UPDATE');
+        $wStmt->execute([$interventionId, $teamId]);
         $row = $wStmt->fetch();
         if ($row) {
           $currWa = json_decode($row['whatsapp_photos'] ?? '[]', true);
@@ -911,11 +1059,11 @@ try {
           unset($gpt);
 
           if ($gpsChanged) {
-            $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, points_gps = ?, modifie_le = NOW() WHERE id = ?');
-            $upStmt->execute([json_encode($currWa), json_encode($currGps), $interventionId]);
+            $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, points_gps = ?, modifie_le = NOW() WHERE id = ? AND team_id = ?');
+            $upStmt->execute([json_encode($currWa), json_encode($currGps), $interventionId, $teamId]);
           } else {
-            $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, modifie_le = NOW() WHERE id = ?');
-            $upStmt->execute([json_encode($currWa), $interventionId]);
+            $upStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, modifie_le = NOW() WHERE id = ? AND team_id = ?');
+            $upStmt->execute([json_encode($currWa), $interventionId, $teamId]);
           }
         }
       } catch (Exception $e) {
@@ -948,14 +1096,16 @@ try {
     return;
   }
   if ($action === 'media_list') {
+    $user = requireAuth();
+    $teamId = $user['team_id'];
     $interventionId = trim((string)($_GET['intervention_id'] ?? ''));
     if ($interventionId === '') {
       http_response_code(400);
       echo json_encode(['error' => 'Intervention requise']);
       return;
     }
-    $stmt = db()->prepare('SELECT id, intervention_id, type, file_path, latitude, longitude, precision_m, captured_at, added_by, created_at FROM intervention_media WHERE intervention_id = ? ORDER BY created_at DESC');
-    $stmt->execute([$interventionId]);
+    $stmt = db()->prepare('SELECT id, team_id, intervention_id, type, file_path, latitude, longitude, precision_m, captured_at, added_by, created_at FROM intervention_media WHERE intervention_id = ? AND team_id = ? ORDER BY created_at DESC');
+    $stmt->execute([$interventionId, $teamId]);
     $media = $stmt->fetchAll();
     foreach ($media as &$item) {
       $item['url'] = 'https://fibretrack.mantota.com/api/' . ltrim($item['file_path'], '/');
@@ -965,6 +1115,8 @@ try {
     return;
   }
   if ($action === 'photo_get' || $action === 'media_get') {
+    $user = requireAuth();
+    $teamId = $user['team_id'];
     $rawPath = trim((string)($_GET['path'] ?? ''));
     if (preg_match('#^https?://#i', $rawPath)) {
       $parsedPath = parse_url($rawPath, PHP_URL_PATH);
@@ -979,6 +1131,18 @@ try {
       http_response_code(400);
       echo json_encode(['error' => 'Chemin média invalide']);
       return;
+    }
+    // Vérification d'isolation par équipe sur le dossier de l'intervention
+    if (empty($user['is_super_admin']) && preg_match('#^uploads/(?:photos|interventions)/([^/]+)/#', $rawPath, $pm)) {
+      $pathIntvId = $pm[1];
+      $chkIntv = db()->prepare('SELECT team_id FROM interventions WHERE id = ? LIMIT 1');
+      $chkIntv->execute([$pathIntvId]);
+      $ownerTeam = $chkIntv->fetchColumn();
+      if ($ownerTeam && $ownerTeam !== $teamId) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Accès refusé : média appartenant à une autre équipe']);
+        return;
+      }
     }
     $uploadsRoot = realpath(__DIR__ . '/uploads');
     $absPath = realpath(__DIR__ . '/' . $rawPath);
@@ -1026,21 +1190,22 @@ try {
   }
   if ($action === 'media_delete') {
     $user = requireAuth();
+    $teamId = $user['team_id'];
     $mediaId = trim((string)($input['id'] ?? ''));
     if ($mediaId === '') {
       http_response_code(400);
       echo json_encode(['error' => 'Média requis']);
       return;
     }
-    $stmt = db()->prepare('SELECT file_path, added_by, intervention_id FROM intervention_media WHERE id = ?');
-    $stmt->execute([$mediaId]);
+    $stmt = db()->prepare('SELECT file_path, added_by, intervention_id, team_id FROM intervention_media WHERE id = ? AND team_id = ?');
+    $stmt->execute([$mediaId, $teamId]);
     $media = $stmt->fetch();
     if (!$media) {
       http_response_code(404);
       echo json_encode(['error' => 'Média introuvable']);
       return;
     }
-    // Autoriser tout technicien ou administrateur authentifié à supprimer le média
+    // Autoriser tout technicien ou administrateur authentifié de l'équipe à supprimer le média
     $relativePath = ltrim((string)$media['file_path'], '/');
     if (strpos($relativePath, 'uploads/interventions/') !== 0 || strpos($relativePath, '..') !== false) {
       http_response_code(400);
@@ -1055,15 +1220,15 @@ try {
     }
     $thumbPath = preg_replace('/\.\w+$/', '_thumb.jpg', $absolutePath);
     if (is_file($thumbPath)) @unlink($thumbPath);
-    $delete = db()->prepare('DELETE FROM intervention_media WHERE id = ?');
-    $delete->execute([$mediaId]);
+    $delete = db()->prepare('DELETE FROM intervention_media WHERE id = ? AND team_id = ?');
+    $delete->execute([$mediaId, $teamId]);
 
     // Nettoyer également des colonnes videos_terrain et whatsapp_photos de l'intervention
     $intvId = $media['intervention_id'] ?? '';
     if ($intvId) {
       try {
-        $vStmt = db()->prepare('SELECT videos_terrain, whatsapp_photos FROM interventions WHERE id = ? FOR UPDATE');
-        $vStmt->execute([$intvId]);
+        $vStmt = db()->prepare('SELECT videos_terrain, whatsapp_photos FROM interventions WHERE id = ? AND team_id = ? FOR UPDATE');
+        $vStmt->execute([$intvId, $teamId]);
         $row = $vStmt->fetch();
         if ($row) {
           $currVideos = json_decode($row['videos_terrain'] ?? '[]', true);
@@ -1074,8 +1239,8 @@ try {
           if (!is_array($currWa)) $currWa = [];
           $filteredWa = array_values(array_filter($currWa, fn($p) => empty($p['id']) || (string)$p['id'] !== (string)$mediaId));
 
-          $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, whatsapp_photos = ?, modifie_le = NOW() WHERE id = ?');
-          $upStmt->execute([json_encode($filteredVideos), json_encode($filteredWa), $intvId]);
+          $upStmt = db()->prepare('UPDATE interventions SET videos_terrain = ?, whatsapp_photos = ?, modifie_le = NOW() WHERE id = ? AND team_id = ?');
+          $upStmt->execute([json_encode($filteredVideos), json_encode($filteredWa), $intvId, $teamId]);
         }
       } catch (Exception $e) {
         error_log("media_delete sync error: " . $e->getMessage());
@@ -1223,12 +1388,15 @@ try {
       break;
 
     case 'deleted_interventions_list':
-      $stmt = db()->query('SELECT id FROM deleted_interventions WHERE deleted_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)');
+      $user = requireAuth();
+      $stmt = db()->prepare('SELECT id FROM deleted_interventions WHERE team_id = ? AND deleted_at >= DATE_SUB(NOW(), INTERVAL 60 DAY)');
+      $stmt->execute([$user['team_id']]);
       echo json_encode($stmt->fetchAll(PDO::FETCH_COLUMN));
       break;
 
     case 'interventions_list_light':
-      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe,
+      $user = requireAuth();
+      $stmt = db()->prepare('SELECT id, team_id, date, statut, nom_technicien, nom_equipe,
         COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
         COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
         adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
@@ -1238,7 +1406,8 @@ try {
         ont_sn, pto_qte, repeteur_wifi_qte, offre_souscrite, videos_terrain,
         latitude, longitude, client_gps_recu, client_repere, points_gps,
         tournee_du_jour, tournee_ordre, tournee_verrouille, motif_non_traite,
-        modifie_par, modifie_le, modifie_le AS updated_at FROM interventions ORDER BY date DESC');
+        modifie_par, modifie_le, modifie_le AS updated_at FROM interventions WHERE team_id = ? ORDER BY date DESC');
+      $stmt->execute([$user['team_id']]);
       $lightRows = $stmt->fetchAll();
       foreach ($lightRows as &$lr) {
         $gps = json_decode($lr['points_gps'] ?? '[]', true) ?? [];
@@ -1264,11 +1433,12 @@ try {
       break;
 
     case 'interventions_list':
+      $user = requireAuth();
       // signature_client/signature_technicien exclus : LONGTEXT lourds, inutiles
       // dans une liste. Meme traitement light que intervention_get_light pour
       // les photos (base64 dans points_gps/whatsapp_photos = plusieurs Mo par
       // intervention, la liste pesait >100 Mo et ne chargeait plus sur mobile).
-      $stmt = db()->query('SELECT id, date, statut, nom_technicien, nom_equipe,
+      $stmt = db()->prepare('SELECT id, team_id, date, statut, nom_technicien, nom_equipe,
         COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
         COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
         adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
@@ -1282,7 +1452,8 @@ try {
         nom_client_declaration, remarque_libre, whatsapp_photos, videos_terrain,
         tournee_du_jour, tournee_ordre, tournee_verrouille, motif_non_traite,
         modifie_par, modifie_le, modifie_le AS updated_at
-        FROM interventions ORDER BY date DESC');
+        FROM interventions WHERE team_id = ? ORDER BY date DESC');
+      $stmt->execute([$user['team_id']]);
       $rows = $stmt->fetchAll();
       foreach ($rows as &$r) {
         $r['materiel_pose'] = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
@@ -1307,10 +1478,12 @@ try {
       break;
 
     case 'intervention_get_light':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       // signature_client/signature_technicien exclues de la requete : elles sont
       // de toute facon ecrasees par '' ci-dessous, inutile de les transferer depuis
       // MySQL (LONGTEXT, potentiellement plusieurs dizaines de Ko chacune).
-      $stmt = db()->prepare('SELECT id, date, statut, nom_technicien, nom_equipe,
+      $stmt = db()->prepare('SELECT id, team_id, date, statut, nom_technicien, nom_equipe,
         COALESCE(NULLIF(nom_client, \'\'), nom_dossier, \'\') AS nom_client,
         COALESCE(NULLIF(nom_dossier, \'\'), nom_client, \'\') AS nom_dossier,
         adresse_zone, telephone_ligne, mobile, etat, msan, fat_ref, port,
@@ -1324,9 +1497,9 @@ try {
         nom_client_declaration, remarque_libre, whatsapp_photos, videos_terrain,
         tournee_du_jour, tournee_ordre, tournee_verrouille, motif_non_traite,
         modifie_par, modifie_le, modifie_le AS updated_at
-        FROM interventions WHERE id = ?');
+        FROM interventions WHERE id = ? AND team_id = ?');
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
-      $stmt->execute([$id]);
+      $stmt->execute([$id, $teamId]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $mp = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
@@ -1345,8 +1518,8 @@ try {
       normalizeInterventionTypes($r);
       // Réconcilier videos_terrain et whatsapp_photos avec intervention_media
       try {
-        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? ORDER BY captured_at ASC");
-        $mStmt->execute([$id]);
+        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND team_id = ? ORDER BY captured_at ASC");
+        $mStmt->execute([$id, $teamId]);
         $medias = $mStmt->fetchAll();
         $currVids = is_array($r['videos_terrain']) ? array_values(array_filter($r['videos_terrain'], fn($v) => empty($v['url']) || !str_starts_with((string)$v['url'], 'blob:'))) : [];
         $vidIds = array_map('strval', array_filter(array_column($currVids, 'id')));
@@ -1382,16 +1555,18 @@ try {
       break;
 
     case 'intervention_updated_at':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       header('Cache-Control: no-cache, no-store, must-revalidate');
       header('Pragma: no-cache');
       header('Expires: 0');
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
-      $stmt = db()->prepare('SELECT modifie_le AS updated_at, CHAR_LENGTH(COALESCE(whatsapp_photos, "")) as wa_len, CHAR_LENGTH(COALESCE(videos_terrain, "")) as vid_len, CHAR_LENGTH(COALESCE(points_gps, "")) as gps_len FROM interventions WHERE id = ?');
-      $stmt->execute([$id]);
+      $stmt = db()->prepare('SELECT modifie_le AS updated_at, CHAR_LENGTH(COALESCE(whatsapp_photos, "")) as wa_len, CHAR_LENGTH(COALESCE(videos_terrain, "")) as vid_len, CHAR_LENGTH(COALESCE(points_gps, "")) as gps_len FROM interventions WHERE id = ? AND team_id = ?');
+      $stmt->execute([$id, $teamId]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
-      $mStmt = db()->prepare('SELECT COUNT(*) as media_cnt, MAX(created_at) as media_max FROM intervention_media WHERE intervention_id = ?');
-      $mStmt->execute([$id]);
+      $mStmt = db()->prepare('SELECT COUNT(*) as media_cnt, MAX(created_at) as media_max FROM intervention_media WHERE intervention_id = ? AND team_id = ?');
+      $mStmt->execute([$id, $teamId]);
       $mRow = $mStmt->fetch();
       $mediaCnt = (int)($mRow['media_cnt'] ?? 0);
       $mediaMax = (string)($mRow['media_max'] ?? '');
@@ -1403,9 +1578,11 @@ try {
       break;
 
     case 'intervention_get_photos':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
-      $stmt = db()->prepare('SELECT points_gps, whatsapp_photos, videos_terrain, signature_client, signature_technicien FROM interventions WHERE id = ?');
-      $stmt->execute([$id]);
+      $stmt = db()->prepare('SELECT points_gps, whatsapp_photos, videos_terrain, signature_client, signature_technicien FROM interventions WHERE id = ? AND team_id = ?');
+      $stmt->execute([$id, $teamId]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $r['points_gps'] = json_decode($r['points_gps'] ?? '[]', true) ?? [];
@@ -1417,8 +1594,8 @@ try {
 
       // Réconciliation avec intervention_media
       try {
-        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? ORDER BY captured_at ASC");
-        $mStmt->execute([$id]);
+        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND team_id = ? ORDER BY captured_at ASC");
+        $mStmt->execute([$id, $teamId]);
         $medias = $mStmt->fetchAll();
         if (!empty($medias)) {
           $vidIds = array_map('strval', array_filter(array_column($r['videos_terrain'], 'id')));
@@ -1462,10 +1639,12 @@ try {
 
     case 'download_photos_zip':
     case 'intervention_photos_zip':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
       if (!$id) { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
-      $stmt = db()->prepare('SELECT id, nom_client, nom_dossier, points_gps, whatsapp_photos FROM interventions WHERE id = ?');
-      $stmt->execute([$id]);
+      $stmt = db()->prepare('SELECT id, nom_client, nom_dossier, points_gps, whatsapp_photos FROM interventions WHERE id = ? AND team_id = ?');
+      $stmt->execute([$id, $teamId]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Intervention non trouvée']); break; }
 
@@ -1566,9 +1745,11 @@ try {
       exit;
 
     case 'intervention_get':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       $id = $input['id'] ?? $_GET['id'] ?? $_POST['id'] ?? null;
-      $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ?');
-      $stmt->execute([$id]);
+      $stmt = db()->prepare('SELECT * FROM interventions WHERE id = ? AND team_id = ?');
+      $stmt->execute([$id, $teamId]);
       $r = $stmt->fetch();
       if (!$r) { http_response_code(404); echo json_encode(['error' => 'Not found']); break; }
       $mp = json_decode($r['materiel_pose'] ?? '{}', true) ?? [];
@@ -1610,8 +1791,8 @@ try {
         if (count($currVids) !== count($r['videos_terrain'] ?? [])) {
           $needsDbCleanup = true;
         }
-        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? ORDER BY captured_at ASC");
-        $mStmt->execute([$id]);
+        $mStmt = db()->prepare("SELECT id, type, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND team_id = ? ORDER BY captured_at ASC");
+        $mStmt->execute([$id, $teamId]);
         $medias = $mStmt->fetchAll();
         if (!empty($medias)) {
           $vidIds = array_map('strval', array_filter(array_column($currVids, 'id')));
@@ -1649,8 +1830,8 @@ try {
         }
         $r['videos_terrain'] = $currVids;
         if ($needsDbCleanup) {
-          $cleanStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, points_gps = ?, videos_terrain = ? WHERE id = ?');
-          $cleanStmt->execute([json_encode($r['whatsapp_photos']), json_encode($r['points_gps']), json_encode($r['videos_terrain']), $id]);
+          $cleanStmt = db()->prepare('UPDATE interventions SET whatsapp_photos = ?, points_gps = ?, videos_terrain = ? WHERE id = ? AND team_id = ?');
+          $cleanStmt->execute([json_encode($r['whatsapp_photos']), json_encode($r['points_gps']), json_encode($r['videos_terrain']), $id, $teamId]);
         }
       } catch (Exception $e) {}
 
@@ -1661,20 +1842,21 @@ try {
         if (count($afterWa) !== count($beforeWa)) {
           $r['whatsapp_photos'] = $afterWa;
           // Persistance sans toucher modifie_le (évite de déclencher une resynchronisation inutile)
-          db()->prepare('UPDATE interventions SET whatsapp_photos = ? WHERE id = ?')->execute([json_encode($afterWa), $id]);
+          db()->prepare('UPDATE interventions SET whatsapp_photos = ? WHERE id = ? AND team_id = ?')->execute([json_encode($afterWa), $id, $teamId]);
         }
       } catch (Exception $e) {}
       echo json_encode($r);
       break;
 
     case 'intervention_delete':
-      requireAuth();
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       $interventionId = trim((string)($input['id'] ?? ''));
       if ($interventionId === '') { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
       $pdo = db();
       $pdo->beginTransaction();
       try {
-        $stmt = $pdo->prepare('SELECT id, nom_client, nom_technicien FROM interventions WHERE id = ? FOR UPDATE');
+        $stmt = $pdo->prepare('SELECT id, team_id, nom_client, nom_technicien FROM interventions WHERE id = ? FOR UPDATE');
         $stmt->execute([$interventionId]);
         $intervention = $stmt->fetch();
         if (!$intervention) {
@@ -1682,34 +1864,41 @@ try {
           echo json_encode(['ok' => true, 'already_deleted' => true, 'stock_restored' => 0]);
           break;
         }
+        if ($intervention['team_id'] !== $teamId && empty($user['is_super_admin'])) {
+          $pdo->rollBack();
+          http_response_code(403);
+          echo json_encode(['error' => 'Accès refusé : cette intervention appartient à une autre équipe']);
+          break;
+        }
 
-        $stmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? GROUP BY designation");
-        $stmt->execute([$interventionId]);
+        $stmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? AND team_id = ? GROUP BY designation");
+        $stmt->execute([$interventionId, $teamId]);
         $outgoing = $stmt->fetchAll();
         $restored = 0;
         foreach ($outgoing as $movement) {
           $quantity = (int)$movement['quantite'];
           if ($quantity <= 0) continue;
           changeStockQuantity($pdo, $movement['designation'], $quantity, [
+            'team_id' => $teamId,
             'intervention_id' => $interventionId,
             'nom_client' => $intervention['nom_client'],
             'nom_technicien' => $intervention['nom_technicien'],
             'motif' => 'Retour - suppression intervention',
-          ]);
+          ], false, $teamId);
           $restored += $quantity;
         }
 
         // Nettoyer les médias associés pour éviter des résidus ou des blocages FK
         try {
-          $delMedia = $pdo->prepare('DELETE FROM intervention_media WHERE intervention_id = ?');
-          $delMedia->execute([$interventionId]);
+          $delMedia = $pdo->prepare('DELETE FROM intervention_media WHERE intervention_id = ? AND team_id = ?');
+          $delMedia->execute([$interventionId, $teamId]);
         } catch (Exception $e) {}
 
-        $stmt = $pdo->prepare('DELETE FROM interventions WHERE id = ?');
-        $stmt->execute([$interventionId]);
+        $stmt = $pdo->prepare('DELETE FROM interventions WHERE id = ? AND team_id = ?');
+        $stmt->execute([$interventionId, $teamId]);
         try {
-          $stmtDelLog = $pdo->prepare('INSERT INTO deleted_interventions (id, deleted_at) VALUES (?, NOW()) ON DUPLICATE KEY UPDATE deleted_at = NOW()');
-          $stmtDelLog->execute([$interventionId]);
+          $stmtDelLog = $pdo->prepare('INSERT INTO deleted_interventions (id, team_id, deleted_at) VALUES (?, ?, NOW()) ON DUPLICATE KEY UPDATE team_id = VALUES(team_id), deleted_at = NOW()');
+          $stmtDelLog->execute([$interventionId, $teamId]);
         } catch (Exception $e) {}
         $pdo->commit();
         echo json_encode(['ok' => true, 'stock_restored' => $restored]);
@@ -1720,7 +1909,13 @@ try {
       break;
 
     case 'intervention_save':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       $d = $input;
+      $d['team_id'] = $teamId;
+      if (empty($d['nom_equipe']) || ($teamId !== 'team_telecom_btp_001' && $d['nom_equipe'] === 'TELECOM BTP Services')) {
+        $d['nom_equipe'] = $user['nom_equipe'] ?: ($d['nom_equipe'] ?? 'Mon Équipe');
+      }
       normalizeInterventionTypes($d);
       $portDisponible = (int)($d['port_disponible'] ?? 0);
       if ($portDisponible < 0 || $portDisponible > 32) {
@@ -1768,7 +1963,7 @@ try {
       }
       $isLight = ($d['_light'] ?? false) === true;
       $fields = [
-        'id', 'date', 'statut', 'nom_technicien', 'nom_equipe',
+        'id', 'team_id', 'date', 'statut', 'nom_technicien', 'nom_equipe',
         'nom_client', 'nom_dossier', 'adresse_zone', 'telephone_ligne', 'mobile',
         'etat', 'msan', 'fat_ref', 'port', 'ports_disponibles', 'port_disponible', 'type_cable',
         'depart_m', 'arrivee_m', 'lineaire_m', 'puissance_fat_dbm', 'puissance_pto_dbm',
@@ -1796,9 +1991,15 @@ try {
       $expectedUpdatedAt = trim((string)($d['expected_updated_at'] ?? ''));
       $changedFields = isset($d['changed_fields']) && is_array($d['changed_fields']) ? array_values($d['changed_fields']) : null;
       if (!empty($d['id'])) {
-        $stmtEx = $pdo->prepare('SELECT points_gps, whatsapp_photos, videos_terrain, signature_client, signature_technicien, materiel_pose, materiel_deduit, statut, nom_client, nom_technicien, modifie_le FROM interventions WHERE id = ? FOR UPDATE');
+        $stmtEx = $pdo->prepare('SELECT team_id, points_gps, whatsapp_photos, videos_terrain, signature_client, signature_technicien, materiel_pose, materiel_deduit, statut, nom_client, nom_technicien, modifie_le FROM interventions WHERE id = ? FOR UPDATE');
         $stmtEx->execute([$d['id']]);
         $existing = $stmtEx->fetch() ?: null;
+        if ($existing && $existing['team_id'] !== $teamId && empty($user['is_super_admin'])) {
+          $pdo->rollBack();
+          http_response_code(403);
+          echo json_encode(['error' => 'Accès refusé : cette intervention appartient à une autre équipe']);
+          break;
+        }
       }
 
       $rawDeletedWa = array_merge(
@@ -2048,8 +2249,8 @@ try {
 
         // Réconcilier également avec intervention_media pour garantir qu'aucune vidéo enregistrée par media_upload ne soit omise
         try {
-          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type = 'video'");
-          $mStmt->execute([$d['id']]);
+          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND team_id = ? AND type = 'video'");
+          $mStmt->execute([$d['id'], $teamId]);
           $mediaRows = $mStmt->fetchAll();
           foreach ($mediaRows as $mr) {
             $mId = (string)$mr['id'];
@@ -2086,8 +2287,8 @@ try {
         try {
           if (!empty($incomingDeletedVideos)) {
             $delPlaceholders = implode(',', array_fill(0, count($incomingDeletedVideos), '?'));
-            $delMStmt = $pdo->prepare("SELECT file_path FROM intervention_media WHERE id IN ($delPlaceholders) AND intervention_id = ?");
-            $delMStmt->execute([...$incomingDeletedVideos, $d['id']]);
+            $delMStmt = $pdo->prepare("SELECT file_path FROM intervention_media WHERE id IN ($delPlaceholders) AND intervention_id = ? AND team_id = ?");
+            $delMStmt->execute([...$incomingDeletedVideos, $d['id'], $teamId]);
             $filesToDel = $delMStmt->fetchAll();
             foreach ($filesToDel as $f) {
               $abs = __DIR__ . '/' . ltrim((string)$f['file_path'], '/');
@@ -2095,12 +2296,12 @@ try {
               $thumb = preg_replace('/\.\w+$/', '_thumb.jpg', $abs);
               if (is_file($thumb)) @unlink($thumb);
             }
-            $pdo->prepare("DELETE FROM intervention_media WHERE id IN ($delPlaceholders) AND intervention_id = ?")->execute([...$incomingDeletedVideos, $d['id']]);
+            $pdo->prepare("DELETE FROM intervention_media WHERE id IN ($delPlaceholders) AND intervention_id = ? AND team_id = ?")->execute([...$incomingDeletedVideos, $d['id'], $teamId]);
           }
 
           // Toujours réconcilier avec la table intervention_media pour qu'aucune vidéo d'un coéquipier ne soit jamais perdue
-          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND type IN ('video', 'video_terrain') ORDER BY captured_at ASC");
-          $mStmt->execute([$d['id']]);
+          $mStmt = $pdo->prepare("SELECT id, file_path, latitude, longitude, precision_m, captured_at, added_by FROM intervention_media WHERE intervention_id = ? AND team_id = ? AND type IN ('video', 'video_terrain') ORDER BY captured_at ASC");
+          $mStmt->execute([$d['id'], $teamId]);
           $medias = $mStmt->fetchAll();
           if (!empty($medias)) {
             $existingIds = array_map('strval', array_filter(array_column($incomingVideos, 'id')));
@@ -2337,7 +2538,7 @@ try {
             $changedFields[] = 'nom_dossier';
             if (empty($d['nom_dossier'])) $d['nom_dossier'] = $d['nom_client'];
           }
-          $patchColumns = array_values(array_filter($fields, fn($field) => !in_array($field, ['id', 'modifie_le'], true) && in_array($field, $changedFields, true) && array_key_exists($field, $d)));
+          $patchColumns = array_values(array_filter($fields, fn($field) => !in_array($field, ['id', 'team_id', 'modifie_le'], true) && in_array($field, $changedFields, true) && array_key_exists($field, $d)));
           $patchAssignments = array_map(fn($field) => "$field = :$field", $patchColumns);
           if ($materialPatch) $patchAssignments[] = 'materiel_pose = :materiel_pose';
           if (in_array('points_gps', $changedFields, true)) {
@@ -2357,7 +2558,7 @@ try {
           }
           $patchAssignments[] = 'modifie_par = :modifie_par';
           $patchAssignments[] = 'modifie_le = :modifie_le';
-          $stmt = $pdo->prepare('UPDATE interventions SET ' . implode(', ', array_unique($patchAssignments)) . ' WHERE id = :id');
+          $stmt = $pdo->prepare('UPDATE interventions SET ' . implode(', ', array_unique($patchAssignments)) . ' WHERE id = :id AND team_id = :team_id_where');
           foreach ($patchColumns as $field) {
             $value = $d[$field];
             if (is_bool($value)) $value = $value ? 1 : 0;
@@ -2375,6 +2576,7 @@ try {
           $stmt->bindValue(':modifie_par', $d['modifie_par'] ?? '');
           $stmt->bindValue(':modifie_le', $serverNow);
           $stmt->bindValue(':id', $d['id']);
+          $stmt->bindValue(':team_id_where', $teamId);
           $stmt->execute();
         } else {
           $d['modifie_le'] = $serverNow;
@@ -2404,8 +2606,8 @@ try {
 
         $deducted = 0;
         if ($shouldReconcileStock) {
-          $usageStmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? GROUP BY designation");
-          $usageStmt->execute([$d['id']]);
+          $usageStmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? AND team_id = ? GROUP BY designation");
+          $usageStmt->execute([$d['id'], $teamId]);
           $recordedUsage = [];
           foreach ($usageStmt->fetchAll() as $movement) $recordedUsage[$movement['designation']] = (int)$movement['quantite'];
           $totalMat = buildTotalMaterielPose($d);
@@ -2416,34 +2618,36 @@ try {
             $delta = $target - ($recordedUsage[$desig] ?? 0);
             if ($delta === 0) continue;
             changeStockQuantity($pdo, $desig, -$delta, [
+              'team_id' => $teamId,
               'intervention_id' => $d['id'],
               'nom_client' => $d['nom_client'] ?? ($existing['nom_client'] ?? ''),
               'nom_technicien' => $d['nom_technicien'] ?? ($existing['nom_technicien'] ?? ''),
               'motif' => $delta > 0 ? 'Pose intervention' : 'Correction matériel intervention',
-            ], true);
+            ], true, $teamId);
             $deducted++;
           }
         } elseif ($shouldRefundStock) {
-          $usageStmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? GROUP BY designation");
-          $usageStmt->execute([$d['id']]);
+          $usageStmt = $pdo->prepare("SELECT designation, SUM(CASE WHEN type = 'sortie' THEN quantite WHEN type = 'entree' THEN -quantite ELSE 0 END) AS quantite FROM stock_movements WHERE intervention_id = ? AND team_id = ? GROUP BY designation");
+          $usageStmt->execute([$d['id'], $teamId]);
           $recordedUsage = $usageStmt->fetchAll();
           foreach ($recordedUsage as $movement) {
             $netUsed = (int)$movement['quantite'];
             if ($netUsed > 0) {
               changeStockQuantity($pdo, $movement['designation'], $netUsed, [
+                'team_id' => $teamId,
                 'intervention_id' => $d['id'],
                 'nom_client' => $d['nom_client'] ?? ($existing['nom_client'] ?? ''),
                 'nom_technicien' => $d['nom_technicien'] ?? ($existing['nom_technicien'] ?? ''),
                 'motif' => 'Restitution stock - intervention ' . ($isNonTraite ? 'non traitée / inachevée' : $finalStatus),
-              ], true);
+              ], true, $teamId);
               $deducted--;
             }
           }
-          $pdo->prepare("UPDATE interventions SET materiel_deduit = 0 WHERE id = ?")->execute([$d['id']]);
+          $pdo->prepare("UPDATE interventions SET materiel_deduit = 0 WHERE id = ? AND team_id = ?")->execute([$d['id'], $teamId]);
         }
 
-        $updatedStmt = $pdo->prepare('SELECT modifie_le FROM interventions WHERE id = ?');
-        $updatedStmt->execute([$d['id'] ?? '']);
+        $updatedStmt = $pdo->prepare('SELECT modifie_le FROM interventions WHERE id = ? AND team_id = ?');
+        $updatedStmt->execute([$d['id'] ?? '', $teamId]);
         $updatedAt = (string)($updatedStmt->fetchColumn() ?: '');
         $pdo->commit();
         echo json_encode([
@@ -2456,8 +2660,6 @@ try {
         ]);
       } catch (Exception $e) {
         $pdo->rollBack();
-        // Trace serveur : sans ça un save qui échoue est invisible —
-        // le technicien retentait à l'aveugle plusieurs fois.
         error_log('[intervention_save] ' . $e->getMessage()
           . ' — id=' . ($d['id'] ?? '?')
           . ' body=' . strlen((string)$rawBody) . 'o');
@@ -2467,7 +2669,9 @@ try {
       break;
 
     case 'tournee_batch_create':
-      requireAuth();
+      $user = requireAuth();
+      $teamId = $user['team_id'];
+      $teamName = $user['nom_equipe'] ?: 'TELECOM BTP Services';
       $items = $input['interventions'] ?? [];
       if (!is_array($items) || empty($items)) {
         http_response_code(400);
@@ -2500,13 +2704,14 @@ try {
           $matPose = json_encode(['crochets' => 0, 'piton' => 1, 'pto' => 1, 'ont' => 1]);
 
           $stmt = $pdo->prepare('INSERT INTO interventions 
-            (id, date, statut, nom_technicien, nom_equipe, nom_client, nom_dossier, telephone_ligne, mobile, offre_souscrite, msan, fat_ref, tournee_du_jour, tournee_ordre, tournee_verrouille, materiel_pose, modifie_le)
-            VALUES (?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())');
+            (id, team_id, date, statut, nom_technicien, nom_equipe, nom_client, nom_dossier, telephone_ligne, mobile, offre_souscrite, msan, fat_ref, tournee_du_jour, tournee_ordre, tournee_verrouille, materiel_pose, modifie_le)
+            VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())');
           $stmt->execute([
             $id,
+            $teamId,
             $statut,
             $tech,
-            'TELECOM BTP Services',
+            $teamName,
             $nomClient,
             $nomClient,
             $telephoneLigne,
@@ -2522,6 +2727,7 @@ try {
 
           $createdList[] = [
             'id' => $id,
+            'team_id' => $teamId,
             'nom_client' => $nomClient,
             'nom_dossier' => $nomClient,
             'telephone_ligne' => $telephoneLigne,
@@ -2530,7 +2736,7 @@ try {
             'msan' => $msan,
             'fat_ref' => $fatRef,
             'nom_technicien' => $tech,
-            'nom_equipe' => 'TELECOM BTP Services',
+            'nom_equipe' => $teamName,
             'tournee_du_jour' => $dateTournee,
             'tournee_ordre' => $ordre,
             'tournee_verrouille' => (bool)$isLocked,
@@ -2552,7 +2758,9 @@ try {
       break;
 
     case 'stock_list':
-      $stmt = db()->query('SELECT designation, quantite FROM stock ORDER BY designation');
+      $user = requireAuth();
+      $stmt = db()->prepare('SELECT designation, quantite FROM stock WHERE team_id = ? ORDER BY designation');
+      $stmt->execute([$user['team_id']]);
       $rows = $stmt->fetchAll();
       $result = [];
       foreach ($rows as $r) { $result[$r['designation']] = (int)$r['quantite']; }
@@ -2560,13 +2768,15 @@ try {
       break;
 
     case 'stock_save':
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
       $designation = trim((string)($input['designation'] ?? ''));
       $quantite = filter_var($input['quantite'] ?? null, FILTER_VALIDATE_INT);
       if ($designation === '' || $quantite === false || $quantite < 0) { http_response_code(400); echo json_encode(['error' => 'Désignation et quantité valide requises']); break; }
       $pdo = db();
       $pdo->beginTransaction();
       try {
-        setStockQuantity($pdo, $designation, $quantite, ['motif' => 'Ajustement manuel du stock']);
+        setStockQuantity($pdo, $designation, $quantite, ['motif' => 'Ajustement manuel du stock', 'team_id' => $teamId], $teamId);
         $pdo->commit();
         echo json_encode(['ok' => true]);
       } catch (Exception $e) {
@@ -2577,6 +2787,7 @@ try {
 
     case 'stock_move':
       $user = requireAuth();
+      $teamId = $user['team_id'];
       $designation = trim((string)($input['designation'] ?? ''));
       $quantite = filter_var($input['quantite'] ?? null, FILTER_VALIDATE_INT);
       $type = $input['type'] ?? '';
@@ -2588,9 +2799,10 @@ try {
       try {
         $delta = $type === 'entree' ? $quantite : -$quantite;
         changeStockQuantity($pdo, $designation, $delta, [
+          'team_id' => $teamId,
           'nom_technicien' => $user['nom'],
           'motif' => trim((string)($input['motif'] ?? 'Mouvement manuel')),
-        ]);
+        ], false, $teamId);
         $pdo->commit();
         echo json_encode(['ok' => true]);
       } catch (Exception $e) {
@@ -2600,6 +2812,8 @@ try {
       break;
 
     case 'stock_import':
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
       $items = $input['items'] ?? [];
       if (empty($items)) { http_response_code(400); echo json_encode(['error' => 'Aucun item']); break; }
       $mode = $input['mode'] ?? 'set';
@@ -2617,9 +2831,9 @@ try {
           }
           if ($mode === 'add') {
             if ($qty === 0) continue;
-            changeStockQuantity($pdo, $desig, $qty, ['motif' => 'Import hebdomadaire - ajout']);
+            changeStockQuantity($pdo, $desig, $qty, ['motif' => 'Import hebdomadaire - ajout', 'team_id' => $teamId], false, $teamId);
           } else {
-            setStockQuantity($pdo, $desig, $qty, ['motif' => 'Inventaire - import canevas']);
+            setStockQuantity($pdo, $desig, $qty, ['motif' => 'Inventaire - import canevas', 'team_id' => $teamId], $teamId);
           }
           $count++;
         }
@@ -2633,32 +2847,35 @@ try {
       break;
 
     case 'stock_movements':
-      $limit = (int)($_GET['limit'] ?? 100);
+      $user = requireAuth();
+      $teamId = $user['team_id'];
+      $limit = max(1, min(500, (int)($_GET['limit'] ?? 100)));
       $stmt = db()->prepare('SELECT sm.*, i.nom_client as int_nom_client, i.date as int_date
         FROM stock_movements sm
-        LEFT JOIN interventions i ON sm.intervention_id COLLATE utf8mb4_unicode_ci = i.id COLLATE utf8mb4_unicode_ci
+        LEFT JOIN interventions i ON sm.intervention_id = i.id AND sm.team_id = i.team_id
+        WHERE sm.team_id = ?
         ORDER BY sm.date_mouvement DESC
         LIMIT ' . $limit);
-      $stmt->execute();
+      $stmt->execute([$teamId]);
       echo json_encode($stmt->fetchAll());
       break;
 
     case 'stock_usage':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
       $interventionId = $input['id'] ?? '';
       if (!$interventionId) { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
       $stmt = db()->prepare('SELECT designation, type, quantite, date_mouvement, motif
         FROM stock_movements
-        WHERE intervention_id COLLATE utf8mb4_unicode_ci = ? COLLATE utf8mb4_unicode_ci
+        WHERE intervention_id = ? AND team_id = ?
         ORDER BY designation');
-      $stmt->execute([$interventionId]);
+      $stmt->execute([$interventionId, $teamId]);
       echo json_encode($stmt->fetchAll());
       break;
 
     case 'stock_deduct':
-      requireAuth(true);
-      // NOTE: la déduction se fait désormais automatiquement dans intervention_save
-      // (transaction atomique + garde materiel_deduit). Cet endpoint reste appelable
-      // par d'anciennes versions de l'app mais devient un no-op si déjà déduit.
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
       $interventionId = $input['intervention_id'] ?? '';
       $nomClient = $input['nom_client'] ?? '';
       $nomTech = $input['nom_technicien'] ?? '';
@@ -2666,8 +2883,8 @@ try {
       if (empty($materiel)) { echo json_encode(['ok' => true, 'deducted' => 0]); break; }
 
       if ($interventionId) {
-        $chk = db()->prepare('SELECT materiel_deduit FROM interventions WHERE id = ?');
-        $chk->execute([$interventionId]);
+        $chk = db()->prepare('SELECT materiel_deduit FROM interventions WHERE id = ? AND team_id = ?');
+        $chk->execute([$interventionId, $teamId]);
         $row = $chk->fetch();
         if ($row && (int)$row['materiel_deduit'] === 1) {
           echo json_encode(['ok' => true, 'deducted' => 0, 'already_done' => true]);
@@ -2684,15 +2901,16 @@ try {
           $qty = (int)$qty;
           if ($qty <= 0) continue;
           changeStockQuantity($pdo, $desig, -$qty, [
+            'team_id' => $teamId,
             'intervention_id' => $interventionId ?: null,
             'nom_client' => $nomClient ?: null,
             'nom_technicien' => $nomTech ?: null,
             'motif' => 'Pose intervention',
-          ], true);
+          ], true, $teamId);
           $deducted++;
         }
         if ($interventionId) {
-          $pdo->prepare('UPDATE interventions SET materiel_deduit = 1 WHERE id = ?')->execute([$interventionId]);
+          $pdo->prepare('UPDATE interventions SET materiel_deduit = 1 WHERE id = ? AND team_id = ?')->execute([$interventionId, $teamId]);
         }
         $pdo->commit();
         echo json_encode(['ok' => true, 'deducted' => $deducted]);
@@ -2713,6 +2931,8 @@ try {
       break;
 
     case 'stock_import_excel':
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
       // Import robuste depuis la feuille "POINT GENERAL" (ou feuille d'inventaire),
       // supporte les modes "set" (stock restant) et "add" (stock reçu / livraison).
       $fileBase64 = $input['file_base64'] ?? '';
@@ -2743,7 +2963,6 @@ try {
             break;
           }
         }
-        // Si non trouvé par nom, chercher la feuille contenant STOCK RESTANT ou STOCK RECU ou STOCK INITIAL
         if (!$sheet) {
           foreach ($spreadsheet->getAllSheets() as $s) {
             try {
@@ -2815,11 +3034,9 @@ try {
           }
         }
 
-        // Si mode = add (livraison), privilégier STOCK RECU s'il existe
         if ($mode === 'add') {
           $valueRowIdx = $recuRowIdx ?? ($restantRowIdx ?? $initialRowIdx);
         } else {
-          // Si mode = set (inventaire), privilégier STOCK RESTANT
           $valueRowIdx = $restantRowIdx ?? ($initialRowIdx ?? $recuRowIdx);
         }
 
@@ -2832,7 +3049,6 @@ try {
         $headerRow = $rows[$headerRowIdx];
         $valueRow = $rows[$valueRowIdx];
 
-        // Dictionnaire des en-têtes et leurs alias
         $headerAliases = [
           'ont'          => ['ONT', 'OTP', 'BOX ONT', 'ROUTEUR ONT'],
           'pto'          => ['PTO', 'PRISE PTO', 'PTO FIBRE'],
@@ -2856,7 +3072,6 @@ try {
           'traverse_15t' => ['CT 15', 'CT15', 'TRAVERSE 15T', 'TRAVERSE 15', 'CT_15'],
         ];
 
-        // Normalise les en-têtes de colonnes trouvées
         $colByNormalizedHeader = [];
         foreach ($headerRow as $colIdx => $h) {
           $norm = strtoupper(trim((string)$h));
@@ -2902,10 +3117,6 @@ try {
             }
           }
 
-          // Protection contre les quantités négatives :
-          // Dans les fichiers Excel réels, si la consommation dépasse le stock initial/reçu de la feuille,
-          // la formule Excel (ex: =E7+E8-E52) affiche une valeur négative (ex: -1).
-          // Un stock physique magasin ne pouvant être négatif, nous ajustons à 0 et notifions l'utilisateur.
           if ($qty < 0) {
             $rawQty = $qty;
             $qty = 0;
@@ -2931,9 +3142,9 @@ try {
           foreach ($items as $item) {
             if ($mode === 'add') {
               if ($item['quantite'] <= 0) continue;
-              changeStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Import Excel hebdomadaire - ajout livraison']);
+              changeStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Import Excel hebdomadaire - ajout livraison', 'team_id' => $teamId], false, $teamId);
             } else {
-              setStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Inventaire Excel - stock restant']);
+              setStockQuantity($pdo, $item['designation'], $item['quantite'], ['motif' => 'Inventaire Excel - stock restant', 'team_id' => $teamId], $teamId);
             }
           }
           $pdo->commit();
@@ -2956,40 +3167,373 @@ try {
       }
       break;
 
+    case 'team_register':
+      $nom = trim((string)($input['nom'] ?? ($input['chef_nom'] ?? '')));
+      $nomEquipe = trim((string)($input['nom_equipe'] ?? ''));
+      $telephone = trim((string)($input['telephone'] ?? ''));
+      $identifiant = strtolower(trim((string)($input['identifiant'] ?? '')));
+      $password = (string)($input['password'] ?? ($input['mot_de_passe'] ?? ''));
+      $rawCode = trim((string)($input['code'] ?? ''));
+
+      if ($nom === '' || $nomEquipe === '' || $telephone === '' || $identifiant === '' || $password === '') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Tous les 5 champs (Nom et prénom, Nom de l\'équipe, Numéro de téléphone, Identifiant, Mot de passe) sont obligatoires.']);
+        break;
+      }
+      if (strlen($password) < 4) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Le mot de passe doit contenir au moins 4 caractères.']);
+        break;
+      }
+      if (!preg_match('/^[a-z0-9._-]{3,50}$/', $identifiant)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'L\'identifiant ne doit contenir que des lettres, chiffres, points ou tirets (3 à 50 caractères).']);
+        break;
+      }
+
+      $pdo = db();
+      $chkId = $pdo->prepare('SELECT id FROM accounts WHERE LOWER(identifiant) = LOWER(?) LIMIT 1');
+      $chkId->execute([$identifiant]);
+      if ($chkId->fetch()) {
+        http_response_code(409);
+        echo json_encode(['error' => 'Cet identifiant de connexion est déjà utilisé. Veuillez en choisir un autre.']);
+        break;
+      }
+
+      $code = (preg_match('/^\d{4}$/', $rawCode)) ? $rawCode : '1000';
+      $teamId = 'team_' . substr(bin2hex(random_bytes(8)), 0, 12);
+      $accountId = 'acc_' . substr(bin2hex(random_bytes(8)), 0, 12);
+      $apiToken = bin2hex(random_bytes(32));
+      $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+
+      $pdo->beginTransaction();
+      try {
+        $insTeam = $pdo->prepare('INSERT INTO teams (id, nom_equipe, chef_nom, telephone, actif, revision) VALUES (?, ?, ?, ?, 1, 1)');
+        $insTeam->execute([$teamId, $nomEquipe, $nom, $telephone]);
+
+        $insAcc = $pdo->prepare('INSERT INTO accounts (id, team_id, nom, identifiant, telephone, code, password_hash, api_token, role, actif, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)');
+        $insAcc->execute([$accountId, $teamId, $nom, $identifiant, $telephone, $code, $passwordHash, $apiToken, 'chef_equipe']);
+
+        // Initialiser les 20 articles du stock à 0 pour cette nouvelle équipe
+        $insStock = $pdo->prepare('INSERT INTO stock (team_id, designation, quantite) VALUES (?, ?, 0) ON DUPLICATE KEY UPDATE quantite = quantite');
+        foreach (array_keys(STOCK_EXCEL_MAP) as $desig) {
+          $insStock->execute([$teamId, $desig]);
+        }
+
+        $pdo->commit();
+        echo json_encode([
+          'ok' => true,
+          'success' => true,
+          'id' => $accountId,
+          'nom' => $nom,
+          'identifiant' => $identifiant,
+          'telephone' => $telephone,
+          'code' => $code,
+          'role' => 'chef_equipe',
+          'is_admin' => true,
+          'is_super_admin' => false,
+          'team_id' => $teamId,
+          'nom_equipe' => $nomEquipe,
+          'team' => [
+            'id' => $teamId,
+            'nom_equipe' => $nomEquipe,
+            'chef_nom' => $nom,
+          ],
+          'token' => $apiToken,
+        ]);
+      } catch (Exception $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        http_response_code(500);
+        echo json_encode(['error' => 'Erreur lors de la création de l\'équipe : ' . $e->getMessage()]);
+      }
+      break;
+
+    case 'auth_login':
+    case 'account_validate':
+      $identifiant = trim((string)($input['identifiant'] ?? ($input['login'] ?? '')));
+      $password = (string)($input['password'] ?? '');
+      $code = trim((string)($input['code'] ?? ''));
+      $requestedTeamId = trim((string)($input['team_id'] ?? ''));
+
+      $pdo = db();
+      $row = null;
+
+      if ($identifiant !== '' && $password !== '') {
+        $stmt = $pdo->prepare('SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.password_hash, a.api_token, a.role, a.actif, t.nom_equipe, t.chef_nom
+          FROM accounts a
+          LEFT JOIN teams t ON t.id = a.team_id
+          WHERE (LOWER(a.identifiant) = LOWER(?) OR LOWER(a.nom) = LOWER(?) OR a.telephone = ?) AND a.actif = 1
+          LIMIT 1');
+        $stmt->execute([$identifiant, $identifiant, $identifiant]);
+        $candidate = $stmt->fetch();
+        if ($candidate) {
+          $hash = (string)($candidate['password_hash'] ?? '');
+          $validPass = ($hash !== '' && password_verify($password, $hash)) || ($password === (string)($candidate['code'] ?? '') && $password !== '');
+          if ($validPass) {
+            $row = $candidate;
+          }
+        }
+        if (!$row) {
+          http_response_code(401);
+          echo json_encode(['error' => 'Identifiant ou mot de passe incorrect.']);
+          break;
+        }
+      } elseif ($code !== '') {
+        if ($requestedTeamId !== '') {
+          $stmt = $pdo->prepare('SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.password_hash, a.api_token, a.role, a.actif, t.nom_equipe, t.chef_nom
+            FROM accounts a
+            LEFT JOIN teams t ON t.id = a.team_id
+            WHERE a.code = ? AND a.team_id = ? AND a.actif = 1
+            LIMIT 1');
+          $stmt->execute([$code, $requestedTeamId]);
+          $row = $stmt->fetch() ?: null;
+        } else {
+          $stmt = $pdo->prepare("SELECT a.id, a.team_id, a.nom, a.identifiant, a.telephone, a.code, a.password_hash, a.api_token, a.role, a.actif, t.nom_equipe, t.chef_nom
+            FROM accounts a
+            LEFT JOIN teams t ON t.id = a.team_id
+            WHERE a.code = ? AND a.actif = 1
+            ORDER BY (a.team_id = 'team_telecom_btp_001') DESC
+            LIMIT 1");
+          $stmt->execute([$code]);
+          $row = $stmt->fetch() ?: null;
+        }
+        if (!$row) {
+          http_response_code(404);
+          echo json_encode(['error' => 'Code d\'accès invalide.']);
+          break;
+        }
+      } else {
+        http_response_code(400);
+        echo json_encode(['error' => 'Veuillez saisir votre identifiant et mot de passe ou votre code d\'accès à 4 chiffres.']);
+        break;
+      }
+
+      $token = (string)($row['api_token'] ?? '');
+      if ($token === '') {
+        $token = bin2hex(random_bytes(32));
+        $pdo->prepare('UPDATE accounts SET api_token = ? WHERE id = ?')->execute([$token, $row['id']]);
+      }
+
+      $role = (string)($row['role'] ?? 'technicien');
+      $isAdmin = in_array($role, ['chef_equipe', 'admin', 'super_admin'], true) || ((string)($row['code'] ?? '') === '9999');
+      $teamId = (string)($row['team_id'] ?: 'team_telecom_btp_001');
+      $nomEquipe = (string)($row['nom_equipe'] ?: 'TELECOM BTP Services');
+
+      echo json_encode([
+        'ok' => true,
+        'id' => (string)$row['id'],
+        'nom' => (string)$row['nom'],
+        'identifiant' => (string)($row['identifiant'] ?? ''),
+        'telephone' => (string)($row['telephone'] ?? ''),
+        'code' => (string)($row['code'] ?? ''),
+        'role' => $role,
+        'is_admin' => $isAdmin,
+        'is_super_admin' => ($role === 'super_admin'),
+        'team_id' => $teamId,
+        'nom_equipe' => $nomEquipe,
+        'token' => $token,
+      ]);
+      break;
+
+    case 'team_info':
+      $user = requireAuth();
+      $teamId = $user['team_id'];
+      $pdo = db();
+      $stmt = $pdo->prepare('SELECT id, nom_equipe, chef_nom, telephone, entreprise_id, chaptech_equipe_id, actif, revision, created_at, updated_at FROM teams WHERE id = ? LIMIT 1');
+      $stmt->execute([$teamId]);
+      $team = $stmt->fetch();
+      if (!$team) {
+        $team = [
+          'id' => $teamId,
+          'nom_equipe' => $user['nom_equipe'] ?: 'Mon Équipe',
+          'chef_nom' => $user['nom'],
+          'telephone' => $user['telephone'] ?? '',
+          'actif' => 1,
+        ];
+      }
+      $cntMembers = $pdo->prepare("SELECT COUNT(*) FROM accounts WHERE team_id = ? AND role != 'super_admin'");
+      $cntMembers->execute([$teamId]);
+      $team['nb_membres'] = (int)$cntMembers->fetchColumn();
+
+      $cntIntv = $pdo->prepare('SELECT COUNT(*) FROM interventions WHERE team_id = ?');
+      $cntIntv->execute([$teamId]);
+      $team['nb_interventions'] = (int)$cntIntv->fetchColumn();
+
+      echo json_encode($team);
+      break;
+
+    case 'team_update':
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
+      $nomEquipe = trim((string)($input['nom_equipe'] ?? ''));
+      $chefNom = trim((string)($input['chef_nom'] ?? ''));
+      $telephone = trim((string)($input['telephone'] ?? ''));
+      if ($nomEquipe === '') {
+        http_response_code(400);
+        echo json_encode(['error' => 'Le nom de l\'équipe est requis']);
+        break;
+      }
+      $pdo = db();
+      $stmt = $pdo->prepare('UPDATE teams SET nom_equipe = ?, chef_nom = COALESCE(NULLIF(?, ""), chef_nom), telephone = ?, revision = revision + 1 WHERE id = ?');
+      $stmt->execute([$nomEquipe, $chefNom, $telephone, $teamId]);
+      if (!empty($input['sync_interventions'])) {
+        $pdo->prepare('UPDATE interventions SET nom_equipe = ? WHERE team_id = ?')->execute([$nomEquipe, $teamId]);
+      }
+      echo json_encode(['ok' => true, 'team_id' => $teamId, 'nom_equipe' => $nomEquipe, 'chef_nom' => $chefNom, 'telephone' => $telephone]);
+      break;
+
+    case 'teams_list_all':
+      $user = requireAuth(true);
+      if (empty($user['is_super_admin'])) {
+        http_response_code(403);
+        echo json_encode(['error' => 'Droits super_admin requis']);
+        break;
+      }
+      $stmt = db()->query("SELECT t.*,
+        (SELECT COUNT(*) FROM accounts a WHERE a.team_id = t.id AND a.role != 'super_admin') AS nb_membres,
+        (SELECT COUNT(*) FROM interventions i WHERE i.team_id = t.id) AS nb_interventions
+        FROM teams t
+        ORDER BY t.created_at ASC");
+      echo json_encode($stmt->fetchAll());
+      break;
+
     case 'accounts_list':
-      $stmt = db()->query('SELECT id, nom, code FROM accounts ORDER BY nom');
+      $user = requireAuth();
+      $teamId = $user['team_id'];
+      $stmt = db()->prepare("SELECT id, team_id, nom, identifiant, telephone, code, role, actif, created_at
+        FROM accounts
+        WHERE team_id = ? AND role != 'super_admin'
+        ORDER BY (role = 'chef_equipe') DESC, nom ASC");
+      $stmt->execute([$teamId]);
       echo json_encode($stmt->fetchAll());
       break;
 
     case 'account_add':
-      $nom = trim($input['nom'] ?? '');
-      $code = trim($input['code'] ?? '');
-      if (!$nom) { http_response_code(400); echo json_encode(['error' => 'Nom requis']); break; }
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
+      $nom = trim((string)($input['nom'] ?? ''));
+      $code = trim((string)($input['code'] ?? ''));
+      $telephone = trim((string)($input['telephone'] ?? ''));
+      $rawIdentifiant = strtolower(trim((string)($input['identifiant'] ?? '')));
+      $password = (string)($input['password'] ?? '');
+      $role = in_array($input['role'] ?? '', ['technicien', 'chef_equipe'], true) ? $input['role'] : 'technicien';
+
+      if ($nom === '') { http_response_code(400); echo json_encode(['error' => 'Nom requis']); break; }
       if (!$code || strlen($code) !== 4 || !ctype_digit($code)) {
-        http_response_code(400); echo json_encode(['error' => 'Code a 4 chiffres requis']); break;
+        http_response_code(400); echo json_encode(['error' => 'Code à 4 chiffres requis']); break;
       }
+
+      $pdo = db();
+      // Vérifier l'unicité du code au sein de la même équipe
+      $chkCode = $pdo->prepare('SELECT id FROM accounts WHERE team_id = ? AND code = ? LIMIT 1');
+      $chkCode->execute([$teamId, $code]);
+      if ($chkCode->fetch()) {
+        http_response_code(409);
+        echo json_encode(['error' => 'Ce code à 4 chiffres est déjà utilisé dans votre équipe']);
+        break;
+      }
+
+      if ($rawIdentifiant === '') {
+        $baseSlug = preg_replace('/[^a-z0-9]/', '', strtolower(@iconv('UTF-8', 'ASCII//TRANSLIT', $nom) ?: $nom)) ?: 'tech';
+        $rawIdentifiant = substr($baseSlug, 0, 20) . '_' . $code;
+      }
+      $chkId = $pdo->prepare('SELECT id FROM accounts WHERE LOWER(identifiant) = LOWER(?) LIMIT 1');
+      $chkId->execute([$rawIdentifiant]);
+      if ($chkId->fetch()) {
+        $rawIdentifiant = $rawIdentifiant . '_' . substr(bin2hex(random_bytes(2)), 0, 3);
+      }
+
+      $effectivePassword = $password !== '' ? $password : $code;
+      $passwordHash = password_hash($effectivePassword, PASSWORD_BCRYPT);
+      $apiToken = bin2hex(random_bytes(32));
       $id = bin2hex(random_bytes(16));
-      $stmt = db()->prepare('INSERT INTO accounts (id, nom, code) VALUES (?, ?, ?)');
-      $stmt->execute([$id, $nom, $code]);
-      echo json_encode(['ok' => true, 'id' => $id]);
+
+      $stmt = $pdo->prepare('INSERT INTO accounts (id, team_id, nom, identifiant, telephone, code, password_hash, api_token, role, actif, revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)');
+      $stmt->execute([$id, $teamId, $nom, $rawIdentifiant, $telephone ?: null, $code, $passwordHash, $apiToken, $role]);
+      echo json_encode([
+        'ok' => true,
+        'id' => $id,
+        'team_id' => $teamId,
+        'nom' => $nom,
+        'identifiant' => $rawIdentifiant,
+        'telephone' => $telephone,
+        'code' => $code,
+        'role' => $role,
+      ]);
       break;
 
-    case 'account_delete':
-      $id = $input['id'] ?? '';
-      if (!$id) { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
-      $stmt = db()->prepare('DELETE FROM accounts WHERE id = ?');
-      $stmt->execute([$id]);
+    case 'account_update':
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
+      $id = trim((string)($input['id'] ?? ''));
+      if ($id === '') { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
+
+      $pdo = db();
+      $chk = $pdo->prepare('SELECT * FROM accounts WHERE id = ? AND team_id = ? LIMIT 1');
+      $chk->execute([$id, $teamId]);
+      $acc = $chk->fetch();
+      if (!$acc) {
+        http_response_code(404);
+        echo json_encode(['error' => 'Membre introuvable dans cette équipe']);
+        break;
+      }
+
+      $nom = trim((string)($input['nom'] ?? $acc['nom']));
+      $code = trim((string)($input['code'] ?? $acc['code']));
+      $telephone = trim((string)($input['telephone'] ?? ($acc['telephone'] ?? '')));
+      $identifiant = strtolower(trim((string)($input['identifiant'] ?? ($acc['identifiant'] ?? ''))));
+      $role = in_array($input['role'] ?? '', ['technicien', 'chef_equipe'], true) ? $input['role'] : $acc['role'];
+      $actif = isset($input['actif']) ? ((int)(bool)$input['actif']) : (int)$acc['actif'];
+      $password = (string)($input['password'] ?? '');
+
+      if ($code !== '' && (!ctype_digit($code) || strlen($code) !== 4)) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Le code doit comporter 4 chiffres']);
+        break;
+      }
+      if ($code !== $acc['code']) {
+        $chkCode = $pdo->prepare('SELECT id FROM accounts WHERE team_id = ? AND code = ? AND id != ? LIMIT 1');
+        $chkCode->execute([$teamId, $code, $id]);
+        if ($chkCode->fetch()) {
+          http_response_code(409);
+          echo json_encode(['error' => 'Ce code est déjà attribué à un autre membre de l\'équipe']);
+          break;
+        }
+      }
+      if ($identifiant !== '' && strtolower($identifiant) !== strtolower((string)$acc['identifiant'])) {
+        $chkId = $pdo->prepare('SELECT id FROM accounts WHERE LOWER(identifiant) = LOWER(?) AND id != ? LIMIT 1');
+        $chkId->execute([$identifiant, $id]);
+        if ($chkId->fetch()) {
+          http_response_code(409);
+          echo json_encode(['error' => 'Cet identifiant est déjà utilisé']);
+          break;
+        }
+      }
+
+      if ($password !== '') {
+        $hash = password_hash($password, PASSWORD_BCRYPT);
+        $stmt = $pdo->prepare('UPDATE accounts SET nom = ?, identifiant = ?, telephone = ?, code = ?, password_hash = ?, role = ?, actif = ?, revision = revision + 1 WHERE id = ? AND team_id = ?');
+        $stmt->execute([$nom, $identifiant ?: null, $telephone ?: null, $code, $hash, $role, $actif, $id, $teamId]);
+      } else {
+        $stmt = $pdo->prepare('UPDATE accounts SET nom = ?, identifiant = ?, telephone = ?, code = ?, role = ?, actif = ?, revision = revision + 1 WHERE id = ? AND team_id = ?');
+        $stmt->execute([$nom, $identifiant ?: null, $telephone ?: null, $code, $role, $actif, $id, $teamId]);
+      }
       echo json_encode(['ok' => true]);
       break;
 
-    case 'account_validate':
-      $code = trim($input['code'] ?? '');
-      if (!$code) { http_response_code(400); echo json_encode(['error' => 'Code requis']); break; }
-      $stmt = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
-      $stmt->execute([$code]);
-      $user = $stmt->fetch();
-      if (!$user) { http_response_code(404); echo json_encode(['error' => 'Code invalide']); break; }
-      echo json_encode($user);
+    case 'account_delete':
+      $user = requireAuth(true);
+      $teamId = $user['team_id'];
+      $id = trim((string)($input['id'] ?? ''));
+      if ($id === '') { http_response_code(400); echo json_encode(['error' => 'ID requis']); break; }
+      if ($id === $user['id']) {
+        http_response_code(400);
+        echo json_encode(['error' => 'Vous ne pouvez pas supprimer votre propre compte chef d\'équipe actif.']);
+        break;
+      }
+      $stmt = db()->prepare("DELETE FROM accounts WHERE id = ? AND team_id = ? AND role != 'super_admin'");
+      $stmt->execute([$id, $teamId]);
+      echo json_encode(['ok' => true]);
       break;
 
     default:

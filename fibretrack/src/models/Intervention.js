@@ -1,19 +1,23 @@
-import { getApiAuthHeaders, getApiCode } from "./Account.js";
+import { getApiAuthHeaders, getApiCode, getTeamId, getTeamName, DEFAULT_TEAM_ID } from "./Account.js";
 import { calculateMaterials } from "../lib/materialsCalculation.js";
 
 // Modèle de données "Intervention" - synchronisé avec le backend MySQL.
-// Toutes les interventions sont partagées entre tous les techniciens.
+// Isolé par équipe (team_id).
 
 const API_URL = import.meta.env?.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
 function buildApiUrl(action) {
   const code = getApiCode();
+  const teamId = getTeamId();
   const [baseAction, queryStr] = action.split("?");
   const params = new URLSearchParams(queryStr || "");
   params.set("action", baseAction);
   params.set("_t", String(Date.now()));
   if (code) {
     params.set("user_code", code);
+  }
+  if (teamId) {
+    params.set("team_id", teamId);
   }
   return `${API_URL}?${params.toString()}`;
 }
@@ -76,15 +80,28 @@ async function apiGet(action, timeoutMs = 20000) {
   }
 }
 
+function getOutboxKey() {
+  return `fibretrack_${getTeamId()}_sync_outbox`;
+}
+
+function getCacheKey() {
+  return `fibretrack_${getTeamId()}_interventions_cache`;
+}
+
+function getIntvStoragePrefix() {
+  return `fibretrack_${getTeamId()}_intv_`;
+}
+
 function evictOldStoredInterventions(keepId = "") {
   try {
     if (typeof localStorage === "undefined" || typeof localStorage.key !== "function") return;
+    const prefix = getIntvStoragePrefix();
     const outboxIds = new Set(getSyncOutbox().map((item) => item?.id).filter(Boolean));
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && (k.startsWith("fibretrack_intv_") || k.startsWith("chaptech_intv_"))) {
-        const id = k.replace(/^(fibretrack_intv_|chaptech_intv_)/, "");
+      if (k && (k.startsWith(prefix) || k.startsWith("fibretrack_intv_") || k.startsWith("chaptech_intv_"))) {
+        const id = k.replace(new RegExp(`^(${prefix}|fibretrack_intv_|chaptech_intv_)`), "");
         if (id !== keepId && !outboxIds.has(id)) {
           keysToRemove.push(k);
         }
@@ -97,12 +114,19 @@ function evictOldStoredInterventions(keepId = "") {
 }
 
 // ===== GESTION DE LA FILE D'ATTENTE OUTBOX HORS-LIGNE =====
-const OUTBOX_KEY = "fibretrack_sync_outbox";
 const outboxListeners = new Set();
 
 export function getSyncOutbox() {
   try {
-    return JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]");
+    const key = getOutboxKey();
+    let raw = localStorage.getItem(key);
+    if (!raw && getTeamId() === DEFAULT_TEAM_ID) {
+      raw = localStorage.getItem("fibretrack_sync_outbox");
+      if (raw) {
+        try { localStorage.setItem(key, raw); } catch {}
+      }
+    }
+    return JSON.parse(raw || "[]");
   } catch {
     return [];
   }
@@ -120,13 +144,17 @@ export function onOutboxChange(callback) {
 }
 
 export function setSyncOutbox(queue) {
+  const key = getOutboxKey();
   try {
-    localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
+    localStorage.setItem(key, JSON.stringify(queue));
+    if (getTeamId() === DEFAULT_TEAM_ID) {
+      try { localStorage.setItem("fibretrack_sync_outbox", JSON.stringify(queue)); } catch {}
+    }
     notifyOutboxChange(queue.length);
   } catch (e) {
     evictOldStoredInterventions();
     try {
-      localStorage.setItem(OUTBOX_KEY, JSON.stringify(queue));
+      localStorage.setItem(key, JSON.stringify(queue));
       notifyOutboxChange(queue.length);
     } catch (e2) {
       console.warn("setSyncOutbox error:", e2);
@@ -192,11 +220,6 @@ export async function flushSyncOutbox() {
     isFlushingOutbox = false;
   }
 }
-
-
-// Cache local pour fonctionnement hors-ligne
-const CACHE_KEY = "fibretrack_interventions_cache";
-const INTV_STORAGE_PREFIX = "fibretrack_intv_";
 
 export function ensureInterventionDefaults(data) {
   if (!data || typeof data !== "object") return createEmptyIntervention();
@@ -550,7 +573,15 @@ export function toLightIntervention(intv) {
 
 export function getCached() {
   try {
-    return JSON.parse(localStorage.getItem(CACHE_KEY) || "[]");
+    const key = getCacheKey();
+    let raw = localStorage.getItem(key);
+    if (!raw && getTeamId() === DEFAULT_TEAM_ID) {
+      raw = localStorage.getItem("fibretrack_interventions_cache");
+      if (raw) {
+        try { localStorage.setItem(key, raw); } catch {}
+      }
+    }
+    return JSON.parse(raw || "[]");
   } catch {
     return [];
   }
@@ -559,7 +590,11 @@ export function getCached() {
 function setCached(list) {
   try {
     const cleanList = Array.isArray(list) ? list.map(toLightIntervention) : [];
-    localStorage.setItem(CACHE_KEY, JSON.stringify(cleanList));
+    const serialized = JSON.stringify(cleanList);
+    localStorage.setItem(getCacheKey(), serialized);
+    if (getTeamId() === DEFAULT_TEAM_ID) {
+      try { localStorage.setItem("fibretrack_interventions_cache", serialized); } catch {}
+    }
   } catch (e) {
     console.warn("setCached localStorage error:", e);
   }
@@ -568,7 +603,14 @@ function setCached(list) {
 export function getStoredIntervention(id) {
   if (!id) return null;
   try {
-    const raw = localStorage.getItem(INTV_STORAGE_PREFIX + id);
+    const key = getIntvStoragePrefix() + id;
+    let raw = localStorage.getItem(key);
+    if (!raw && getTeamId() === DEFAULT_TEAM_ID) {
+      raw = localStorage.getItem("fibretrack_intv_" + id);
+      if (raw) {
+        try { localStorage.setItem(key, raw); } catch {}
+      }
+    }
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return ensureInterventionDefaults(parsed);
@@ -603,9 +645,13 @@ export async function listInterventions() {
     const deletedSet = new Set(Array.isArray(deletedIds) ? deletedIds : []);
 
     // Purger immédiatement les interventions supprimées du stockage local et de l'outbox
+    const prefix = getIntvStoragePrefix();
     for (const dId of deletedSet) {
       removeFromOutbox(dId);
-      try { localStorage.removeItem(INTV_STORAGE_PREFIX + dId); } catch {}
+      try {
+        localStorage.removeItem(prefix + dId);
+        if (getTeamId() === DEFAULT_TEAM_ID) localStorage.removeItem("fibretrack_intv_" + dId);
+      } catch {}
     }
 
     const currentCached = getCached().filter((c) => c?.id && !deletedSet.has(c.id));
@@ -650,7 +696,10 @@ export async function listInterventions() {
           merged.unshift(cached);
         } else {
           // Supprimée sur le serveur -> purger le cache local de l'appareil
-          try { localStorage.removeItem(INTV_STORAGE_PREFIX + cached.id); } catch {}
+          try {
+            localStorage.removeItem(prefix + cached.id);
+            if (getTeamId() === DEFAULT_TEAM_ID) localStorage.removeItem("fibretrack_intv_" + cached.id);
+          } catch {}
         }
       }
     }
@@ -779,12 +828,17 @@ export function saveInterventionLocally(intervention) {
       }
     }
 
+    const storageKey = getIntvStoragePrefix() + defaulted.id;
+    const serialized = JSON.stringify(defaulted);
     try {
-      localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
+      localStorage.setItem(storageKey, serialized);
+      if (getTeamId() === DEFAULT_TEAM_ID) {
+        try { localStorage.setItem("fibretrack_intv_" + defaulted.id, serialized); } catch {}
+      }
     } catch (quotaErr) {
       evictOldStoredInterventions(defaulted.id);
       try {
-        localStorage.setItem(INTV_STORAGE_PREFIX + defaulted.id, JSON.stringify(defaulted));
+        localStorage.setItem(storageKey, serialized);
       } catch (quotaErr2) {
         console.warn("saveInterventionLocally quota error after eviction:", quotaErr2);
       }
@@ -803,6 +857,7 @@ export function saveInterventionLocally(intervention) {
       try {
         window.postMessage({
           type: "FIBRETRACK_INTERVENTION_UPDATED",
+          team_id: getTeamId(),
           intervention: defaulted,
           timestamp: Date.now(),
         }, "*");
@@ -846,6 +901,7 @@ export async function saveIntervention(intervention) {
       try {
         window.postMessage({
           type: "FIBRETRACK_INTERVENTION_UPDATED",
+          team_id: getTeamId(),
           intervention,
           timestamp: Date.now(),
         }, "*");
@@ -989,7 +1045,10 @@ export async function deleteIntervention(id) {
 
   // 2. Nettoyage immédiat du stockage local dédié
   try {
-    localStorage.removeItem(INTV_STORAGE_PREFIX + id);
+    localStorage.removeItem(getIntvStoragePrefix() + id);
+    if (getTeamId() === DEFAULT_TEAM_ID) {
+      localStorage.removeItem("fibretrack_intv_" + id);
+    }
   } catch {}
 
   // 3. Retrait immédiat du cache des interventions
@@ -1001,6 +1060,7 @@ export async function deleteIntervention(id) {
     try {
       window.postMessage({
         type: "FIBRETRACK_INTERVENTION_DELETED",
+        team_id: getTeamId(),
         id,
         timestamp: Date.now(),
       }, "*");
@@ -1019,10 +1079,11 @@ export async function deleteIntervention(id) {
 export function createEmptyIntervention(technicien, initialNom = "") {
   return {
     id: crypto.randomUUID(),
+    team_id: getTeamId(),
     date: new Date().toISOString(),
     statut: "en_cours",
     nom_technicien: technicien ?? "",
-    nom_equipe: "TELECOM BTP Services",
+    nom_equipe: getTeamName(),
 
     nom_client: initialNom,
     nom_dossier: initialNom,

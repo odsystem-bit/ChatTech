@@ -1,0 +1,41 @@
+import fs from 'fs';
+import JSZip from 'jszip';
+
+async function run() {
+  const buf = fs.readFileSync('api/GS BTP 121026.xlsx');
+  const zip = await JSZip.loadAsync(buf);
+  const sheet2Xml = await zip.file('xl/worksheets/sheet2.xml').async('string');
+  const mergeMatches = sheet2Xml.match(/<mergeCell [^>]*ref="([^"]+)"/g);
+  console.log('--- MERGE CELLS IN SHEET 2 ---');
+  console.log(mergeMatches);
+
+  let sharedStrings = [];
+  if (zip.file('xl/sharedStrings.xml')) {
+    const sstXml = await zip.file('xl/sharedStrings.xml').async('string');
+    const siMatches = [...sstXml.matchAll(/<si>(.*?)<\/si>/gs)];
+    sharedStrings = siMatches.map(m => {
+      const tMatches = [...m[1].matchAll(/<t[^>]*>(.*?)<\/t>/gs)];
+      return tMatches.map(t => t[1]).join('');
+    });
+  }
+
+  for (let r = 1; r <= 30; r++) {
+    const m = sheet2Xml.match(new RegExp(`<row[^>]*r="${r}"[^>]*>(.*?)</row>`, 's'));
+    if (m) {
+      const cells = [...m[1].matchAll(/<c r="([A-Z0-9]+)"([^>]*)>(.*?)<\/c>/gs)];
+      const content = cells.map(c => {
+        const ref = c[1];
+        const isString = c[2].includes('t="s"');
+        const vMatch = c[3].match(/<v>(.*?)<\/v>/);
+        let val = vMatch ? vMatch[1] : '';
+        if (isString && sharedStrings[parseInt(val, 10)] !== undefined) {
+          val = `"${sharedStrings[parseInt(val, 10)]}"`;
+        }
+        return `${ref}=${val}`;
+      }).join(', ');
+      console.log(`Row ${r}: ${content}`);
+    }
+  }
+}
+
+run().catch(console.error);

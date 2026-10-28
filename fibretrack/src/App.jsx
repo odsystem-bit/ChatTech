@@ -35,6 +35,10 @@ import {
   IconCheckCircle,
   IconCalendar,
   IconXCircle,
+  IconBox,
+  IconUsers,
+  IconClock,
+  IconBriefcase,
 } from "./components/Icons";
 
 export default function App() {
@@ -494,16 +498,24 @@ export default function App() {
 
   return (
     <div className="app-home">
-      <header>
-        <div className="header-top">
-          <h1>
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
-            CHAPTECH
-          </h1>
+      <header style={{ background: "var(--nav-deep)", color: "#FFFFFF", padding: "16px 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+        <div className="header-top" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 34, height: 34, borderRadius: 10, background: "#2563EB", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <div>
+              <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, color: "#FFFFFF", letterSpacing: "-0.01em" }}>CHAPTECH FIBRETRACK</h1>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: "rgba(255,255,255,0.85)", fontWeight: 500 }}>
+                <IconBriefcase size={13} color="#93C5FD" />
+                <span>{user.nom_equipe || "TELECOM BTP Services"}</span>
+              </div>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button
               type="button"
@@ -512,12 +524,20 @@ export default function App() {
               disabled={loading}
               aria-label="Actualiser les interventions"
               title="Actualiser les interventions en direct"
+              style={{ background: "rgba(255,255,255,0.12)", color: "#FFFFFF", border: "none", borderRadius: 8, padding: "6px 10px", fontSize: 13, fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 5 }}
             >
-              <IconRefresh size={16} className={loading ? "spin-icon" : ""} style={{ verticalAlign: "middle" }} />
+              <IconRefresh size={14} className={loading ? "spin-icon" : ""} />
               <span className="btn-refresh-label">{loading ? "…" : "Actualiser"}</span>
             </button>
-            <button type="button" className="btn-icon" onClick={handleLogout} aria-label="Déconnexion">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={handleLogout}
+              aria-label="Déconnexion"
+              title="Se déconnecter"
+              style={{ background: "rgba(220, 38, 38, 0.2)", color: "#FCA5A5", border: "1px solid rgba(220, 38, 38, 0.4)", borderRadius: 8, width: 34, height: 34, display: "flex", alignItems: "center", justifyContent: "center" }}
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
                 <polyline points="16 17 21 12 16 7" />
                 <line x1="21" y1="12" x2="9" y2="12" />
@@ -525,7 +545,14 @@ export default function App() {
             </button>
           </div>
         </div>
-        <p>Bonjour, <strong>{user.nom}</strong></p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 4 }}>
+          <p style={{ margin: 0, fontSize: 13.5, color: "rgba(255,255,255,0.85)" }}>
+            Bonjour, <strong>{user.nom}</strong>
+          </p>
+          <span style={{ fontSize: 11.5, fontWeight: 700, padding: "2px 8px", borderRadius: 12, background: user.isAdmin ? "#2563EB" : "rgba(255,255,255,0.15)", color: "#FFFFFF" }}>
+            {user.role === "chef_equipe" || user.isAdmin ? "Chef d'équipe" : "Technicien"}
+          </span>
+        </div>
       </header>
 
       <main>
@@ -536,7 +563,7 @@ export default function App() {
           <div className="sync-status-left">
             {!isOnline ? (
               <span className="sync-pill sync-pill-offline" title="Connexion internet indisponible">
-                <span className="sync-dot offline" /> Hors-ligne (données sauvegardées en local)
+                <span className="sync-dot offline" /> Hors-ligne (sauvegarde locale active)
               </span>
             ) : outboxCount > 0 ? (
               <span className="sync-pill sync-pill-pending" title="Modifications en attente d'envoi vers le serveur">
@@ -561,52 +588,106 @@ export default function App() {
           )}
         </div>
 
-        <div className="home-actions">
+        {/* ===== TABLEAU DE BORD : 3 INDICATEURS CLÉS (KPI) ===== */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, margin: "14px 0" }}>
+          <button
+            type="button"
+            onClick={() => handleTabChange("en_cours")}
+            style={{
+              background: activeTab === "en_cours" ? "#EFF6FF" : "#FFFFFF",
+              border: activeTab === "en_cours" ? "2px solid #2563EB" : "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              padding: "12px 10px",
+              textAlign: "left",
+              cursor: "pointer",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#2563EB", fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+              <IconZap size={14} /> En cours
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--nav-deep)", lineHeight: 1 }}>
+              {filteredData.enCoursCount}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>dossiers actifs</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange("terminees")}
+            style={{
+              background: activeTab === "terminees" ? "#F0FDF4" : "#FFFFFF",
+              border: activeTab === "terminees" ? "2px solid #16A34A" : "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              padding: "12px 10px",
+              textAlign: "left",
+              cursor: "pointer",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#16A34A", fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+              <IconCheckCircle size={14} /> Terminées
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--nav-deep)", lineHeight: 1 }}>
+              {filteredData.termineesCount}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>validées</div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabChange("tournee")}
+            style={{
+              background: activeTab === "tournee" ? "#FDF8F6" : "#FFFFFF",
+              border: activeTab === "tournee" ? "2px solid #F59E0B" : "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              padding: "12px 10px",
+              textAlign: "left",
+              cursor: "pointer",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 5, color: "#F59E0B", fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
+              <IconClock size={14} /> À effectuer
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--nav-deep)", lineHeight: 1 }}>
+              {filteredData.tourneeTodayCount + (filteredData.nonTraiteesCount || 0)}
+            </div>
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>en attente</div>
+          </button>
+        </div>
+
+        {/* ===== ACTIONS RAPIDES DU TERRAIN ===== */}
+        <div className="home-actions" style={{ display: "grid", gridTemplateColumns: user.isAdmin ? "repeat(auto-fit, minmax(200px, 1fr))" : "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginBottom: 14 }}>
           <button type="button" className="home-action-card" onClick={() => setNewDossierModalOpen(true)} disabled={creatingNew}>
             <div className="icon primary">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
+              <IconPlus size={22} color="#2563EB" />
             </div>
             <div>
               <div className="label">{creatingNew ? "Création…" : "Nouvelle intervention"}</div>
-              <div className="sub">Créer un nouveau dossier / raccordement</div>
+              <div className="sub">Créer un dossier / raccordement</div>
             </div>
-            <svg className="chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
           </button>
 
           <button type="button" className="home-action-card" onClick={() => navigateTo("stock")}>
             <div className="icon accent">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-              </svg>
+              <IconBox size={22} color="#F59E0B" />
             </div>
             <div>
               <div className="label">Stock d'équipe</div>
-              <div className="sub">Gérer l'inventaire matériel</div>
+              <div className="sub">Inventaire & matériels posés</div>
             </div>
-            <svg className="chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
           </button>
 
           {user.isAdmin && (
             <button type="button" className="home-action-card" onClick={() => navigateTo("admin")}>
               <div className="icon success">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
-                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-                </svg>
+                <IconUsers size={22} color="#16A34A" />
               </div>
               <div>
-                <div className="label">Administration</div>
-                <div className="sub">Gérer les utilisateurs</div>
+                <div className="label">Membres de l'équipe</div>
+                <div className="sub">Gérer techniciens & accès</div>
               </div>
-              <svg className="chevron" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
             </button>
           )}
         </div>
@@ -1094,10 +1175,11 @@ export default function App() {
                       setNewDossierName("");
                       startNewIntervention(name, { tournee: true });
                     }}
-                    style={{ background: "#0284c7", borderColor: "#0284c7" }}
+                    style={{ background: "#0284c7", borderColor: "#0284c7", display: "inline-flex", alignItems: "center", gap: 6 }}
                     title="Ajouter à la feuille de route Tournée du jour"
                   >
-                    {creatingNew ? "Création…" : "📅 Tournée du jour"}
+                    <IconCalendar size={15} />
+                    <span>{creatingNew ? "Création…" : "Tournée du jour"}</span>
                   </button>
                   <button
                     type="button"
@@ -1109,10 +1191,11 @@ export default function App() {
                       setNewDossierName("");
                       startNewIntervention(name, { tournee: false });
                     }}
-                    style={{ background: "#16a34a", borderColor: "#16a34a" }}
+                    style={{ background: "#16a34a", borderColor: "#16a34a", display: "inline-flex", alignItems: "center", gap: 6 }}
                     title="Démarrer directement l'intervention dans 'En cours'"
                   >
-                    {creatingNew ? "Création…" : "⚡ Démarrer (En cours)"}
+                    <IconZap size={15} />
+                    <span>{creatingNew ? "Création…" : "Démarrer (En cours)"}</span>
                   </button>
                 </div>
               </form>

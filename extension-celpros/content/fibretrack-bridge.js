@@ -60,11 +60,42 @@
           {
             action: "FIBRETRACK_UPDATE_BROADCAST",
             payload: item,
+            team_id: event.data.team_id || null,
           },
           () => {
             if (chrome.runtime.lastError) {
               /* ignorer silencieusement si extension déconnectée */
             }
+          }
+        );
+      }
+    }
+
+    if (event.data.type === "FIBRETRACK_AUTH_CHANGED") {
+      console.log("[ChapTech CelPros Bridge] 🔑 Changement de session/équipe détecté:", event.data.account?.nom_equipe || "Déconnexion");
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage(
+          {
+            action: "FIBRETRACK_AUTH_CHANGED",
+            payload: event.data.account,
+          },
+          () => {
+            if (chrome.runtime.lastError) {}
+          }
+        );
+      }
+    }
+
+    if (event.data.type === "FIBRETRACK_INTERVENTION_DELETED" && event.data.id) {
+      console.log("[ChapTech CelPros Bridge] 🗑️ Suppression d'intervention détectée:", event.data.id);
+      if (typeof chrome !== "undefined" && chrome.runtime && chrome.runtime.sendMessage) {
+        chrome.runtime.sendMessage(
+          {
+            action: "FIBRETRACK_INTERVENTION_DELETED",
+            payload: { id: event.data.id, team_id: event.data.team_id },
+          },
+          () => {
+            if (chrome.runtime.lastError) {}
           }
         );
       }

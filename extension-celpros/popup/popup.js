@@ -105,12 +105,21 @@ document.addEventListener("DOMContentLoaded", async () => {
     const stored = await chrome.storage.local.get([
       "apiUrl",
       "apiCode",
+      "token",
+      "teamId",
+      "teamName",
+      "userName",
       "activeIntervention",
       "cachedInterventions",
     ]);
 
     if (cfgApiUrl) cfgApiUrl.value = stored.apiUrl || "https://fibretrack.mantota.com/api/index.php";
-    if (cfgApiCode) cfgApiCode.value = stored.apiCode || "9999";
+    if (cfgApiCode) cfgApiCode.value = stored.apiCode || "";
+
+    const teamBadge = document.getElementById("popup-team-badge");
+    if (teamBadge) {
+      teamBadge.textContent = stored.teamName || "TELECOM BTP Services";
+    }
 
     if (stored.activeIntervention) {
       renderActiveIntervention(stored.activeIntervention);

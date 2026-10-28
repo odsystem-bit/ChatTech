@@ -1,18 +1,22 @@
-import { getApiAuthHeaders, getApiCode } from "../models/Account";
+import { getApiAuthHeaders, getApiCode, getTeamId, DEFAULT_TEAM_ID } from "../models/Account";
 
 // Utilitaires de gestion du stock de matériel d'équipe.
-// Synchronisé avec le backend MySQL - partagé entre tous les techniciens.
+// Synchronisé avec le backend MySQL - isolé par équipe (team_id).
 
 const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/api/index.php";
 
 function buildApiUrl(action) {
   const code = getApiCode();
+  const teamId = getTeamId();
   const [baseAction, queryStr] = action.split("?");
   const params = new URLSearchParams(queryStr || "");
   params.set("action", baseAction);
   params.set("_t", String(Date.now()));
   if (code) {
     params.set("user_code", code);
+  }
+  if (teamId) {
+    params.set("team_id", teamId);
   }
   return `${API_URL}?${params.toString()}`;
 }
@@ -39,11 +43,21 @@ async function apiGet(action) {
   return data;
 }
 
-const CACHE_KEY = "fibretrack_stock_cache";
+function getStockCacheKey() {
+  return `fibretrack_${getTeamId()}_stock_cache`;
+}
 
 function getCached() {
   try {
-    return JSON.parse(localStorage.getItem(CACHE_KEY) || "{}");
+    const key = getStockCacheKey();
+    let raw = localStorage.getItem(key);
+    if (!raw && getTeamId() === DEFAULT_TEAM_ID) {
+      raw = localStorage.getItem("fibretrack_stock_cache");
+      if (raw) {
+        try { localStorage.setItem(key, raw); } catch {}
+      }
+    }
+    return JSON.parse(raw || "{}");
   } catch {
     return {};
   }
@@ -51,7 +65,11 @@ function getCached() {
 
 function setCached(stock) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(stock));
+    const serialized = JSON.stringify(stock);
+    localStorage.setItem(getStockCacheKey(), serialized);
+    if (getTeamId() === DEFAULT_TEAM_ID) {
+      try { localStorage.setItem("fibretrack_stock_cache", serialized); } catch {}
+    }
   } catch {}
 }
 
@@ -106,13 +124,16 @@ function normalize(name) {
 }
 
 let _stockPromise = null;
+let _stockPromiseTeam = null;
 
 /**
  * Charge le stock depuis le backend (avec assainissement strict des doublons/héritages).
  * @returns {Promise<Record<string, number>>}
  */
 export async function fetchStock() {
-  if (_stockPromise) return _stockPromise;
+  const currentTeam = getTeamId();
+  if (_stockPromise && _stockPromiseTeam === currentTeam) return _stockPromise;
+  _stockPromiseTeam = currentTeam;
   _stockPromise = (async () => {
     try {
       const stock = await apiGet("stock_list");
@@ -171,7 +192,7 @@ export async function moveStockItem(designationInput, type, quantite, motif = "M
  * @param {number} limit
  */
 export async function fetchStockMovements(limit = 100) {
-  const res = await fetch(`${API_URL}?action=stock_movements&limit=${limit}`, { headers: getApiAuthHeaders() });
+  const res = await fetch(buildApiUrl(`stock_movements?limit=${limit}`), { headers: getApiAuthHeaders() });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Erreur API");
   return data;

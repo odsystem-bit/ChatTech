@@ -1,7 +1,7 @@
 // Generation PDF - cote serveur via API PHP
 // L'APK/WebView ne fait qu'ouvrir les URLs, le serveur genere le PDF
 
-import { getApiCode } from "../models/Account";
+import { getApiCode, getSessionToken, getTeamId } from "../models/Account";
 
 const PDF_URL = "https://fibretrack.mantota.com/api/pdf.php";
 const EXCEL_EXPORT_URL = "https://fibretrack.mantota.com/api/excel_export.php";
@@ -9,7 +9,13 @@ const EXCEL_HEBDO_URL = "https://fibretrack.mantota.com/api/excel_hebdo.php";
 
 function authSuffix() {
   const code = getApiCode();
-  return code ? `&code=${encodeURIComponent(code)}` : "";
+  const token = getSessionToken();
+  const teamId = getTeamId();
+  let suffix = "";
+  if (code) suffix += `&code=${encodeURIComponent(code)}`;
+  if (token) suffix += `&token=${encodeURIComponent(token)}`;
+  if (teamId) suffix += `&team_id=${encodeURIComponent(teamId)}`;
+  return suffix;
 }
 
 function isInWebView() {

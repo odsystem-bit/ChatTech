@@ -1,4 +1,4 @@
-import { getApiAuthHeaders, getApiCode } from "../models/Account";
+import { getApiAuthHeaders, getApiCode, getTeamId } from "../models/Account";
 
 // Médias serveur partagés par intervention (photos + vidéos).
 // Mêmes endpoints que l'APK : media_list, media_upload, media_delete.
@@ -7,9 +7,11 @@ const API_URL = import.meta.env.VITE_API_URL || "https://fibretrack.mantota.com/
 
 function buildMediaApiUrl(params = {}) {
   const code = getApiCode();
+  const teamId = getTeamId();
   const query = new URLSearchParams({
     ...params,
     ...(code ? { user_code: code } : {}),
+    ...(teamId ? { team_id: teamId } : {}),
   });
   return `${API_URL}?${query.toString()}`;
 }

@@ -4,7 +4,12 @@
 
 const DEFAULT_CONFIG = {
   apiUrl: "https://fibretrack.mantota.com/api/index.php",
-  apiCode: "9999",
+  apiCode: "",
+  token: "",
+  teamId: "team_telecom_btp_001",
+  teamName: "TELECOM BTP Services",
+  userName: "",
+  userRole: "technicien",
   autoSync: true,
   autoPilotEnabled: true,
   widgetVisible: true,
@@ -120,6 +125,9 @@ chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.local.get([
     "apiUrl",
     "apiCode",
+    "token",
+    "teamId",
+    "teamName",
     "widgetVisible",
     "autoPilotEnabled",
     "chaptech_autopilot_enabled",
@@ -140,11 +148,16 @@ chrome.runtime.onInstalled.addListener(async () => {
   console.log("[CelPros Background] Extension installée / mise à jour. Configuration initiale:", initial);
 });
 
-// Récupération sécurisée de la configuration
+// Récupération sécurisée de la configuration multi-équipes
 async function getConfig() {
   const stored = await chrome.storage.local.get([
     "apiUrl",
     "apiCode",
+    "token",
+    "teamId",
+    "teamName",
+    "userName",
+    "userRole",
     "autoSync",
     "autoPilotEnabled",
     "chaptech_autopilot_enabled",
@@ -161,6 +174,11 @@ async function getConfig() {
   return {
     apiUrl: stored.apiUrl || DEFAULT_CONFIG.apiUrl,
     apiCode: stored.apiCode || DEFAULT_CONFIG.apiCode,
+    token: stored.token || "",
+    teamId: stored.teamId || DEFAULT_CONFIG.teamId,
+    teamName: stored.teamName || DEFAULT_CONFIG.teamName,
+    userName: stored.userName || "",
+    userRole: stored.userRole || "technicien",
     autoSync: stored.autoSync ?? DEFAULT_CONFIG.autoSync,
     autoPilotEnabled,
     widgetVisible: stored.widgetVisible ?? DEFAULT_CONFIG.widgetVisible,
@@ -169,8 +187,8 @@ async function getConfig() {
   };
 }
 
-// Construction des en-têtes d'authentification sans cache
-function getAuthHeaders(apiCode) {
+// Construction des en-têtes d'authentification avec Bearer token et isolation X-Team-Id
+function getAuthHeaders(apiCode, token = null, teamId = null) {
   const headers = {
     "Accept": "application/json, text/plain, */*",
     "Content-Type": "application/json",
@@ -178,14 +196,20 @@ function getAuthHeaders(apiCode) {
     "Pragma": "no-cache",
     "Expires": "0",
   };
+  if (token) {
+    headers["Authorization"] = `Bearer ${String(token).trim()}`;
+  }
   if (apiCode) {
     headers["X-User-Code"] = String(apiCode).trim();
+  }
+  if (teamId) {
+    headers["X-Team-Id"] = String(teamId).trim();
   }
   return headers;
 }
 
-// Construction des URLs d'action API avec cache-busting strict (_t=timestamp) et user_code
-function formatApiActionUrl(baseUrl, action, apiCode = null) {
+// Construction des URLs d'action API avec cache-busting strict (_t=timestamp), user_code et team_id
+function formatApiActionUrl(baseUrl, action, apiCode = null, teamId = null) {
   let clean = (baseUrl || DEFAULT_CONFIG.apiUrl).trim().replace(/\/+$/, "");
   if (!clean.includes(".php") && !clean.includes("?")) {
     clean = `${clean}/index.php`;
@@ -194,6 +218,9 @@ function formatApiActionUrl(baseUrl, action, apiCode = null) {
   let url = `${clean}${sep}action=${encodeURIComponent(action)}&_t=${Date.now()}`;
   if (apiCode) {
     url += `&user_code=${encodeURIComponent(String(apiCode).trim())}`;
+  }
+  if (teamId) {
+    url += `&team_id=${encodeURIComponent(String(teamId).trim())}`;
   }
   return url;
 }
@@ -233,13 +260,15 @@ async function testConnection(customConfig = null) {
   const config = customConfig || (await getConfig());
   const apiUrl = (config.apiUrl || DEFAULT_CONFIG.apiUrl).trim();
   const apiCode = (config.apiCode || DEFAULT_CONFIG.apiCode).trim();
+  const token = config.token || "";
+  const teamId = config.teamId || DEFAULT_CONFIG.teamId;
 
   try {
-    const url = formatApiActionUrl(apiUrl, "interventions_list_light", apiCode);
+    const url = formatApiActionUrl(apiUrl, "interventions_list_light", apiCode, teamId);
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
-      headers: getAuthHeaders(apiCode),
+      headers: getAuthHeaders(apiCode, token, teamId),
     });
 
     if (!res.ok) {
@@ -261,6 +290,8 @@ async function testConnection(customConfig = null) {
       count: data.length,
       sample: data.slice(0, 3),
       timestamp: new Date().toISOString(),
+      teamId,
+      teamName: config.teamName || "Équipe",
     };
   } catch (err) {
     return { ok: false, error: err.message || "Impossible de joindre le serveur ChapTech" };
@@ -270,13 +301,13 @@ async function testConnection(customConfig = null) {
 // Récupération de la liste des interventions (light) avec tri et fallback cache
 async function fetchInterventionsList(forceFresh = false) {
   const config = await getConfig();
-  const url = formatApiActionUrl(config.apiUrl, "interventions_list_light", config.apiCode);
+  const url = formatApiActionUrl(config.apiUrl, "interventions_list_light", config.apiCode, config.teamId);
 
   try {
     const res = await fetch(url, {
       method: "GET",
       cache: "no-store",
-      headers: getAuthHeaders(config.apiCode),
+      headers: getAuthHeaders(config.apiCode, config.token, config.teamId),
     });
 
     if (!res.ok) {
@@ -350,14 +381,14 @@ async function fetchInterventionsList(forceFresh = false) {
 async function fetchInterventionDetails(id, forceFresh = false, options = {}) {
   if (!id) throw new Error("ID d'intervention manquant");
   const config = await getConfig();
-  const url = formatApiActionUrl(config.apiUrl, "intervention_get", config.apiCode);
+  const url = formatApiActionUrl(config.apiUrl, "intervention_get", config.apiCode, config.teamId);
 
   try {
     const res = await fetch(url, {
       method: "POST",
       cache: "no-store",
-      headers: getAuthHeaders(config.apiCode),
-      body: JSON.stringify({ id: String(id) }),
+      headers: getAuthHeaders(config.apiCode, config.token, config.teamId),
+      body: JSON.stringify({ id: String(id), team_id: config.teamId }),
     });
 
     if (!res.ok) {
@@ -544,13 +575,13 @@ async function fetchMediaAsDataUrl(mediaUrl) {
 async function checkForUpdates(id, lastKnownUpdatedAt = null) {
   if (!id) throw new Error("ID manquant pour vérification");
   const config = await getConfig();
-  const url = formatApiActionUrl(config.apiUrl, "intervention_updated_at", config.apiCode);
+  const url = formatApiActionUrl(config.apiUrl, "intervention_updated_at", config.apiCode, config.teamId);
 
   const res = await fetch(url, {
     method: "POST",
     cache: "no-store",
-    headers: getAuthHeaders(config.apiCode),
-    body: JSON.stringify({ id: String(id) }),
+    headers: getAuthHeaders(config.apiCode, config.token, config.teamId),
+    body: JSON.stringify({ id: String(id), team_id: config.teamId }),
   });
 
   if (!res.ok) {
@@ -689,6 +720,69 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       }
       sendResponse({ ok: false, error: "Payload d'intervention invalide" });
       return false;
+
+    case "FIBRETRACK_AUTH_CHANGED": {
+      const acc = payload;
+      (async () => {
+        try {
+          if (!acc) {
+            // Déconnexion complète : purger caches et fiches locales pour isolation stricte
+            mediaDataUrlCache.clear();
+            await chrome.storage.local.remove(["activeIntervention", "cachedInterventions", "token"]);
+            broadcastActiveIntervention(null);
+            sendResponse({ ok: true, message: "Session et caches purgés avec succès" });
+            return;
+          }
+          const stored = await getConfig();
+          const currentTeam = stored.teamId;
+          const nextTeam = acc.team_id || "team_telecom_btp_001";
+          const teamChanged = currentTeam && currentTeam !== nextTeam;
+          if (teamChanged) {
+            // Changement d'équipe : purge impérative des photos et interventions de l'équipe précédente
+            mediaDataUrlCache.clear();
+            await chrome.storage.local.remove(["activeIntervention", "cachedInterventions"]);
+            broadcastActiveIntervention(null);
+          }
+          await chrome.storage.local.set({
+            apiCode: acc.code || "",
+            token: acc.token || "",
+            teamId: nextTeam,
+            teamName: acc.nom_equipe || "Équipe",
+            userName: acc.nom || "",
+            userRole: acc.role || "technicien",
+          });
+          sendResponse({ ok: true, teamId: nextTeam, teamChanged });
+        } catch (err) {
+          sendResponse({ ok: false, error: err.message });
+        }
+      })();
+      return true;
+    }
+
+    case "FIBRETRACK_INTERVENTION_DELETED": {
+      const delId = payload?.id;
+      if (delId) {
+        (async () => {
+          try {
+            const stored = await chrome.storage.local.get(["activeIntervention", "cachedInterventions"]);
+            if (stored.activeIntervention && String(stored.activeIntervention.id) === String(delId)) {
+              await chrome.storage.local.remove(["activeIntervention"]);
+              broadcastActiveIntervention(null);
+            }
+            if (Array.isArray(stored.cachedInterventions)) {
+              const nextList = stored.cachedInterventions.filter((i) => String(i.id) !== String(delId));
+              await chrome.storage.local.set({ cachedInterventions: nextList });
+            }
+            sendResponse({ ok: true });
+          } catch (err) {
+            sendResponse({ ok: false, error: err.message });
+          }
+        })();
+        return true;
+      }
+      sendResponse({ ok: false, error: "ID manquant pour suppression" });
+      return false;
+    }
 
     default:
       sendResponse({ ok: false, error: `Action inconnue: ${action}` });

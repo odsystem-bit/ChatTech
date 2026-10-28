@@ -53,22 +53,51 @@ if (!function_exists('db')) {
 header('Access-Control-Allow-Origin: *');
 
 $action = $_GET['action'] ?? '';
-$code = $_GET['code'] ?? '';
+$code = $_GET['code'] ?? ($_SERVER['HTTP_X_USER_CODE'] ?? '');
+$authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+$token = trim($_GET['token'] ?? '');
+if (!$token && preg_match('/^Bearer\s+([a-f0-9]{32,128})$/i', trim($authHeader), $m)) {
+  $token = $m[1];
+}
+$requestedTeamId = trim($_GET['team_id'] ?? ($_SERVER['HTTP_X_TEAM_ID'] ?? ''));
 
-$isAllowed = ($code === '9999');
-if (!$isAllowed && preg_match('/^\d{4}$/', (string)$code)) {
-  $stmtAcc = db()->prepare('SELECT id, nom FROM accounts WHERE code = ?');
-  $stmtAcc->execute([$code]);
-  if ($stmtAcc->fetch()) {
-    $isAllowed = true;
+$authRow = null;
+if ($token !== '' && preg_match('/^[a-f0-9]{32,128}$/i', $token)) {
+  $stmtAcc = db()->prepare('SELECT a.id, a.nom, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.session_token = ? LIMIT 1');
+  $stmtAcc->execute([$token]);
+  $authRow = $stmtAcc->fetch();
+}
+if (!$authRow && $code === '9999') {
+  $authRow = ['id' => 'admin-9999', 'role' => 'chef_equipe', 'team_id' => $requestedTeamId ?: 'team_telecom_btp_001', 'actif' => 1, 'nom_equipe' => 'TELECOM BTP Services'];
+}
+if (!$authRow && preg_match('/^\d{4}$/', (string)$code)) {
+  if ($requestedTeamId !== '') {
+    $stmtAcc = db()->prepare('SELECT a.id, a.nom, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? AND a.team_id = ? LIMIT 1');
+    $stmtAcc->execute([$code, $requestedTeamId]);
+    $authRow = $stmtAcc->fetch();
+  }
+  if (!$authRow) {
+    $stmtAcc = db()->prepare('SELECT a.id, a.nom, a.role, a.team_id, a.actif, t.nom_equipe FROM accounts a LEFT JOIN teams t ON t.id = a.team_id WHERE a.code = ? ORDER BY (a.team_id = "team_telecom_btp_001") DESC LIMIT 1');
+    $stmtAcc->execute([$code]);
+    $authRow = $stmtAcc->fetch();
   }
 }
-if (!$isAllowed) {
+
+if (!$authRow || (isset($authRow['actif']) && !(int)$authRow['actif'])) {
   http_response_code(403);
   header('Content-Type: application/json');
-  echo json_encode(['error' => 'Accès refusé - code valide requis']);
+  echo json_encode(['error' => 'Accès refusé - code ou token valide requis']);
   exit;
 }
+
+if ($requestedTeamId !== '' && $requestedTeamId !== $authRow['team_id'] && ($authRow['role'] ?? '') !== 'super_admin') {
+  http_response_code(403);
+  header('Content-Type: application/json');
+  echo json_encode(['error' => 'Accès refusé à cette équipe']);
+  exit;
+}
+
+$teamId = ($requestedTeamId !== '' && ($authRow['role'] ?? '') === 'super_admin') ? $requestedTeamId : ($authRow['team_id'] ?: 'team_telecom_btp_001');
 
 if ($action !== 'export_point_materiel') {
   http_response_code(400);
@@ -120,29 +149,34 @@ function determineCpcKeyExport(array $intervention, array $materials): ?string {
 try {
   $pdo = db();
 
-  // Stock actuel
-  $stockRows = $pdo->query('SELECT designation, quantite FROM stock')->fetchAll();
+  // Stock actuel de l'équipe
+  $stockStmt = $pdo->prepare('SELECT designation, quantite FROM stock WHERE team_id = ?');
+  $stockStmt->execute([$teamId]);
+  $stockRows = $stockStmt->fetchAll();
   $stockActuel = [];
   foreach ($stockRows as $r) { $stockActuel[$r['designation']] = (int)$r['quantite']; }
 
-  // Total reçu / sorti
-  $movRows = $pdo->query("SELECT designation,
+  // Total reçu / sorti de l'équipe
+  $movStmt = $pdo->prepare("SELECT designation,
       SUM(CASE WHEN type IN ('entree', 'ajustement') THEN quantite ELSE 0 END) as entree,
       SUM(CASE WHEN type='sortie' THEN quantite ELSE 0 END) as sortie
-    FROM stock_movements GROUP BY designation")->fetchAll();
+    FROM stock_movements WHERE team_id = ? GROUP BY designation");
+  $movStmt->execute([$teamId]);
+  $movRows = $movStmt->fetchAll();
   $totEntree = []; $totSortie = [];
   foreach ($movRows as $r) {
     $totEntree[$r['designation']] = (int)$r['entree'];
     $totSortie[$r['designation']] = (int)$r['sortie'];
   }
 
-  // Interventions
-  $stmt = $pdo->query("SELECT id, nom_client, telephone_ligne, adresse_zone, nom_equipe,
+  // Interventions de l'équipe
+  $stmt = $pdo->prepare("SELECT id, nom_client, telephone_ligne, adresse_zone, nom_equipe,
       nom_technicien, date, statut, materiel_pose, motif_non_traite,
       lineaire_m, arrivee_m, depart_m, type_cable
     FROM interventions 
-    WHERE statut = 'termine' AND (motif_non_traite IS NULL OR motif_non_traite = '')
+    WHERE team_id = ? AND statut = 'termine' AND (motif_non_traite IS NULL OR motif_non_traite = '')
     ORDER BY date ASC");
+  $stmt->execute([$teamId]);
   $interventions = $stmt->fetchAll();
 
   $spreadsheet = new Spreadsheet();

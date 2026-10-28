@@ -1,50 +1,52 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-  --primary: #2563eb;
+  --nav-deep: #142D4E;
+  --nav-deep-dark: #0e2038;
+  --primary: #2563EB;
   --primary-dark: #1d4ed8;
   --primary-light: #3b82f6;
   --primary-bg: rgba(37, 99, 235, 0.08);
   --primary-border: rgba(37, 99, 235, 0.3);
-  --accent: #f59e0b;
+  --accent: #F59E0B;
   --accent-dark: #d97706;
-  --success: #10b981;
-  --success-bg: rgba(16, 185, 129, 0.1);
-  --warning: #f59e0b;
+  --success: #16A34A;
+  --success-bg: rgba(22, 163, 74, 0.1);
+  --warning: #F59E0B;
   --warning-bg: rgba(245, 158, 11, 0.1);
-  --danger: #ef4444;
-  --danger-bg: rgba(239, 68, 68, 0.1);
+  --danger: #DC2626;
+  --danger-bg: rgba(220, 38, 38, 0.1);
 
-  --bg: #f1f5f9;
-  --bg-card: #ffffff;
-  --bg-input: #f8fafc;
-  --bg-hover: #f1f5f9;
-  --text: #0f172a;
-  --text-muted: #64748b;
-  --text-light: #94a3b8;
-  --border: #e2e8f0;
-  --border-dark: #cbd5e1;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+  --bg: #F3F6FA;
+  --bg-card: #FFFFFF;
+  --bg-input: #F8FAFC;
+  --bg-hover: #EEF2F7;
+  --text: #142D4E;
+  --text-muted: #526580;
+  --text-light: #8798AD;
+  --border: #DCE3ED;
+  --border-dark: #C2CDD9;
+  --shadow-sm: 0 1px 2px rgba(20, 45, 78, 0.05);
+  --shadow: 0 4px 8px -1px rgba(20, 45, 78, 0.07), 0 2px 4px -2px rgba(20, 45, 78, 0.05);
+  --shadow-lg: 0 10px 18px -3px rgba(20, 45, 78, 0.09), 0 4px 6px -4px rgba(20, 45, 78, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(20, 45, 78, 0.12), 0 8px 10px -6px rgba(20, 45, 78, 0.05);
 
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
   --radius-xl: 20px;
 
-  --sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --heading: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --heading: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, Consolas, monospace;
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
 
-  font: 16px/1.5 var(--sans);
-  letter-spacing: -0.01em;
+  font: 400 15px/1.5 var(--sans);
+  letter-spacing: -0.005em;
   color-scheme: light;
   color: var(--text);
   background: var(--bg);
@@ -57,7 +59,11 @@
 
 body {
   margin: 0;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 400;
   background: var(--bg);
+  color: var(--text);
   overscroll-behavior-y: none;
 }
 
@@ -74,14 +80,17 @@ h1, h2, h3 {
   margin: 0;
 }
 
-h1 { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
-h2 { font-size: 20px; font-weight: 700; }
+/* Hiérarchie typographique : Titre principal 24px Bold, Section 18px Semi-Bold */
+h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 h3 { font-size: 16px; font-weight: 600; }
 
-p { margin: 0; }
+p { margin: 0; font-size: 15px; }
 
 button {
   font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 600;
   cursor: pointer;
   border: none;
   transition: all 0.15s ease;
@@ -90,6 +99,7 @@ button {
 
 input, select, textarea {
   font-family: var(--sans);
+  font-size: 15px;
 }
 
 * { box-sizing: border-box; }
